@@ -610,6 +610,12 @@ JM_SR_QNN_LIB=build-host/libsr_qnn.so python android/tools/host_test_sr_qnn.py
 QT_QPA_PLATFORM=offscreen python android/tools/host_test_file_dialog.py
 ```
 
+上面 1)2)4) 加上接口解密链（`host_test_crypto_android.py`）和图片解码链路
+（`host_test_image_pipeline.py`）就是 **CI 每次提交都跑的那套门**，见
+`.github/workflows/android.yml`（`ubuntu-latest` + Python 3.11 + PySide6-Essentials 6.11.2，
+Qt offscreen，不需要手机与 Android SDK/NDK）。本地一条命令跑全部：
+`bash android/tools/wsl_run_smoke.sh`。
+
 WSL 构建树同步 + 语法检查（`/root` 只有 root 能读，所以 WSL 命令一律 `wsl -u root`）：
 
 ```bash

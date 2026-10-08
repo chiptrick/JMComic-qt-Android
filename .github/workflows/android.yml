@@ -1,0 +1,75 @@
+name: android
+
+# Android 移植的 CI —— 跑的是**宿主侧回归**：不需要手机、不需要 Android SDK/NDK，
+# 也不需要 Qualcomm QNN SDK。
+#
+# 用与 APK 里相同的 Python 3.11 + PySide6 6.11.2（Qt offscreen），执行 android/tools/
+# 里的 5 道门，外加 shell 语法检查与全量字节码编译。这些用例就是移植过程中用来定位
+# 真机问题的同一套回归，任何一道红都代表真的坏了。
+#
+# 不在这里做 APK 打包：需要 NDK + QNN SDK，而且首次冷构建要几十分钟，放 CI 不划算
+# （打包流程见 android/README.md §5/§9）。
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  host-regression:
+    runs-on: ubuntu-latest
+    env:
+      # 没有显示器，Qt 走 offscreen 平台插件
+      QT_QPA_PLATFORM: offscreen
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'   # APK 里的版本（buildozer 要求宿主 <= 3.11）
+
+      # 裸 runner 上缺这些库时 Qt 会报 "could not load the Qt platform plugin offscreen"
+      - name: 安装 Qt offscreen 运行库
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libegl1 libgl1 libglx-mesa0 libxkbcommon0 libdbus-1-3 \
+            libfontconfig1 fonts-noto-cjk
+
+      - name: 安装 Python 依赖
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r src/requirements_android_ci.txt
+
+      - name: 字节码编译（目标是 APK 里的 Python 3.11）
+        run: |
+          python -m compileall -q \
+            src android/main.py android/sr_qnn android/tools android/recipes android/shims
+
+      - name: shell 脚本语法检查
+        run: |
+          fail=0
+          for f in android/*.sh android/tools/*.sh android/tools/archive/*.sh; do
+            bash -n "$f" || { echo "::error file=$f::bash 语法错误"; fail=1; }
+          done
+          if [ "$fail" -ne 0 ]; then exit 1; fi
+
+      - name: C++ ↔ ctypes 接口一致性
+        run: python android/tools/check_interfaces.py
+
+      - name: Android 竖屏冒烟（不联网）
+        run: python android/tools/smoke_test_android.py
+
+      - name: 接口解密链回归（AES / ctypes 后端）
+        run: python android/tools/host_test_crypto_android.py
+
+      - name: 图片解码链路回归（分割还原 / QImage / 线程）
+        run: python android/tools/host_test_image_pipeline.py
+
+      - name: 应用内文件选择器回归
+        run: python android/tools/host_test_file_dialog.py

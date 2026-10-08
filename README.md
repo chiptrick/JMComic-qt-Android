@@ -1,5 +1,27 @@
 # JMComic-qt · Android 移植分支
 
+> ## ⚠️ AI 生成声明
+>
+> **本分支的 Android 移植工作由 AI 生成。** 具体包括：
+>
+> * `android/` 整个目录 —— 打包工程、`libsr_qnn.so` 原生代码（C++/QNN）、模型转换工具、
+>   全部构建与验证脚本、`android/README.md`
+> * `src/` 下的移动端适配层与相关改动 —— `tools/mobile_ui.py`、`tools/platform_mobile.py`、
+>   `tools/mobile_file_dialog.py`、`tools/sr_backend.py`、`tools/waifu2x_check.py`，
+>   以及各 `view/` / `task/` / `widget/` 里的移动端分支
+> * 本 README、[NOTICE.md](NOTICE.md)、`android/tools/README.md` 等文档
+>
+> **上游的桌面端代码不是 AI 生成的**，它是原作者 tonquer 等人的作品（见
+> [许可证与署名](#许可证与署名) 与 [NOTICE.md](NOTICE.md)）。请不要把整个仓库笼统称为
+> “AI 项目”——那等于把上游的工作也划到 AI 名下。
+>
+> **AI 生成意味着请自行审阅后再使用。** 这些代码经过真机验证和一套宿主回归
+> （`android/tools/`，CI 每次提交都会跑），但覆盖并不完整，**不代表没有安全或正确性缺陷**，
+> 也不提供任何担保。
+>
+> 生成方式：由 AI 编码代理在真机上反复实测（日志、像素级比对、adb 断言）+ 宿主回归测试驱动，
+> 逐轮定位根因后修改；`android/README.md` 里记录了每一轮的根因与修法。
+
 禁漫天堂第三方客户端。本仓库是 [tonquer/JMComic-qt](https://github.com/tonquer/JMComic-qt) 的
 **Android 移植分支**：在上游桌面版（Windows / Linux / macOS）的基础上，增加了完整的 Android
 手机版，并针对竖屏重做了界面适配。
@@ -68,6 +90,25 @@ python android/tools/prepare_models.py # 把 waifu2x onnx 转成 NPU 可用的�
 ### 桌面端
 
 沿用上游流程，见 [.github/workflows](.github/workflows)（Windows / Linux / macOS 三平台）。
+注意：上游那三个桌面端 job 加了 `if: github.repository == 'tonquer/JMComic-qt'`，
+只在上游仓库运行；本分支不发布桌面端安装包，需要时删掉那个 `if` 即可。
+
+## CI
+
+| 工作流 | 触发 | 内容 |
+| --- | --- | --- |
+| [android.yml](.github/workflows/android.yml) | push / PR 到 main、手动 | **本分支自己的 CI**。在 `ubuntu-latest` 上用 Python 3.11 + PySide6-Essentials 6.11.2（Qt offscreen）跑宿主回归：字节码编译、`android/**/*.sh` 语法检查、C++↔ctypes 接口一致性、竖屏冒烟、接口解密链、图片解码链路、应用内文件选择器 |
+| [CI.yml](.github/workflows/CI.yml) | push / PR 到 main | 上游的桌面端三平台构建（在本仓库默认不运行） |
+| [release.yml](.github/workflows/release.yml) | 打 tag | 上游的桌面端发布流程（在本仓库默认不运行） |
+
+Android 的 CI **不需要手机，也不需要 Android SDK/NDK/QNN SDK**，所以能在 CI 里跑；
+真正打 APK 需要 NDK + QNN SDK 且首次冷构建几十分钟，不放在 CI 里。
+
+依赖清单单独放在 [src/requirements_android_ci.txt](src/requirements_android_ci.txt)：
+版本以 **APK 里实际装的东西**为准（PySide6 6.11.2、jmcomic 2.7.7、pycryptodome），
+而不是桌面端 `requirements.txt` 里的钉子，否则会掩盖移动端才暴露的问题。
+
+本地想跑同一套回归，用 `android/tools/wsl_run_smoke.sh`（WSL/ Linux 均可）。
 
 ## 目录结构
 

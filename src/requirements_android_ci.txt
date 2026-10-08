@@ -1,0 +1,30 @@
+# Android CI（宿主侧回归）依赖
+#
+# 只用于 .github/workflows/android.yml：在 Linux 上跑 android/tools/ 的宿主回归，
+# 不需要 Android SDK/NDK，也不需要真机。
+#
+# 版本口径以 **APK 实际装的东西** 为准，而不是桌面端的 src/requirements.txt：
+#   * PySide6-Essentials 6.11.2 —— 与 android_aarch64 wheel 对齐（构建日志里的
+#     pyside6-6.11.2-…），也是 android 工具链实际装的形态。用桌面端钉的 6.5.3 会掩盖
+#     移动端适配层依赖新 API 的问题。**刻意不装 PySide6 元包的 Addons**（175MB）：
+#     仓库里用到的 Qt 子模块只有 QtCore/QtGui/QtWidgets/QtSql/QtSvg/QtOpenGLWidgets/
+#     QtNetwork/QtXml，全在 Essentials 里。
+#   * pycryptodome（不是 pycryptodomex）—— 代码里 import 的是 `Crypto.*`，
+#     Android 的 AppRequirements(android/tools/patch_buildozer_spec.py) 里也是 pycryptodome。
+#   * jmcomic 2.7.7 —— APK 里装的就是 2.7.7（buildozer 日志：jmcomic-2.7.7.dist-info）。
+#   * lxml 保留：Android 上故意不装（p4a 静态构建太脆，tools/tool.py 回退 etree），
+#     但 Linux 宿主上装了才能顺带覆盖 lxml 那条分支。
+#   * curl_cffi 保留：Android 上由 android/shims 垫片提供，宿主上装真实包来覆盖导入路径。
+PySide6-Essentials==6.11.2
+pillow
+pycryptodome
+curl_cffi>=0.13.0,<=0.16.1
+jmcomic==2.7.7
+lxml
+beautifulsoup4
+natsort
+PySocks
+tqdm
+pysmb
+smbprotocol
+webdavclient3
