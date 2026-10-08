@@ -3,8 +3,12 @@ on:
   push:
     tags:
       - '*'
+# 注意：这些 job 只在**上游仓库**运行。本仓库是 Android 移植分支，不发布桌面端安装包，
+# 而 CI 用的是上游的容器镜像与已废弃的 action，在 fork 上跑只会失败并浪费 Actions 额度。
+# 想在自己的仓库里跑桌面端构建，删掉各 job 的 `if: github.repository == ...` 即可。
 jobs:
   setup:
+    if: github.repository == 'tonquer/JMComic-qt'
     runs-on: ubuntu-latest
     outputs:
       PACKAGE_PREFIX: ${{ steps.get-package_prefix.outputs.PACKAGE_PREFIX }}
@@ -25,6 +29,7 @@ jobs:
           echo "::set-output name=HEAD_SHA_SHORT::${HEAD_SHA_SHORT}"
 
   release:
+    if: github.repository == 'tonquer/JMComic-qt'
     needs: [setup]
     runs-on: ubuntu-latest
     outputs:
@@ -42,6 +47,7 @@ jobs:
           prerelease: true
 
   macos:
+    if: github.repository == 'tonquer/JMComic-qt'
     needs: [setup, release]
     runs-on: macos-latest
     env:
@@ -148,7 +154,7 @@ jobs:
         asset_content_type: application/gzip
 
   windows:
-    if: github.event_name == 'push' || github.event.inputs.build_windows == 'true'
+    if: github.repository == 'tonquer/JMComic-qt' && (github.event_name == 'push' || github.event.inputs.build_windows == 'true')
     needs: [setup, release]
     runs-on: windows-latest
     env:
@@ -223,7 +229,7 @@ jobs:
         asset_content_type: application/x-7z-compressed
 
   ubuntu:
-    if: github.event_name == 'push' || github.event.inputs.build_ubuntu == 'true'
+    if: github.repository == 'tonquer/JMComic-qt' && (github.event_name == 'push' || github.event.inputs.build_ubuntu == 'true')
     needs: [setup, release]
     runs-on: ubuntu-latest
     container:
@@ -287,7 +293,7 @@ jobs:
         asset_content_type: application/gzip
 
   uos:
-    if: github.event_name == 'push' || github.event.inputs.build_uos == 'true'
+    if: github.repository == 'tonquer/JMComic-qt' && (github.event_name == 'push' || github.event.inputs.build_uos == 'true')
     needs: [setup, release]
     runs-on: ubuntu-latest
     container:
@@ -351,7 +357,7 @@ jobs:
         asset_content_type: application/gzip
 
   ubuntu-appimage228:
-    if: github.event_name == 'push' || github.event.inputs.build_appimage == 'true'
+    if: github.repository == 'tonquer/JMComic-qt' && (github.event_name == 'push' || github.event.inputs.build_appimage == 'true')
     needs: [setup, release]
     runs-on: ubuntu-latest
     container:
@@ -423,7 +429,7 @@ jobs:
         asset_content_type: application/gzip
 
   ubuntu-appimage239:
-    if: github.event_name == 'push' || github.event.inputs.build_appimage == 'true'
+    if: github.repository == 'tonquer/JMComic-qt' && (github.event_name == 'push' || github.event.inputs.build_appimage == 'true')
     needs: [setup, release]
     runs-on: ubuntu-latest
     container:

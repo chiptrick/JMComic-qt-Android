@@ -145,3 +145,29 @@ test/__init__.py
 .vscode
 data/
 /dev
+
+# ---- Android 移植 ----
+# pysidedeploy.spec 是部署配置，需要入库(上面的 *.spec 规则会误伤)
+!android/pysidedeploy.spec
+# 构建中间产物(业务源码副本、原生库、wheel、构建目录)
+android/app_src/
+android/libs/
+android/.work/
+android/.venv/
+android/.buildozer/
+android/bin/
+android/*.apk
+android/*.aab
+# 超分模型(onxx 体积大，用 tools/prepare_models.py 生成)
+android/sr_qnn/models/*.onnx
+# ---- 仓库卫生(发布用) ----
+# 桌面端构建产物(约 1.7GB，含 7z 包)与 Visual Studio 状态
+build_out/
+.vs/
+# Android：真机证据目录(日志/截图/真机配置 —— 含账号、代理 IP、下载样本)
+android/build_logs/
+# Android：IDE 运行配置 / p4a 生成的工程 / 打包缓存与 wheel
+android/.run/
+android/deployment/
+android/wheels/
+android/buildozer.spec

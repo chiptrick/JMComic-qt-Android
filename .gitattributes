@@ -1,0 +1,19 @@
+# 换行符约定
+#
+# 只约束本分支新增的 android/ 目录，不动上游的桌面端文件
+# （给上游文件加 text/eol 规则会让它们全部变成"已修改"，以后跟上游合并很难看）。
+#
+# .sh / .py 必须是 LF：CRLF 的 shell 脚本在 WSL/Linux 下会直接
+#   bash: ./x.sh: /usr/bin/env: bad interpreter: No such file or directory
+# 这个坑在移植过程中真的踩过，所以用 .gitattributes 兜住，而不是靠人记得。
+android/**/*.sh   text eol=lf
+android/**/*.py   text eol=lf
+android/**/*.spec text eol=lf
+
+# PowerShell 脚本是 Windows 侧工具，保持 CRLF
+android/**/*.ps1  text eol=crlf
+
+# 这些是生成物/二进制，不要做任何换行或编码转换
+android/sr_qnn/models/*.onnx binary
+android/*.apk binary
+android/*.aab binary

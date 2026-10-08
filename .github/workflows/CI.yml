@@ -9,8 +9,12 @@ on:
   pull_request:
     branches: [ main ]
 
+# 注意：这些 job 只在**上游仓库**运行。本仓库是 Android 移植分支，不发布桌面端安装包，
+# 而 CI 用的是上游的容器镜像与已废弃的 action，在 fork 上跑只会失败并浪费 Actions 额度。
+# 想在自己的仓库里跑桌面端构建，删掉各 job 的 `if: github.repository == ...` 即可。
 jobs:
   windows:
+    if: github.repository == 'tonquer/JMComic-qt'
     runs-on: windows-latest
     env:
       PACKAGENAME: jmcomic_py39_windows_x64
@@ -47,6 +51,7 @@ jobs:
         retention-days: 7
 
   ubuntu-appimage:
+    if: github.repository == 'tonquer/JMComic-qt'
     runs-on: ubuntu-latest
     container:
       image: tonquer/ubuntu-python:24.04
@@ -84,6 +89,7 @@ jobs:
         retention-days: 7
 
   macos:
+    if: github.repository == 'tonquer/JMComic-qt'
     runs-on: macos-latest
     env:
       PACKAGENAME: jmcomic_py39_macos
