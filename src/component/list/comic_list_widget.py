@@ -16,6 +16,22 @@ from tools.str import Str
 from tools.tool import ToolUtil
 
 
+def _ScheduleGridCover(view):
+    """ 加完一个封面后，让竖屏适配层去抖地重排一次"一行 2 个"
+
+    真机实证：首页的漫画是网络回来后**一条条** AddBookItem 的，控件宽度在建的时候就
+    按当时的封面宽定死了；而重排原来只在窗口 shown / 切页时才发生，于是首屏那批 item
+    建完后没有任何时机纠正它 —— 打开首页一行 1 个，进设置页再返回才变回一行 2 个。
+    桌面端/非 Android 下 ScheduleGridCoverSize 直接返回，不影响原布局。
+    """
+    try:
+        from tools import mobile_ui
+        mobile_ui.ScheduleGridCoverSize(view)
+    except Exception:
+        pass
+    return
+
+
 class ComicListWidget(BaseListWidget):
     def __init__(self, parent):
         BaseListWidget.__init__(self, parent)
@@ -265,6 +281,7 @@ class ComicListWidget(BaseListWidget):
         self.setItemWidget(item, widget)
         widget.picLabel.setText(Str.GetStr(Str.LoadingPicture))
         widget.PicLoad.connect(self.LoadingPicture)
+        _ScheduleGridCover(self)
 
     def AddBookItemByHistory(self, v):
         _id = v.bookId
@@ -324,6 +341,7 @@ class ComicListWidget(BaseListWidget):
         if not isShiled:
             widget.picLabel.setText(Str.GetStr(Str.LoadingPicture))
         widget.PicLoad.connect(self.LoadingPicture)
+        _ScheduleGridCover(self)
         # if url and config.IsLoadingPicture:
         #     self.AddDownloadTask(url, widget.path, completeCallBack=self.LoadingPictureComplete, backParam=index)
 

@@ -1,15 +1,35 @@
 # coding: utf-8
 from enum import Enum
 
-import xcffib as xcb
+# 注意：xcffib / QtX11Extras 只存在于 Linux 桌面环境。Android 打包时
+# (pyside6-android-deploy) 会静态扫描源码里的 PySide6 模块字样来决定要打包哪些
+# Qt 模块，而 Android 的 PySide6 wheel 里并没有这个 X11 模块，会让打包直接失败。
+# 所以这里用 importlib + 拼字符串的方式动态导入，源码里不出现该模块名的字面量。
+import importlib
+
+xcb = None
+QX11Info = None
+ButtonIndex = ButtonMask = ButtonReleaseEvent = None
+ClientMessageData = ClientMessageEvent = EventMask = xprotoExtension = None
+try:  # pragma: no cover - 仅 Linux/X11 桌面会成功
+    xcb = importlib.import_module("xcffib")
+    _xproto = importlib.import_module("xcffib.xproto")
+    _x11mod = importlib.import_module("PySide6.Qt" + "X11Extras")
+    QX11Info = _x11mod.QX11Info
+    ButtonIndex = _xproto.ButtonIndex
+    ButtonMask = _xproto.ButtonMask
+    ButtonReleaseEvent = _xproto.ButtonReleaseEvent
+    ClientMessageData = _xproto.ClientMessageData
+    ClientMessageEvent = _xproto.ClientMessageEvent
+    EventMask = _xproto.EventMask
+    xprotoExtension = _xproto.xprotoExtension
+except Exception:
+    pass
+
 from PySide6 import sip
 from PySide6.QtCore import QPointF, Qt, QEvent, QPoint
 from PySide6.QtGui import QMouseEvent
 from PySide6.QtWidgets import QWidget, QApplication
-from PySide6.QtX11Extras import QX11Info
-from xcffib.xproto import (ButtonIndex, ButtonMask, ButtonReleaseEvent,
-                           ClientMessageData, ClientMessageEvent, EventMask,
-                           xprotoExtension)
 
 
 class WindowMessage(Enum):

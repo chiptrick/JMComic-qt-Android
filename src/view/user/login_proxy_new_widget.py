@@ -1,6 +1,8 @@
 import json
 import re
-import urllib
+# 显式导入子模块：`import urllib` 不会加载 urllib.request，
+# Init() 里的 urllib.request.getproxies() 会抛 AttributeError(真机上已复现)
+import urllib.request
 from functools import partial
 
 from PySide6 import QtCore

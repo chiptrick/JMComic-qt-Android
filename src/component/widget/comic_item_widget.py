@@ -10,6 +10,9 @@ from tools.str import Str
 
 class ComicItemWidget(QWidget, Ui_ComicItem):
     PicLoad = Signal(int)
+    # 桌面端封面基准尺寸(宽 x 高)，竖屏按比例换算
+    BaseCoverWidth = 250
+    BaseCoverHeight = 340
 
     def __init__(self, isCategory=False, isShiled=False):
         QWidget.__init__(self)
@@ -28,17 +31,17 @@ class ComicItemWidget(QWidget, Ui_ComicItem):
         self.url = ""
         self.path = ""
         # TODO 如何自适应
+        self.isCategory = isCategory
         if not isCategory:
             rate = Setting.CoverSize.value
-            baseW = 250
-            baseH = 340
+            baseW = ComicItemWidget.BaseCoverWidth
+            baseH = ComicItemWidget.BaseCoverHeight
         else:
             rate = Setting.CategorySize.value
             baseW = 300
             baseH = 300
 
-        width = baseW * rate / 100
-        height = baseH * rate / 100
+        width, height = self._CoverSize(baseW, baseH, rate)
 
         icon2 = QIcon()
         icon2.addFile(u":/png/icon/new.svg", QSize(), QIcon.Normal, QIcon.Off)
@@ -87,6 +90,63 @@ class ComicItemWidget(QWidget, Ui_ComicItem):
         self.isWaifu2x = False
         self.isWaifu2xLoading = False
         self.isLoadPicture = False
+
+    @staticmethod
+    def _CoverSize(baseW, baseH, rate):
+        """ 封面尺寸(逻辑像素)
+
+        桌面端 = 基准尺寸 x 用户设置的百分比；Android 竖屏下改为按屏幕宽度反算成
+        "一行放得下 2 本"，否则 250x340 的桌面封面在 384px 的竖屏上每行只能放 1 本。
+        宽高比保持桌面原样。
+        """
+        try:
+            rate = float(rate or 100)
+        except Exception:
+            rate = 100.0
+        width = float(baseW) * rate / 100.0
+        height = float(baseH) * rate / 100.0
+        try:
+            from tools import platform_mobile
+            if platform_mobile.IsAndroid():
+                from tools import mobile_ui
+                cover = float(mobile_ui.GridCoverWidth(False))
+                if cover > 0:
+                    width = cover
+                    height = cover * float(baseH) / float(baseW)
+        except Exception:
+            pass
+        return max(24, int(width)), max(24, int(height))
+
+    def ResizeCover(self, coverWidth):
+        """ 按新的封面宽度重算尺寸(运行时改设置/旋转屏幕用)，保持宽高比 """
+        try:
+            coverWidth = int(coverWidth)
+            if coverWidth <= 0:
+                return
+            if self.isCategory:
+                baseW, baseH = 300, 300
+            else:
+                baseW, baseH = ComicItemWidget.BaseCoverWidth, ComicItemWidget.BaseCoverHeight
+            height = int(coverWidth * float(baseH) / float(baseW))
+            if self.picLabel.width() == coverWidth and self.picLabel.height() == height:
+                return
+            # RefreshItemSizeHints 为了让 QListView 的装箱确定，会把 item widget 的宽度
+            # setFixedWidth 钉住。要变**小**就必须先松绑：否则下面的 adjustSize() 缩不回去，
+            # 控件会停在旧宽度(封面小了、控件没小 -> 真机上还是一行 1 个)。
+            self.setMinimumWidth(0)
+            self.setMaximumWidth(16777215)
+            self.picLabel.setFixedSize(coverWidth, height)
+            self.categoryLabel.setMaximumWidth(coverWidth - 20)
+            self.starButton.setMaximumWidth(coverWidth - 20)
+            self.timeLabel.setMaximumWidth(coverWidth - 20)
+            self.nameLable.setMaximumWidth(coverWidth - 20)
+            self.adjustSize()
+            if self.picData:
+                self.SetPicture(self.picData)
+        except Exception as es:
+            from tools.log import Log
+            Log.Error(es)
+        return
 
     def SetTitle(self, title, fontColor):
         self.title = title

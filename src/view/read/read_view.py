@@ -17,6 +17,7 @@ from task.task_multi import TaskMulti
 from tools.book import BookMgr
 from tools.str import Str
 from tools.tool import time_me, ToolUtil
+from tools import mobile_file_dialog
 from view.download.download_item import DownloadItem, DownloadEpsItem
 from view.read.read_enum import ReadMode, QtFileData
 from view.read.read_frame import ReadFrame
@@ -941,7 +942,7 @@ class ReadView(QtWidgets.QWidget, QtTaskBase):
         try:
             if self.lastPath:
                 path = os.path.join(self.lastPath, path)
-            filepath = QFileDialog.getSaveFileName(self, Str.GetStr(Str.Save), path, "Image Files(*.jpg *.png)")
+            filepath = mobile_file_dialog.GetSaveFileName(self, Str.GetStr(Str.Save), path, "Image Files(*.jpg *.png)")
             if filepath and len(filepath) >= 1:
                 name = filepath[0]
                 if not name:
@@ -976,7 +977,7 @@ class ReadView(QtWidgets.QWidget, QtTaskBase):
             else:
                 if self.lastPath:
                     path = os.path.join(self.lastPath, path)
-                filepath = QFileDialog.getSaveFileName(self, Str.GetStr(Str.Save), path, "Image Files(*.jpg *.png)")
+                filepath = mobile_file_dialog.GetSaveFileName(self, Str.GetStr(Str.Save), path, "Image Files(*.jpg *.png)")
                 if filepath and len(filepath) >= 1:
                     name = filepath[0]
                     if not name:

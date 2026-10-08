@@ -11,8 +11,15 @@ from tools.log import Log
 from tools.str import Str
 from tools.tool import ToolUtil
 import platform
-import urllib
+# 必须导入 urllib.request 子模块：只写 `import urllib` 不会把 request 挂到 urllib 上，
+# 下面 SetProxy 里的 urllib.request.getproxies() 会抛 AttributeError(真机上已复现)
+import urllib.request
 from curl_cffi import CurlOpt, CurlHttpVersion
+
+# 接口响应解密(AES)的统计。真机上曾经因为 p4a 的 ctypes/android 补丁导致
+# pycryptodome 完全不可用，于是**每一个**接口响应解密都抛异常，
+# 表现就是"登录报错、首页也报错"。这个计数只用于诊断，不参与业务逻辑。
+ParseStats = {"ok": 0, "fail": 0, "lastUrl": "", "lastError": "", "lastShape": ""}
 
 
 class ServerReq(object):
@@ -282,7 +289,23 @@ class ServerReq(object):
         # newData = result2.decode()
         # return newData
         from jmcomic import JmCryptoTool
-        return JmCryptoTool.decode_resp_data(data, ts=self.now)
+        try:
+            result = JmCryptoTool.decode_resp_data(data, ts=self.now)
+        except Exception as es:
+            ParseStats["fail"] += 1
+            ParseStats["lastUrl"] = self.url
+            ParseStats["lastError"] = "{}: {}".format(type(es).__name__, es)
+            raise
+        ParseStats["ok"] += 1
+        ParseStats["lastUrl"] = self.url
+        # 只记"解出来多大、顶层有哪些字段"，不记内容(登录响应里带会话票据，不能落日志)
+        try:
+            obj = json.loads(result)
+            ParseStats["lastShape"] = "len={} keys={} code={}".format(
+                len(result), sorted(obj.keys()), obj.get("code"))
+        except Exception:
+            ParseStats["lastShape"] = "len={} (非 json)".format(len(result))
+        return result
 
 
 # 检查更新

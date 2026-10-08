@@ -13,6 +13,7 @@ from task.qt_task import QtTaskBase
 from task.task_local import LocalData
 from tools.str import Str
 from tools.tool import time_me
+from tools import mobile_file_dialog
 from view.tool.local_read_db import LocalReadDb
 
 
@@ -365,9 +366,9 @@ class LocalReadView(QWidget, Ui_Local, QtTaskBase):
     # 导入单本目录
     def CheckAction1(self):
         if self.lastPath:
-            url = QFileDialog.getExistingDirectory(self, Str.GetStr(Str.SelectFold), dir=self.lastPath)
+            url = mobile_file_dialog.GetExistingDirectory(self, Str.GetStr(Str.SelectFold), dir=self.lastPath)
         else:
-            url = QFileDialog.getExistingDirectory(self, Str.GetStr(Str.SelectFold))
+            url = mobile_file_dialog.GetExistingDirectory(self, Str.GetStr(Str.SelectFold))
         if url:
             QtOwner().ShowLoading()
             self.AddLocalTaskLoad(LocalData.Type1, url, os.path.dirname(url), self.CheckAction1LoadBack)
@@ -410,9 +411,9 @@ class LocalReadView(QWidget, Ui_Local, QtTaskBase):
     # 导入单本Zip
     def CheckAction2(self):
         if self.lastPath:
-            filename = QFileDialog.getOpenFileName(self, "Open Zip", self.lastPath, "Image Files(*.zip)")
+            filename = mobile_file_dialog.GetOpenFileName(self, "Open Zip", self.lastPath, "Image Files(*.zip)")
         else:
-            filename = QFileDialog.getOpenFileName(self, "Open Zip", ".", "Image Files(*.zip)")
+            filename = mobile_file_dialog.GetOpenFileName(self, "Open Zip", ".", "Image Files(*.zip)")
         if filename and len(filename) >= 1:
             name = filename[0]
             if os.path.isfile(name):
@@ -424,9 +425,9 @@ class LocalReadView(QWidget, Ui_Local, QtTaskBase):
     # 导入单本目录
     def CheckAction3(self):
         if self.lastPath:
-            url = QFileDialog.getExistingDirectory(self, Str.GetStr(Str.SelectFold), dir=self.lastPath)
+            url = mobile_file_dialog.GetExistingDirectory(self, Str.GetStr(Str.SelectFold), dir=self.lastPath)
         else:
-            url = QFileDialog.getExistingDirectory(self, Str.GetStr(Str.SelectFold))
+            url = mobile_file_dialog.GetExistingDirectory(self, Str.GetStr(Str.SelectFold))
         if url:
             QtOwner().ShowLoading()
             self.AddLocalTaskLoad(LocalData.Type3, url, os.path.dirname(url), self.CheckAction1LoadBack)

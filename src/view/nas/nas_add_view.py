@@ -14,6 +14,7 @@ from qt_owner import QtOwner
 from task.qt_task import QtTaskBase
 from task.task_upload import QtUpTask
 from tools.str import Str
+from tools import mobile_file_dialog
 from view.nas.nas_item import NasInfoItem
 
 
@@ -46,7 +47,7 @@ class NasAddView(BaseMaskDialog, Ui_NasAdd, QtTaskBase):
         self.SwitchTips()
 
     def SelectSavePath(self):
-        url = QFileDialog.getExistingDirectory(self, Str.GetStr(Str.SelectFold))
+        url = mobile_file_dialog.GetExistingDirectory(self, Str.GetStr(Str.SelectFold))
         if url:
             self.pathEdit.setText(url)
 

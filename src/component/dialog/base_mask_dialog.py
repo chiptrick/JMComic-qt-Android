@@ -3,6 +3,8 @@ from PySide6.QtCore import QEasingCurve, QPropertyAnimation, Qt, Signal
 from PySide6.QtWidgets import (QDialog, QGraphicsDropShadowEffect,
                                QGraphicsOpacityEffect, QWidget, QSpacerItem, QSizePolicy, QVBoxLayout, QApplication)
 
+from tools import mobile_ui, platform_mobile
+
 
 class BaseMaskDialog(QDialog):
     """ 带遮罩的对话框抽象基类 """
@@ -19,7 +21,14 @@ class BaseMaskDialog(QDialog):
         self.setAttribute(Qt.WA_TranslucentBackground)
 
         self.setAttribute(Qt.WA_QuitOnClose, False)
-        self.setGeometry(self.parent().geometry())
+        if platform_mobile.IsAndroid():
+            # 手机端做成主窗口里的子控件覆盖层：Android + Qt6.11 上第二个顶层窗口
+            # 一渲染就撞 eglSurface() 的死锁保护器 abort(见 mobile_ui.MakeChildOverlay)。
+            # 这类对话框(登录/收藏夹/模型选择/目录选择/DoH…)都是"盖满主窗口的遮罩"，
+            # 本来就适合做子控件。
+            mobile_ui.MakeChildOverlay(self)
+        if self.parent() is not None:
+            self.setGeometry(self.parent().geometry())
         self.windowMask.resize(self.size())
 
         self.windowMask.setStyleSheet('background:rgba(255, 255, 255, 0.6)')
@@ -30,6 +39,16 @@ class BaseMaskDialog(QDialog):
         self.vBoxLayout.addItem(self.verticalSpacer2)
 
         self.__setShadowEffect()
+
+    def show(self):
+        """ 子控件模式下：对齐父窗口 + 抬到最上层 """
+        if mobile_ui.IsChildOverlay(self):
+            parent = self.parentWidget()
+            if parent is not None:
+                self.setGeometry(0, 0, parent.width(), parent.height())
+        QDialog.show(self)
+        if mobile_ui.IsChildOverlay(self):
+            self.raise_()
 
     def reject(self):
         self.close()

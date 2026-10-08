@@ -145,6 +145,8 @@ class Setting:
     # Waifu2x设置
     SelectEncodeGpu = SettingValue("Waifu2xSetting", "", True)
     Waifu2xCpuCore = SettingValue("Waifu2xSetting", 0, True)
+    # 上次初始化成功的配置(显卡名|cpu线程数|显卡序号|实际线程数)，用于跳过初始化探测
+    Waifu2xCheckKey = SettingValue("Waifu2xSetting", "", False)
     Waifu2xTileSize = SettingValue("Waifu2xSetting", 0, False, [0, 200, 100, 32])
 
     # 封面 Waifu2x
@@ -232,8 +234,13 @@ class Setting:
                 setItem.InitValue(value, name)
         from tools.log import Log
         Log.UpdateLoggingLevel()
-        if sys.platform.lower() == "linux" and not Setting.SavePath.value:
-            Setting.SavePath.SetValue(Setting.GetDataPath())
+        if not Setting.SavePath.value:
+            from tools.platform_mobile import IsAndroid, GetAndroidSavePath
+            if IsAndroid():
+                # Android 14: 应用外部私有目录，无需存储权限且用户可见
+                Setting.SavePath.SetValue(GetAndroidSavePath())
+            elif sys.platform.lower() == "linux":
+                Setting.SavePath.SetValue(Setting.GetDataPath())
         return
 
     @staticmethod

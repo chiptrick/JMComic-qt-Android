@@ -9,10 +9,16 @@ from collections import OrderedDict
 from urllib.parse import quote
 
 import io
-from lxml import etree
+try:
+    # lxml 仅用于写 ComicInfo.xml(Element/SubElement/ElementTree)，桌面端继续用它；
+    # Android 上 lxml 需要静态 libxml2/libxslt，构建链很脆弱，缺失时用标准库等价实现
+    from lxml import etree
+except ImportError:
+    import xml.etree.ElementTree as etree
 
 from config import config
 from config.setting import Setting
+from tools import platform_mobile
 from tools.langconv import Converter
 from tools.log import Log
 from tools.status import Status
@@ -157,6 +163,12 @@ class ToolUtil(object):
 
     @staticmethod
     def GetAnimationFormat(data):
+        # Android 的 Pillow 没有 webp 解码器，动图(webp/gif)识别会误判成静态，
+        # 先让 Qt 读一次；不是动图就返回空串(与 PIL 语义一致)
+        if platform_mobile.IsAndroid():
+            size = ToolUtil.GetPictureSizeQt(data)
+            if size:
+                return size[2].upper() if size[3] else ""
         try:
             from PIL import Image
             from io import BytesIO
@@ -170,12 +182,61 @@ class ToolUtil(object):
             return format
         except Exception as es:
             Log.Error(es)
+        size = ToolUtil.GetPictureSizeQt(data)
+        if size:
+            return size[2].upper() if size[3] else ""
         return ""
+
+    @staticmethod
+    def GetPictureSizeQt(data):
+        """ 用 Qt 自己的图像栈读尺寸/格式/是否动图；读不出来返回 None
+
+        Android 的 Pillow 是 p4a 编的，只有 png/jpg/gif，没有 webp 解码器，
+        而 JM 下发的图正是 webp：PIL 报 "cannot identify image file"，
+        于是 mat 被兜底成 "jpg"、isAni 恒为 False。这里和看图界面用同一套解码器。
+        """
+        try:
+            from PySide6.QtCore import QBuffer, QByteArray, QIODevice
+            from PySide6.QtGui import QImageReader
+            ba = QByteArray(data)
+            buf = QBuffer(ba)
+            buf.open(QIODevice.OpenModeFlag.ReadOnly)
+            try:
+                reader = QImageReader(buf)
+                reader.setDecideFormatFromContent(True)
+                size = reader.size()
+                if not size.isValid() or size.width() <= 0 or size.height() <= 0:
+                    return None
+                fmt = bytes(reader.format()).decode("utf-8", "ignore").lower()
+                if fmt in ("jpeg", "jpg"):
+                    mat = "jpg"
+                elif fmt in ("png", "gif", "webp", "bmp"):
+                    mat = fmt
+                else:
+                    mat = fmt or "jpg"
+                # 必须是"能证明"的动图：imageCount() 拿不到(-1)时按静态处理，
+                # 否则静态 webp 会被当成动图而跳过分割还原(那就又错位了)
+                isAnima = False
+                try:
+                    isAnima = bool(reader.supportsAnimation()) and reader.imageCount() > 1
+                except Exception:
+                    isAnima = False
+                return size.width(), size.height(), mat, isAnima
+            finally:
+                buf.close()
+        except Exception as es:
+            Log.Warn("GetPictureSizeQt failed:{}".format(es))
+            return None
 
     @staticmethod
     def GetPictureSize(data):
         if not data:
             return 0, 0, "jpg", False
+        # Android 上先问 Qt：Pillow 解不了 webp，直接走 PIL 只会刷一屏 traceback
+        if platform_mobile.IsAndroid():
+            size = ToolUtil.GetPictureSizeQt(data)
+            if size:
+                return size
         try:
             from PIL import Image
             from io import BytesIO
@@ -194,6 +255,10 @@ class ToolUtil(object):
             return img.width, img.height, mat, isAnima
         except Exception as es:
             Log.Error(es)
+        # Pillow 不行就用 Qt 再读一次
+        size = ToolUtil.GetPictureSizeQt(data)
+        if size:
+            return size
         return 0, 0, "jpg", False
 
     # @staticmethod
@@ -973,11 +1038,193 @@ class ToolUtil(object):
     #         pictureUrl[int(id)-1] = url
     #     return aid, minAid, pictureUrl, pictureName
 
+    # ---- 图片分割(分块还原)的 Qt 实现 ----
+    # 官方算法(见 jmcomic JmImageTool.decode_and_save)：把高 h 按 num 等分，
+    # 余数 rem 归"最下面那一块"，然后从最下面那块开始往上依次贴回(最后贴最上面那块)。
+    # 注意：只有 h % num == 0 时这个变换才是对合(involution)，一般情况下
+    # 同一张图被还原两次 = 彻底错位，所以任何路径都只能对原始字节做一次。
+
+    @staticmethod
+    def LoadQImage(imgData):
+        """ bytes -> QImage(无效返回 isNull 的 QImage) """
+        from PySide6.QtGui import QImage
+        q = QImage()
+        if imgData:
+            try:
+                q.loadFromData(imgData)
+            except Exception as es:
+                Log.Warn("LoadQImage failed:{}".format(es))
+        return q
+
+    @staticmethod
+    def SegmentQImage(img, num):
+        """ 用 QImage 做分块还原；img 无效/num 不合理时原样返回 """
+        try:
+            if img is None or num <= 1:
+                return img
+            from PySide6.QtCore import QRect
+            from PySide6.QtGui import QImage, QPainter
+            w = img.width()
+            h = img.height()
+            if w <= 0 or h <= 0:
+                return img
+            c = h // num
+            if c <= 0:
+                return img
+            rem = h % num
+            out = QImage(w, h, QImage.Format.Format_ARGB32_Premultiplied)
+            if out.isNull():
+                return img
+            out.fill(0)
+            painter = QPainter(out)
+            try:
+                yDst = 0
+                for i in range(num):
+                    move = c + (rem if i == 0 else 0)
+                    ySrc = h - c * (i + 1) - rem
+                    if ySrc < 0 or yDst + move > h or ySrc + move > h:
+                        continue
+                    painter.drawImage(QRect(0, yDst, w, move), img, QRect(0, ySrc, w, move))
+                    yDst += move
+            finally:
+                painter.end()
+            return out
+        except Exception as es:
+            Log.Error("SegmentQImage failed, num:{} err:{}".format(num, es))
+            return img
+
+    @staticmethod
+    def SegmentationQImage(imgData, epsId, scramble_id, pictureName):
+        """ bytes -> QImage|None：Qt 解码 + 分块还原
+
+        看图线程直接用这个(拿到就是能显示的 QImage)，省掉"还原→编码→再解码"的来回。
+        解码不了返回 None，调用方自行决定要不要退回原始字节。
+        """
+        try:
+            q = ToolUtil.LoadQImage(imgData)
+            if q.isNull():
+                return None
+            num = ToolUtil.GetSegmentationNum(epsId, scramble_id, pictureName)
+            if num > 1:
+                q = ToolUtil.SegmentQImage(q, num)
+            return q
+        except Exception as es:
+            Log.Error("SegmentationQImage failed:{}".format(es))
+            return None
+
+    @staticmethod
+    def ImageFormatFromData(data):
+        """ 从字节头判断图片格式(Qt 保存时用它保持原扩展名) """
+        try:
+            head = bytes(data[:16])
+        except Exception:
+            return ""
+        if head[:8] == b"\x89PNG\r\n\x1a\n":
+            return "PNG"
+        if head[:3] == b"\xff\xd8\xff":
+            return "JPEG"
+        if head[:4] == b"RIFF" and head[8:12] == b"WEBP":
+            return "WEBP"
+        if head[:6] in (b"GIF87a", b"GIF89a"):
+            return "GIF"
+        if head[:2] == b"BM":
+            return "BMP"
+        return ""
+
+    @staticmethod
+    def _SaveQImage(img, path, toFormat=""):
+        """ QImage -> 文件；返回实际写入的格式或空串 """
+        formats = []
+        if toFormat:
+            formats.append(str(toFormat).upper().replace("JPG", "JPEG"))
+        for fmt in ("PNG", "JPEG"):
+            if fmt not in formats:
+                formats.append(fmt)
+        for fmt in formats:
+            try:
+                quality = 95 if fmt in ("JPEG", "WEBP") else -1
+                if img.save(path, fmt, quality):
+                    return fmt
+            except Exception as es:
+                Log.Warn("save qimage as {} failed:{}".format(fmt, es))
+        return ""
+
+    @staticmethod
+    def _SaveQImageToBytes(img, toFormat=""):
+        """ QImage -> bytes；返回 (bytes, 格式) 或 (None, "") """
+        from PySide6.QtCore import QBuffer, QByteArray, QIODevice
+        formats = []
+        if toFormat:
+            formats.append(str(toFormat).upper().replace("JPG", "JPEG"))
+        for fmt in ("PNG", "JPEG"):
+            if fmt not in formats:
+                formats.append(fmt)
+        for fmt in formats:
+            try:
+                ba = QByteArray()
+                buf = QBuffer(ba)
+                buf.open(QIODevice.OpenModeFlag.WriteOnly)
+                try:
+                    # 有损格式给 95：旧路径(PIL 默认 80)在这里会掉画质
+                    ok = img.save(buf, fmt, 95 if fmt in ("JPEG", "WEBP") else -1)
+                finally:
+                    buf.close()
+                if ok and not ba.isEmpty():
+                    return bytes(ba), fmt
+            except Exception as es:
+                Log.Warn("encode qimage as {} failed:{}".format(fmt, es))
+        return None, ""
+
+    @staticmethod
+    def SegmentationPictureQt(imgData, epsId, scramble_id, pictureName, toFormat=""):
+        """ Qt 版 SegmentationPicture：解码 + 还原 + 编码；失败返回 None
+
+        Android 的 Pillow 是 p4a 编出来的，只有 png/jpg/gif，**没有 webp 解码器**
+        (包里只有 PIL/_webp.pyi，没有 _webp.so)，而 JM 下发的图正是 webp；
+        这时 PIL 会抛 "cannot identify image file"，必须靠 Qt 自己的图像栈
+        (看图界面显示用的就是它，能解 webp)。
+        """
+        try:
+            q = ToolUtil.SegmentationQImage(imgData, epsId, scramble_id, pictureName)
+            if q is None or q.isNull():
+                return None
+            fmt = toFormat or ToolUtil.ImageFormatFromData(imgData)
+            value, used = ToolUtil._SaveQImageToBytes(q, fmt)
+            return value
+        except Exception as es:
+            Log.Error("SegmentationPictureQt failed:{}".format(es))
+            return None
+
+    @staticmethod
+    def SegmentationPictureToDiskQt(imgData, epsId, scramble_id, pictureName, path, toFormat=""):
+        """ Qt 版 SegmentationPictureToDisk：解码 + 还原 + 落盘；失败返回 False """
+        try:
+            q = ToolUtil.SegmentationQImage(imgData, epsId, scramble_id, pictureName)
+            if q is None or q.isNull():
+                return False
+            fmt = toFormat or ToolUtil.ImageFormatFromData(imgData)
+            return bool(ToolUtil._SaveQImage(q, path, fmt))
+        except Exception as es:
+            Log.Error("SegmentationPictureToDiskQt failed:{}".format(es))
+            return False
+
     # 获得图片分割数
     @staticmethod
     def GetSegmentationNum(epsId, scramble_id, pictureName):
-        scramble_id = int(scramble_id)
-        epsId = int(epsId)
+        # 这个函数绝不能抛异常：scramble_id 来自接口/缓存，可能是 ""/None/非数字，
+        # 一旦抛出去，上层(TaskMulti → 看图)就把这张图当成"解密失败"丢掉了。
+        try:
+            scramble_id = int(scramble_id or 0)
+        except (TypeError, ValueError):
+            scramble_id = 0
+        try:
+            epsId = int(epsId or 0)
+        except (TypeError, ValueError):
+            epsId = 0
+        if pictureName is None:
+            pictureName = ""
+        else:
+            pictureName = str(pictureName)
         if epsId < scramble_id:
             num = 0
         elif epsId < 268850:
@@ -1002,90 +1249,137 @@ class ToolUtil(object):
     @staticmethod
     def SegmentationPicture(imgData, epsId, scramble_id, bookId):
         num = ToolUtil.GetSegmentationNum(epsId, scramble_id, bookId)
-        if num <= 1:
+        if num <= 1 or not imgData:
             return imgData
 
-        from PIL import Image
-        from io import BytesIO
-        src = BytesIO(imgData)
-        srcImg = Image.open(src)
+        # Android 上优先用 Qt：p4a 编出来的 Pillow 没有 webp 解码器，JM 下发的图
+        # 又偏偏是 webp，PIL 会抛 "cannot identify image file"，以前这里兜底返回原图，
+        # 真机上看到的就是"图片分割异常、图像错位"。
+        if platform_mobile.IsAndroid():
+            qt = ToolUtil.SegmentationPictureQt(imgData, epsId, scramble_id, bookId)
+            if qt:
+                return qt
 
-        size = (width, height) = srcImg.size
-        desImg = Image.new(srcImg.mode, size)
-        format = srcImg.format
+        try:
+            from PIL import Image
+            from io import BytesIO
+            src = BytesIO(imgData)
+            srcImg = Image.open(src)
+            try:
+                size = (width, height) = srcImg.size
+                desImg = Image.new(srcImg.mode, size)
+                # srcImg.format 可能是 None(jpg 里没有 format 就会保存失败)，
+                # 那种情况由下面的 except 兜住
+                format = srcImg.format
 
-        rem = height % num
-        copyHeight = math.floor(height / num)
-        block = []
-        totalH = 0
-        for i in range(num):
-            h = copyHeight * (i + 1)
-            if i == num - 1:
-                h += rem
-            block.append((totalH, h))
-            totalH = h
+                rem = height % num
+                copyHeight = math.floor(height / num)
+                block = []
+                totalH = 0
+                for i in range(num):
+                    h = copyHeight * (i + 1)
+                    if i == num - 1:
+                        h += rem
+                    block.append((totalH, h))
+                    totalH = h
 
-        h = 0
-        for start, end in reversed(block):
-            coH = end - start
-            temp_img = srcImg.crop((0, start, width, end))
-            desImg.paste(temp_img, (0, h, width, h + coH))
-            h += coH
+                h = 0
+                for start, end in reversed(block):
+                    coH = end - start
+                    temp_img = srcImg.crop((0, start, width, end))
+                    desImg.paste(temp_img, (0, h, width, h + coH))
+                    h += coH
 
-        srcImg.close()
-        src.close()
-
-        des = BytesIO()
-        desImg.save(des, format)
-        value = des.getvalue()
-        desImg.close()
-        des.close()
-        return value
+                des = BytesIO()
+                desImg.save(des, format)
+                value = des.getvalue()
+                desImg.close()
+                des.close()
+                return value
+            finally:
+                try:
+                    srcImg.close()
+                    src.close()
+                except Exception:
+                    pass
+        except Exception as es:
+            # 失败必须把输入原样返回：返回 None 会被 consumer 塞进结果队列，
+            # 看图界面拿到后把 info.data 覆盖成 None，整页图直接消失。
+            Log.Error("SegmentationPicture failed, epsId:{} scrambleId:{} len:{} err:{}".format(
+                epsId, scramble_id, len(imgData) if imgData else 0, es))
+            # Pillow 不行(缺 codec/格式特殊)就换 Qt 的图像栈再试一次
+            qt = ToolUtil.SegmentationPictureQt(imgData, epsId, scramble_id, bookId)
+            if qt:
+                Log.Warn("SegmentationPicture: 已用 Qt 图像栈还原(epsId:{} scrambleId:{})".format(
+                    epsId, scramble_id))
+                return qt
+            return imgData
 
     # 图片分割合成
     @staticmethod
     def SegmentationPictureToDisk(imgData, epsId, scramble_id, bookId, path, toFormat):
         num = ToolUtil.GetSegmentationNum(epsId, scramble_id, bookId)
 
-        from PIL import Image
-        from io import BytesIO
-        src = BytesIO(imgData)
-        srcImg = Image.open(src)
-        if num <= 1:
-            srcImg.save(path, toFormat)
-            return True
+        # 同 SegmentationPicture：Android 的 Pillow 解不了 webp(也没法转 png)，
+        # 先用 Qt 走一遍；否则"保存到手机"存下来的会是被打乱的原图。
+        if platform_mobile.IsAndroid():
+            if ToolUtil.SegmentationPictureToDiskQt(imgData, epsId, scramble_id, bookId, path, toFormat):
+                return True
 
-        size = (width, height) = srcImg.size
-        desImg = Image.new(srcImg.mode, size)
-        format = srcImg.format
+        try:
+            from PIL import Image
+            from io import BytesIO
+            src = BytesIO(imgData)
+            srcImg = Image.open(src)
+            try:
+                if num <= 1:
+                    srcImg.save(path, toFormat)
+                    return True
 
-        rem = height % num
-        copyHeight = math.floor(height / num)
-        block = []
-        totalH = 0
-        for i in range(num):
-            h = copyHeight * (i + 1)
-            if i == num - 1:
-                h += rem
-            block.append((totalH, h))
-            totalH = h
+                size = (width, height) = srcImg.size
+                desImg = Image.new(srcImg.mode, size)
+                format = srcImg.format
 
-        h = 0
-        for start, end in reversed(block):
-            coH = end - start
-            temp_img = srcImg.crop((0, start, width, end))
-            desImg.paste(temp_img, (0, h, width, h + coH))
-            h += coH
+                rem = height % num
+                copyHeight = math.floor(height / num)
+                block = []
+                totalH = 0
+                for i in range(num):
+                    h = copyHeight * (i + 1)
+                    if i == num - 1:
+                        h += rem
+                    block.append((totalH, h))
+                    totalH = h
 
-        srcImg.close()
-        src.close()
+                h = 0
+                for start, end in reversed(block):
+                    coH = end - start
+                    temp_img = srcImg.crop((0, start, width, end))
+                    desImg.paste(temp_img, (0, h, width, h + coH))
+                    h += coH
 
-        # des = BytesIO()
-        desImg.save(path, toFormat)
-        # value = des.getvalue()
-        # desImg.close()
-        # des.close()
-        return True
+                desImg.save(path, toFormat)
+                return True
+            finally:
+                try:
+                    srcImg.close()
+                    src.close()
+                except Exception:
+                    pass
+        except Exception as es:
+            Log.Error("SegmentationPictureToDisk failed, epsId:{} scrambleId:{} path:{} len:{} err:{}".format(
+                epsId, scramble_id, path, len(imgData) if imgData else 0, es))
+            # Pillow 不行就换 Qt 再试一次(桌面端遇到 Pillow 不支持的格式时同理)
+            if ToolUtil.SegmentationPictureToDiskQt(imgData, epsId, scramble_id, bookId, path, toFormat):
+                Log.Warn("SegmentationPictureToDisk: 已用 Qt 图像栈还原(epsId:{})".format(epsId))
+                return True
+            # 分割失败也要把原始字节落盘：至少让这一页能显示出来(返回 False = 没做分割)
+            try:
+                with open(path, "wb") as f:
+                    f.write(imgData)
+            except Exception as es2:
+                Log.Error("SegmentationPictureToDisk write raw failed, path:{} err:{}".format(path, es2))
+            return False
 
     @staticmethod
     def IsSameName(name1, name2):

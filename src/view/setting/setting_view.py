@@ -16,6 +16,7 @@ from qt_owner import QtOwner
 from tools.log import Log
 from tools.str import Str
 from tools.tool import ToolUtil
+from tools import mobile_file_dialog
 from view.tool.doh_dns_view import DohDnsView
 
 
@@ -477,7 +478,7 @@ class SettingView(QtWidgets.QWidget, Ui_SettingNew):
         return
 
     def SelectSavePath(self):
-        url = QFileDialog.getExistingDirectory(self, Str.GetStr(Str.SelectFold))
+        url = mobile_file_dialog.GetExistingDirectory(self, Str.GetStr(Str.SelectFold))
         if url:
             Setting.SavePath.SetValue(url)
         self.SetDownloadLabel()
@@ -506,8 +507,11 @@ class SettingView(QtWidgets.QWidget, Ui_SettingNew):
 
         if not config.EncodeGpu or (
                 self.gpuInfos and config.EncodeGpu != "CPU" and config.EncodeGpu not in self.gpuInfos):
-            config.EncodeGpu = self.gpuInfos[0]
-            config.Encode = 0
+            # 没有设置过显卡时优先使用独显(NVIDIA/AMD)，避免默认选到核显
+            from tools.waifu2x_check import Waifu2xChecker
+            index = Waifu2xChecker.PreferGpuId(self.gpuInfos)
+            config.EncodeGpu = self.gpuInfos[index]
+            config.Encode = index
 
         index = 0
         if self.gpuInfos:

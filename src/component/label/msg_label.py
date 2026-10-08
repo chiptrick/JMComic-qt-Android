@@ -5,6 +5,7 @@ from PySide6.QtCore import Qt, QPoint, QPropertyAnimation, QEasingCurve, QParall
 from PySide6.QtGui import QPen, QPainterPath, QPainter, QColor
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QFileDialog
 
+from tools import mobile_ui, platform_mobile
 from tools.log import Log
 
 
@@ -16,8 +17,16 @@ class MsgLabel(QWidget):
 
     def __init__(self, *args, **kwargs):
         super(MsgLabel, self).__init__(*args, **kwargs)
-        self.setWindowFlags(
-            Qt.Window | Qt.Tool | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.X11BypassWindowManagerHint)
+        if platform_mobile.IsAndroid():
+            # 手机端必须做成**子控件**：Android + Qt6.11 上第二个顶层窗口一渲染就
+            # 撞 eglSurface() 的死锁保护器直接 abort(设置页每改一项都会弹这个提示条，
+            # 真机上表现为"改设置必崩")。详见 tools/mobile_ui.MakeChildOverlay。
+            mobile_ui.MakeChildOverlay(self, coverParent=False)
+            # 提示条不该抢触摸：它盖在页面上，但要点得到下面的控件
+            self.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        else:
+            self.setWindowFlags(
+                Qt.Window | Qt.Tool | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.X11BypassWindowManagerHint)
         self.setMinimumWidth(200)
         self.setMinimumHeight(48)
         self.setAttribute(Qt.WA_TranslucentBackground, True)
@@ -43,17 +52,37 @@ class MsgLabel(QWidget):
         self.moveAnimation = None
         self.close()
 
-    def show(self):
-        super(MsgLabel, self).show()
-        x = self.parent().geometry().x()
-        y = self.parent().geometry().y()
-        x2 = self.parent().size().width()
-        y2 = self.parent().size().height()
+    def ShowNow(self):
+        QWidget.show(self)
+        parent = self.parent()
+        if parent is None:
+            return
+        if mobile_ui.IsChildOverlay(self):
+            # 子控件：坐标是相对父窗口的(父窗口的 geometry().x/y() 是它在自己父级里的位置，
+            # 拿来做偏移会把提示条推到屏幕外)
+            x = 0
+            y = 0
+            self.raise_()
+        else:
+            x = parent.geometry().x()
+            y = parent.geometry().y()
+        x2 = parent.size().width()
+        y2 = parent.size().height()
         startPos = QPoint(x+int(x2/2)-int(self.width()/2), y+int(y2/2))
         endPos = QPoint(x+int(x2/2)-int(self.width()/2), y+int(y2/2)-self.height()*3-5)
         self.move(startPos)
         # 初始化动画
         self.initAnimation(startPos, endPos)
+
+    def show(self):
+        # Android 上如果它还是**顶层窗口**(桌面端/异常兜底)，从输入事件处理里同步 show
+        # 会让 Qt 在 eglSurface() 上重入并直接 abort('Failed to acquire deadlock
+        # protector')；延到当前事件处理结束再 show，行为不变、不再重入。
+        # 手机端已经把它做成子控件了(见 __init__)，子控件不需要延后。
+        if mobile_ui.ShouldDeferWindowShow() and not mobile_ui.IsChildOverlay(self):
+            mobile_ui.DeferCall(self.ShowNow)
+            return
+        self.ShowNow()
 
     def initAnimation(self, startPos, endPos):
         # 透明度动画
@@ -142,7 +171,11 @@ class MsgLabel(QWidget):
     @staticmethod
     def OpenPicture(self, path="."):
         try:
-            filename = QFileDialog.getOpenFileName(self, "Open Image", path, "Image Files(*.jpg *.png)")
+            # Android 上不能用 QFileDialog(会弹一个回不来的顶层窗口，应用直接卡死)，
+            # 走应用内的选择器；桌面端仍原样用 QFileDialog，返回值形状一致
+            from tools import mobile_file_dialog
+            filename = mobile_file_dialog.GetOpenFileName(
+                self, "Open Image", path, "Image Files(*.jpg *.png)")
             if filename and len(filename) > 1:
                 name = filename[0]
                 picFormat = filename[1]

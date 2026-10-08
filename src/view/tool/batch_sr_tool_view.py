@@ -20,6 +20,7 @@ from task.task_local import LocalData
 from tools.log import Log
 from tools.str import Str
 from tools.tool import ToolUtil
+from tools import mobile_file_dialog
 from view.read.read_qgraphics_proxy_widget import ReadQGraphicsProxyWidget
 from view.tool.batch_sr_tool_db import BatchSrToolDb
 
@@ -124,7 +125,7 @@ class BatchSrToolView(QtWidgets.QWidget, Ui_BatchSrTool, QtTaskBase):
         return modelName
 
     def SelectSavePath(self, lineEdit):
-        url = QFileDialog.getExistingDirectory(self, Str.GetStr(Str.SelectFold))
+        url = mobile_file_dialog.GetExistingDirectory(self, Str.GetStr(Str.SelectFold))
         if url:
             lineEdit.setText(url)
             if lineEdit == self.inputDir:

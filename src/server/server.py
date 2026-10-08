@@ -19,7 +19,8 @@ from tools.singleton import Singleton
 from tools.status import Status
 from tools.tool import ToolUtil
 import socket
-import urllib
+# 同理：显式导入子模块，避免 `urllib` 没有 `request` 属性
+import urllib.request
 
 
 host_table = {}

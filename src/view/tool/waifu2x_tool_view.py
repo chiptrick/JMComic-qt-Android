@@ -15,6 +15,7 @@ from task.qt_task import QtTaskBase
 from tools.log import Log
 from tools.str import Str
 from tools.tool import ToolUtil
+from tools import mobile_file_dialog
 from view.read.read_qgraphics_proxy_widget import ReadQGraphicsProxyWidget
 
 
@@ -327,7 +328,7 @@ class Waifu2xToolView(QtWidgets.QWidget, Ui_Waifu2xTool, QtTaskBase):
 
     def OpenPicture(self):
         try:
-            filename = QFileDialog.getOpenFileName(self, "Open Image", ".", "Image Files(*.jpg *.png *.gif *.webp)")
+            filename = mobile_file_dialog.GetOpenFileName(self, "Open Image", ".", "Image Files(*.jpg *.png *.gif *.webp)")
             if filename and len(filename) >= 1:
                 name = filename[0]
                 if os.path.isfile(name):
@@ -403,7 +404,7 @@ class Waifu2xToolView(QtWidgets.QWidget, Ui_Waifu2xTool, QtTaskBase):
             return
         try:
             today = time.strftime("%Y%m%d%H%M%S", time.localtime(time.time()))
-            filepath = QFileDialog.getSaveFileName(self, Str.GetStr(Str.Save), "{}.{}".format(today, self.format.text()))
+            filepath = mobile_file_dialog.GetSaveFileName(self, Str.GetStr(Str.Save), "{}.{}".format(today, self.format.text()))
             if filepath and len(filepath) >= 1:
                 name = filepath[0]
                 if not name:
