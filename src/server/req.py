@@ -14,12 +14,54 @@ import platform
 # 必须导入 urllib.request 子模块：只写 `import urllib` 不会把 request 挂到 urllib 上，
 # 下面 SetProxy 里的 urllib.request.getproxies() 会抛 AttributeError(真机上已复现)
 import urllib.request
+import curl_cffi
 from curl_cffi import CurlOpt, CurlHttpVersion
 
 # 接口响应解密(AES)的统计。真机上曾经因为 p4a 的 ctypes/android 补丁导致
 # pycryptodome 完全不可用，于是**每一个**接口响应解密都抛异常，
 # 表现就是"登录报错、首页也报错"。这个计数只用于诊断，不参与业务逻辑。
 ParseStats = {"ok": 0, "fail": 0, "lastUrl": "", "lastError": "", "lastShape": ""}
+
+
+def IsAdvancedTlsSupported():
+    """当前 curl_cffi 是否真的会用 HTTP/3(HTTP_VERSION)和 ECH。
+
+    Android 上跑的是 android/shims/curl_cffi 纯 python 垫片，它把这两个选项当空操作
+    (见 android/README.md 已知限制)，垫片用 HTTP3_ECH_SUPPORTED=False 声明这一点；
+    真 curl_cffi 没有这个属性，按支持处理。
+    """
+    return bool(getattr(curl_cffi, "HTTP3_ECH_SUPPORTED", True))
+
+
+class Http3EchFallback(object):
+    """HTTP/3 与 ECH 的"用完就关"自适应开关。
+
+    这两项都能提速，但都能让**每一个**请求都失败：
+      * HTTP/3 走 UDP：网络封掉 UDP 443 时 QUIC 握手一直不返回，libcurl 只在
+        "握手失败"时才 fallback(一直等不到就只能超时)，请求整轮白等；
+      * ECH 配置每 15 分钟从 cloudflare-ech.com 拉一次，配置轮换/过期时服务端回
+        ECH_REJECTED，TLS 握手直接失败；
+      * curl_cffi 没编 HTTP/3 时设 HTTP_VERSION=3 会直接报 CURLE_UNSUPPORTED_PROTOCOL。
+    只要有一个请求因为它们失败，就整体关掉，后续请求直接走 HTTP/2 + 普通 SNI，
+    不再让每个请求都白等一轮。用户在"代理设置"里保存一次(ResetHttp3EchFallback)
+    或者重启应用即可重新尝试。
+    """
+    http3Off = False
+    echOff = False
+
+    @classmethod
+    def Reset(cls):
+        cls.http3Off = False
+        cls.echOff = False
+
+    @classmethod
+    def Stats(cls):
+        return "http3Off={}, echOff={}, advancedTls={}".format(
+            cls.http3Off, cls.echOff, IsAdvancedTlsSupported())
+
+
+def ResetHttp3EchFallback():
+    Http3EchFallback.Reset()
 
 
 class ServerReq(object):
@@ -45,6 +87,7 @@ class ServerReq(object):
         self.isImg = False
         self.isRegister = False
         self.isH3 = False
+        self.isEch = False
         host = ToolUtil.GetUrlHost(self.url)
         if "https://" + host in GlobalConfig.Url2List.value :
             self.isApi = True
@@ -135,6 +178,8 @@ class ServerReq(object):
         self.ipList = dnsIpList
         self.curl_opt = dict()
         self.curl_opt[CurlOpt.HTTP_VERSION] = CurlHttpVersion.V2_0
+        self.isH3 = False
+        self.isEch = False
         host = ToolUtil.GetUrlHost(self.url)
         isEch = isEch and (self.isImg or self.isApi or self.isRegister or self.isOtherCloudFlare) and not self.proxyUrl
         # allUrls = GlobalConfig.DohUrlList.value[:]
@@ -144,8 +189,9 @@ class ServerReq(object):
         #     if host in ignoreUrl:
         #         isEch = False
         #         break
-        if isEch and echConfig:
+        if isEch and echConfig and not Http3EchFallback.echOff:
             self.curl_opt[CurlOpt.ECH] = f"ecl:{echConfig}"
+            self.isEch = True
         if dnsIpList:
             if isinstance(dnsIpList, list):
                 ipStr = ",".join(dnsIpList)
@@ -158,9 +204,39 @@ class ServerReq(object):
                     for v in GlobalConfig.UrlList.value:
                         host2 =  ToolUtil.GetUrlHost(v)
                         self.curl_opt[CurlOpt.RESOLVE].append(f"{host2}:443:{ipStr}")
-        if isHttp3:
+        if isHttp3 and not Http3EchFallback.http3Off:
             self.curl_opt[CurlOpt.HTTP_VERSION] = CurlHttpVersion.V3
             self.isH3 = True
+
+    def DisableHttp3(self):
+        """关掉本请求的 HTTP/3 并记住(后续请求不再开)，返回是否有改动。"""
+        if not self.isH3:
+            return False
+        self.isH3 = False
+        self.curl_opt[CurlOpt.HTTP_VERSION] = CurlHttpVersion.V2_0
+        Http3EchFallback.http3Off = True
+        return True
+
+    def DisableEch(self):
+        """关掉本请求的 ECH 并记住(后续请求不再开)，返回是否有改动。"""
+        if not self.isEch:
+            return False
+        self.isEch = False
+        self.curl_opt.pop(CurlOpt.ECH, None)
+        Http3EchFallback.echOff = True
+        return True
+
+    def DowngradeTlsOptions(self, isEchFail=False):
+        """请求失败后降级：关掉 HTTP/3 / ECH，返回是否有改动(有改动才值得重试)。
+
+        只在**网络类失败**时由调用方触发；ECH 被拒时先关 ECH，其余先关 HTTP/3。
+        垫片(不支持这两项)下直接返回 False —— 降级重试没有意义，只会多打一轮请求。
+        """
+        if not IsAdvancedTlsSupported():
+            return False
+        if isEchFail:
+            return self.DisableEch() or self.DisableHttp3()
+        return self.DisableHttp3() or self.DisableEch()
 
     def ResetToSwitchNextUrl(self):
         if not self.resetUrl:
@@ -190,9 +266,7 @@ class ServerReq(object):
         #     return True
 
     def GetPri(self):
-        ech = False
-        if CurlOpt.ECH in self.curl_opt:
-            ech = True
+        ech = self.isEch
         if Setting.LogIndex.value <= 1:
             return "{}, ech:{}, url:{}, ip:{}, h3:{}".format(self.__class__.__name__, ech, self.url, self.ipList, self.isH3)
         headers = dict()

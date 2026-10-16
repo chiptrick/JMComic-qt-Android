@@ -304,6 +304,9 @@ class LoginProxyNewWidget(object):
         Setting.EnableEch.SetValue(bool(self.owner.echBox.isChecked()))
         Setting.DohAddress.SetValue((self.owner.dohLine.text()))
         Setting.IsOpenHTTP3.SetValue(bool(self.owner.http3Box.isChecked()))
+        # 用户重新选/保存代理就重新相信这两个选项：之前运行时因为失败把它们关了，
+        # 现在给个机会再试(比如换了网络/换了 IP)。
+        req.ResetHttp3EchFallback()
         # Setting.DohAddress.SetValue(self.dohEdit.text())
         # Setting.IsOpenDoh.SetValue(int(self.dohBox.isChecked()))
         # self.UpdateServer()

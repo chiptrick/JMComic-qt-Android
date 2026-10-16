@@ -107,6 +107,7 @@ Android 移植用的脚本集合。**所有脚本都不写死本机路径**，�
 | `host_test_sr_qnn.py` | 引擎逻辑自测：固定 shape 分块拼接、缩放、编解码、任务 API、模型回退 |
 | `host_test_image_pipeline.py` | 看图解码链路回归（含真数据闭环，样本缺失时该段 SKIP） |
 | `host_test_file_dialog.py` | 应用内文件选择器回归（委托/排序/过滤/权限降级/嵌套事件循环） |
+| `host_test_net_fallback.py` | HTTP/3、ECH 失败自动降级回归（垫片跳过 / 降级语义 / `_Send`、CDN 图片真实调用点重投） |
 | `host_test_crypto_android.py` | Android 模式下接口解密链（AES）回归 |
 | `dump_ui.py` | 打印 `.ui` 的结构骨架（类名/对象名/几何/布局行列），用于规划竖屏排版 |
 

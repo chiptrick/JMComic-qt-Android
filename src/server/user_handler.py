@@ -1049,6 +1049,14 @@ class DownloadBookHandler(object):
                 # 异常图片
                 if len(data) < 20 or isFail:
                     Log.Warn(f"download_error_picture, url:{backData.req.url}, data:{len(data)}, is_fail:{isFail}")
+                    # HTTP/3、ECH 失败时先把它们关掉重试一次(CDN 图片同样会踩这两个坑)
+                    if isFail and backData.req.DowngradeTlsOptions(backData.status == Status.EchError):
+                        Log.Warn("download downgrade http3/ech and retry:{} ({})".format(
+                            backData.req.GetPri(), req.Http3EchFallback.Stats()))
+                        backData.req.resetCnt += 1
+                        backData.req.isReset = True
+                        Server().ReDownload(backData)
+                        return
                     ## 尝试切换图片地址
                     backData.req.ResetToSwitchNextUrl()
                     if backData.req.resetCnt >= 0:

@@ -23,6 +23,12 @@ import socket
 import urllib.request
 
 
+# HTTP/3、ECH 失败后值得降级重试的状态 —— 只认"网络类"失败。
+# 离线模式/解析错误之类不该因为这两个选项被重试(也不该把它们关掉)。
+DowngradeStatus = (Status.DnsError, Status.TimeOut, Status.ConnectErr, Status.NetError,
+                   Status.SSLErr, Status.ResetErr, Status.EchError, Status.SNIError)
+
+
 host_table = {}
 # _orig_getaddrinfo = socket.getaddrinfo
 # # 如果使用代理，無法使用自定義dns
@@ -327,6 +333,9 @@ class Server(Singleton):
     def _Send(self, task, index, session):
         try:
             task.req.resetCnt -= 1
+            # 重试(切 URL / 降级 HTTP/3、ECH)时不能继承上一次的错误状态：
+            # 否则请求已经成功了，handler 还会按旧状态当失败处理。
+            task.status = Status.Ok
             Log.Info("request{}-> backId:{}, {}".format(index, task.bakParam, task.req))
             if QtOwner().isOfflineModel:
                 task.status = Status.OfflineModel
@@ -390,6 +399,15 @@ class Server(Singleton):
 
         if task.status != Status.Ok and task.req.resetCnt > 0:
             task.req.ResetToSwitchNextUrl()
+            self._Send(task, index, session)
+            return
+
+        # HTTP/3、ECH 失败时关掉它们重试一次(只关不试等于没修：这两个选项会让每个请求
+        # 都白等一轮)。测速是诊断，故意不降级，好让用户看到 h3 到底通不通。
+        if (task.status in DowngradeStatus
+                and not isinstance(task.req, (req.SpeedTestPingReq, req.SpeedTestPing2Req))
+                and task.req.DowngradeTlsOptions(task.status == Status.EchError)):
+            Log.Warn("downgrade http3/ech and retry:{} ({})".format(task.req.GetPri(), req.Http3EchFallback.Stats()))
             self._Send(task, index, session)
             return
 

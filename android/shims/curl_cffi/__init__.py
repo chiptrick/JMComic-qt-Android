@@ -11,6 +11,11 @@ from .requests import (AsyncSession, Session, Response, get, post, put,  # noqa:
 
 __version__ = "0.0.0-shim"
 
+# 垫片把 CurlOpt.HTTP_VERSION / CurlOpt.ECH 当空操作(只支持 HTTP/1.1，没有 ECH/DOH)。
+# 业务层(src/server/req.py 的 IsAdvancedTlsSupported)据此跳过"HTTP/3、ECH 失败降级重试"，
+# 免得在每个失败请求上多打一轮。真 curl_cffi 没有这个属性，按"支持"处理。
+HTTP3_ECH_SUPPORTED = False
+
 
 class _Enum(object):
     def __init__(self, names):

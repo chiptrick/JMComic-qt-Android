@@ -77,6 +77,7 @@ android/
 | **首页除"最新上传"以外的分区完全不能滑动**：分区页是网络回来后由 `IndexView.InitBack` 逐个 `AddTab()` 建出来的，而 `EnableTouchScroll` 只在窗口 `Apply`/`OnShown` 跑过一遍 —— 那会儿这些页还不存在 -> 分区列表**从来没被 `QScroller` 接管**(`_jmTouchScroll=False`)，手指在上面划纹丝不动（"滑动防误触"也一起没生效，滑动还会误点中封面） | **建立即接管**：App 级过滤器 `_ScrollWatcher` 听 `QEvent.ChildAdded`/`ChildPolished`，新出现的滚动区域攒起来用 0ms 定时器推到**下一轮事件循环**再扫（`ChildAdded` 是构造函数里发给父控件的，当场判不可靠）；`_TouchGuard.OnPress` 里再加一层兜底 `_AdoptScrollArea`：手指按上去时向上找最近的滚动区域，没接管过就地补装（放在判定模式之前：同一次按下就算进滑动区） | `_ScrollWatcher` / `_AdoptScrollArea` / `InstallScrollWatcher` / `EnableTouchScroll` |
 | **导入本地漫画 / 导入本地图片卡死** | Android 上不再用 `QFileDialog`（它会创建一个回不来的顶层窗口 + 嵌套模态循环），改为**主窗口内的子控件选择器** + 嵌套 `QEventLoop`（不创建任何顶层窗口）；桌面端原样转发 `QFileDialog` | `tools/mobile_file_dialog.py` |
 | **任何未捕获的 python 异常 = 闪退**：`sys.excepthook` 里弹出的 `QErrorMessage` 同样是独立顶层窗口，异常一发生就撞上面同一个 `eglSurface()` 死锁保护器 abort（回调/解析/网络里任何一个漏网异常都会被放大成整进程退出）；异常若来自工作线程，还会变成"在非 GUI 线程里建 QWidget" | Android 下运行期错误框改成主窗口内的**子控件提示条**(`MsgLabel.ShowErrorEx`)，非主线程只记日志（`Log.Error` 已经写过完整回溯，adb 能拉到）；桌面端行为不变，仍弹原来的 `QErrorMessage` | `qt_error.showError2` / `ShowAndroidError` |
+| **开启 HTTP3/ECH 后 CDN 请求大量失败**：`CurlHttpVersion.V3` 走 UDP，封掉 UDP 443 的网络里 QUIC 握手一直不返回、libcurl 自带的 fallback 只在"握手失败"时才触发(一直等不到就只剩超时)，**每个请求都白等一轮**；ECH 配置每 15 分钟从 `cloudflare-ech.com` 轮换一次，过期时服务端回 `ECH_REJECTED`，TLS 握手直接失败 | 失败后**降级并记住**：`DowngradeTlsOptions` 关掉 HTTP/3 / ECH 重试一次(`ECH_REJECTED` 先关 ECH)，`Http3EchFallback` 记住后让**后续请求直接走 HTTP/2 + 普通 SNI**；垫片下 `IsAdvancedTlsSupported()=False` 自动跳过(Android 行为不变)；重存"代理设置"即重置再试 | `req.DowngradeTlsOptions` / `req.Http3EchFallback` / `Server._Send` / `DownloadBookHandler` |
 | 系统托盘不存在 | Android 下不创建 `QSystemTrayIcon`，关闭窗口即退出 | `platform_mobile.SupportSystemTray` |
 | 旋转屏幕 | 窗口尺寸变化时重算宽度上限、抽屉几何、滚动区域，并重跑一次拆行/折行/封面尺寸 | `mobile_ui.OnShown` / `OnResize` |
 
@@ -556,6 +557,57 @@ Python 子类还没构造完（属性/重写都还没挂上，`isinstance` 都�
 > 松手惯性到 852px）。`QGraphicsView`（看图界面 / 超分预览）**故意不接管**：它的拖动是它
 > 自己的翻页/平移逻辑（`InstallReaderDrag`），所以清点时的唯一例外就是它。
 
+### 3.9 开启 HTTP3/ECH 后"CDN 请求大量失败"（失败自动降级并记住）
+
+**现象**：设置里勾上"启用HTTP3（UDP）"、"启用ECH"后，日志里成片出现
+`error:XXXReq, ech:True, url:..., h3:True`（超时 / 连接错误 / `ECH_REJECTED`），
+接口和 CDN 图片都大量失败（不崩溃，只是全都不通）；把两个勾去掉就恢复。
+
+**根因**：这两项都能提速，但都会让**每一个**请求都白等一轮：
+
+* **HTTP/3 走 UDP**。封掉 UDP 443 的网络里 QUIC 握手一直收不到回应，而 libcurl 自带的
+  fallback 只在"HTTP/3 连接**建立失败**"时才触发 —— 一直等不到就只能等到超时，
+  HTTP/2 那条路根本没机会走。它还不看域名：`GetJmServerReq` 的 `bytepluses.com`
+  （JM 服务器列表）、DOH 用的 `jpacg.cc` 这些**根本不说 QUIC** 的域名也会被设成 HTTP/3。
+* **ECH 配置是"拉一次用很久"**：`login_new_view.InitEchConfig` 每 15 分钟从
+  `cloudflare-ech.com` 拉一次写进 `QtOwner().echConfig`，再作为 `ecl:<base64>` 套到
+  所有 CF 域名上；配置轮换/过期时服务端直接回 `ECH_REJECTED`，TLS 握手失败。
+* **`curl_cffi` 没编出 HTTP/3** 时，设 `HTTP_VERSION=3` 会直接报
+  `CURLE_UNSUPPORTED_PROTOCOL`（也是异常）。
+
+**修法**（`src/server/`，与平台无关；垫片下自动跳过，所以 Android 现有行为一字不变）：
+
+| 位置 | 改动 |
+| --- | --- |
+| `req.ServerReq.DowngradeTlsOptions`（新增） | 请求失败后关掉 HTTP/3 / ECH 并重试一次；`ECH_REJECTED` 先关 ECH，其余先关 HTTP/3；每项只关一次，都关完就返回 `False`（不会死循环） |
+| `req.Http3EchFallback`（新增） | **进程级的"用完就关"开关**：只要有一个请求因为它们失败就整体记住，后续请求 `SetCurlOpt` 直接不再开 —— 否则"每个请求各超时一次"的"大量失败"依旧存在 |
+| `req.IsAdvancedTlsSupported`（新增） | 垫片在 `android/shims/curl_cffi/__init__.py` 里声明 `HTTP3_ECH_SUPPORTED=False`，这里返回 `False`：降级重试只会多打一轮请求，直接不做 |
+| `Server._Send` / `DownloadBookHandler` | 接口请求与 CDN 图片下载失败后各降级重试一次。**测速故意不降级**：它是诊断，要让用户看到 h3 到底通不通 |
+| `Server._Send`（附带修） | 每次尝试开头把 `task.status` 复位成 `Status.Ok` —— 否则"重试成功了，handler 还按上一次的错误状态当失败处理"（下载那条路的 `ReDownload` 本来就是这么做的） |
+| `login_proxy_new_widget.SaveSetting` | 用户重新保存"代理设置"就 `ResetHttp3EchFallback()`：换网络/换 IP 后给一次重试机会 |
+
+**回归**（新增 `android/tools/host_test_net_fallback.py`，已进 `wsl_run_smoke.sh` 第 7 项，
+不联网、用假 session 驱动真实调用点）：先断言垫片下**不降级、不改状态**（Android 行为不变），
+再模拟真 `curl_cffi` 验证"第一轮只关 HTTP/3 → 还失败再关 ECH → 关完不再重试"、
+"记住后新请求不再开"、"重存代理设置后重置"、"`ECH_REJECTED` 优先关 ECH 而保留 HTTP/3"，
+最后驱动 `Server._Send`（接口，含"测速不降级"）与 `DownloadBookHandler`（CDN 图片）：
+
+```
+[ok] 垫片下 HTTP/3/ECH 不触发降级重试(不改变 Android 现有行为)
+[ok] HTTP/3、ECH 失败自动降级并记住(ECH 被拒先关 ECH)，Reset 后重置
+[ok] 接口失败一次: 关 HTTP/3 重试成功 -> [{'ver': 10005, 'ech': True}, {'ver': 10002, 'ech': True}]
+[ok] 接口连失败两次: 再关 ECH 重试 -> [{'ver': 10005, 'ech': True}, {'ver': 10002, 'ech': True}, {'ver': 10002, 'ech': False}]
+[ok] 关完还失败不再重试, 调用次数 = 3
+[ok] 测速 ping 不降级(让用户看到 h3 到底通不通)
+[ok] CDN 图片失败: 关 HTTP/3 后重投(ReDownload)
+
+结果: 全部通过
+```
+
+> 顺带修掉一个老问题：`Server._Send` 重试（切 URL / 降级）时**没有把 `task.status` 复位**，
+> 于是"重试成功了，handler 还按上一次的错误状态当失败处理"。现在每次尝试开头都置
+> `Status.Ok`（下载那条路 `ReDownload` 本来就是这么做的）。
+
 ---
 
 ## 4. Waifu2x on 高通 NPU
@@ -715,7 +767,7 @@ adb shell dumpsys package <包名> | grep -E "minSdk|targetSdk"
 ## 7. 已知限制
 
 1. `curl_cffi` 垫片没有 TLS 指纹伪装，遇到 Cloudflare 严格模式可能 403 —— 正式分发请编原生 recipe。
-2. QNN 后端只支持 HTTP/1.1 时代的同步取图流程不受影响；网络层的 HTTP/2-HTTP/3、ECH 在垫片下不可用（原生 curl_cffi 可用）。
+2. QNN 后端只支持 HTTP/1.1 时代的同步取图流程不受影响；网络层的 HTTP/2-HTTP/3、ECH 在垫片下不可用（原生 curl_cffi 可用）。垫片会声明 `HTTP3_ECH_SUPPORTED=False`，业务层据此**跳过"HTTP/3、ECH 失败降级重试"**（见 3.9），所以打开这两个开关在 Android 上既不会生效也不会因此失败。
 3. cunet 模型在 NPU 上默认复用 anime 模型（质量接近，速度更好）；要精确一致需要自己导出 cunet onnx。
 4. 看图界面（`read_view`）沿用桌面端的自绘滚动逻辑，未挂 QScroller；竖屏条漫滚动本来就是它的强项。
 5. `Android 14 以下` 未做兼容（用户明确要求）：`minSdk 34`。

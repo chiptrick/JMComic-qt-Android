@@ -33,7 +33,8 @@
 ## 与上游的差异
 
 本分支只做加法，桌面端行为不变（移动端适配层都用 `tools/platform_mobile.IsAndroid()` 和
-`tools/mobile_ui.IsEnabled()` 做了门控，非 Android 直接短路）。
+`tools/mobile_ui.IsEnabled()` 做了门控，非 Android 直接短路）。唯一例外是网络层的
+"HTTP/3、ECH 失败自动降级"（见下），它对桌面端同样生效 —— 那本来就是修 bug。
 
 | 改动 | 说明 |
 | --- | --- |
@@ -41,6 +42,7 @@
 | **竖屏界面适配** | 抽屉式导航、首页双列封面、详情页堆叠、返回键处理、无系统托盘时降级、最小尺寸放宽、应用内文件选择器（替换在 Android 上会卡死的 `QFileDialog`） |
 | **Waifu2x 走高通 NPU** | `libsr_qnn.so`（QNN/HTP）+ `onnxruntime-android-qnn`，9 组共 39 个固定 shape 模型，可选 fp16 / 量化 |
 | **两处 Android 专有的坑** | `bootstrap=qt` 下 AES 解密必须补 `ctypes.util`；`PYTHONOPTIMIZE=2` 会让 ctypes 后端在 Android 上必死 —— 详见 [android/README.md](android/README.md) §3.1/§3.2 |
+| **HTTP/3、ECH 失败自动降级** | 打开这两个选项遇到 UDP 被封 / ECH 配置过期时，失败一次就整体关掉、改走 HTTP/2 + 普通 SNI，不再让每个请求都白等一轮超时 —— 详见 [android/README.md](android/README.md) §3.9 |
 
 ## 下载与安装
 

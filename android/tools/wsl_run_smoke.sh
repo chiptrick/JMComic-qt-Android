@@ -48,6 +48,7 @@ echo "===== 1. 语法编译(python3.11，目标版本) ====="
     android/tools/host_test_crypto_android.py \
     android/tools/host_test_image_pipeline.py \
     android/tools/host_test_file_dialog.py \
+    android/tools/host_test_net_fallback.py \
     && echo "[ok] py3.11 编译通过" || echo "[FAIL] py3.11 编译失败"
 
 run() {
@@ -70,7 +71,9 @@ run "5. 图片解密管线回归(拼图/QImage 线程/超时)" android/tools/hos
 image=$?
 run "6. 应用内文件选择器回归" android/tools/host_test_file_dialog.py
 picker=$?
+run "7. HTTP/3、ECH 失败降级回归" android/tools/host_test_net_fallback.py
+netfb=$?
 
 echo
-echo "结果: smoke=$smoke interfaces=$iface crypto=$crypto image=$image picker=$picker"
-[ "$smoke" -eq 0 ] && [ "$iface" -eq 0 ] && [ "$crypto" -eq 0 ] && [ "$image" -eq 0 ] && [ "$picker" -eq 0 ]
+echo "结果: smoke=$smoke interfaces=$iface crypto=$crypto image=$image picker=$picker netfb=$netfb"
+[ "$smoke" -eq 0 ] && [ "$iface" -eq 0 ] && [ "$crypto" -eq 0 ] && [ "$image" -eq 0 ] && [ "$picker" -eq 0 ] && [ "$netfb" -eq 0 ]
