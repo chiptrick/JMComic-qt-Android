@@ -18,7 +18,7 @@ echo
 echo "=== .buildozer/android/app 是否包含最新改动 ==="
 APP="$A/.buildozer/android/app"
 for pair in \
-    "app_src/tools/mobile_ui.py:_DrawerScrim" \
+    "app_src/tools/mobile_ui_drawer.py:_DrawerScrim" \
     "app_src/server/req.py:import urllib.request" \
     "app_src/server/server.py:import urllib.request" \
     "app_src/view/user/login_proxy_new_widget.py:import urllib.request" \

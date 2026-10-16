@@ -17,6 +17,15 @@ echo "===== 1. 语法编译(python3.11，目标版本) ====="
 "$PY" -m py_compile \
     src/tools/platform_mobile.py \
     src/tools/mobile_ui.py \
+    src/tools/mobile_ui_base.py \
+    src/tools/mobile_ui_hooks.py \
+    src/tools/mobile_ui_window.py \
+    src/tools/mobile_ui_drawer.py \
+    src/tools/mobile_ui_layout.py \
+    src/tools/mobile_ui_reader.py \
+    src/tools/mobile_ui_grid.py \
+    src/tools/mobile_ui_touch.py \
+    src/tools/mobile_ui_diag.py \
     src/tools/mobile_file_dialog.py \
     src/component/widget/comic_item_widget.py \
     src/component/list/comic_list_widget.py \

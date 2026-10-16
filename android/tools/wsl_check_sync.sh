@@ -11,6 +11,15 @@ APP="$SYNC/android/app_src"
 
 FILES=(
     src/tools/mobile_ui.py
+    src/tools/mobile_ui_base.py
+    src/tools/mobile_ui_hooks.py
+    src/tools/mobile_ui_window.py
+    src/tools/mobile_ui_drawer.py
+    src/tools/mobile_ui_layout.py
+    src/tools/mobile_ui_reader.py
+    src/tools/mobile_ui_grid.py
+    src/tools/mobile_ui_touch.py
+    src/tools/mobile_ui_diag.py
     src/tools/platform_mobile.py
     src/tools/sr_backend.py
     src/tools/tool.py
@@ -57,7 +66,11 @@ done
 echo
 echo "仓库 vs 构建树: 相同 $same, 不同/缺失 $diff"
 echo "app_src 是否已生成: $([ -d "$APP" ] && echo "是 ($(ls "$APP" | wc -l) 项)" || echo 否)"
-for f in src/tools/mobile_ui.py src/tools/tool.py src/task/task_qimage.py \
+for f in src/tools/mobile_ui.py src/tools/mobile_ui_base.py src/tools/mobile_ui_hooks.py \
+         src/tools/mobile_ui_window.py src/tools/mobile_ui_drawer.py src/tools/mobile_ui_layout.py \
+         src/tools/mobile_ui_reader.py src/tools/mobile_ui_grid.py src/tools/mobile_ui_touch.py \
+         src/tools/mobile_ui_diag.py \
+         src/tools/tool.py src/task/task_qimage.py \
          src/component/list/comic_list_widget.py; do
     if [ -d "$APP" ] && [ -f "$APP/${f#src/}" ]; then
         if diff -q "$APP/${f#src/}" "$REPO/$f" > /dev/null; then
@@ -82,8 +95,8 @@ apk = sys.argv[1]
 checks = [
     ("tools/tool.pyc", b"SegmentationPictureQt", "Qt 分割还原(tool.py)"),
     ("task/task_qimage.pyc", b"segQt", "Qt 分割计数(task_qimage.py)"),
-    ("tools/mobile_ui.pyc", "图片分割自检".encode(), "图片分割自检(mobile_ui.py)"),
-    ("tools/mobile_ui.pyc", b"ScheduleGridCoverSize", "首屏网格去抖重排(mobile_ui.py)"),
+    ("tools/mobile_ui_diag.pyc", "图片分割自检".encode(), "图片分割自检(mobile_ui_diag.py)"),
+    ("tools/mobile_ui_grid.pyc", b"ScheduleGridCoverSize", "首屏网格去抖重排(mobile_ui_grid.py)"),
     ("component/list/comic_list_widget.pyc", b"ScheduleGridCoverSize",
      "加完封面就排重排(comic_list_widget.py)"),
 ]

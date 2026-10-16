@@ -6,7 +6,7 @@
 >
 > * `android/` 整个目录 —— 打包工程、`libsr_qnn.so` 原生代码（C++/QNN）、模型转换工具、
 >   全部构建与验证脚本、`android/README.md`
-> * `src/` 下的移动端适配层与相关改动 —— `tools/mobile_ui.py`、`tools/platform_mobile.py`、
+> * `src/` 下的移动端适配层与相关改动 —— `tools/mobile_ui*.py`、`tools/platform_mobile.py`、
 >   `tools/mobile_file_dialog.py`、`tools/sr_backend.py`、`tools/waifu2x_check.py`，
 >   以及各 `view/` / `task/` / `widget/` 里的移动端分支
 > * 本 README、[NOTICE.md](NOTICE.md)、`android/tools/README.md` 等文档
