@@ -6,9 +6,14 @@
  *   1. QNN EP 不支持动态 shape，所以每个模型在离线准备阶段就把输入固定为
  *      N×3×T×T(T 见 models.txt 的 tile 字段)；引擎把原图切成 T×T 的块，
  *      每块用边缘像素补齐后再送 NPU，回读后按有效区域拼接，保证无缝。
- *   2. 优先 HTP(fp16 精度)；失败时依次退化：HTP(允许 CPU 兜底) -> CPU EP。
- *   3. 支持 QNN context binary 缓存(第二次启动大幅加快图编译)。
+ *   2. 优先 HTP；失败时依次退化：HTP+优化项 -> HTP+基础项 -> HTP(允许 CPU 兜底) -> CPU EP。
+ *   3. 支持 QNN context binary 缓存(第二次启动大幅加快图编译)，默认内嵌成单文件。
  *   4. 无第三方图像库依赖：解码/编码由 Python 侧 Qt 完成，C 侧只处理 RGB 原始像素。
+ *   5. 合并了 QNN/HTP 提速项(均可用环境变量关闭，见 models/README.md)：
+ *      VTCM 大小、图编译优化档位、fp16、会话优先级(qnn_context_priority)、
+ *      HTP 共享内存零拷贝 I/O(enable_htp_shared_memory_allocator)。
+ *   6. HTP 子系统重启(SSR)会让 ORT 会话失效，引擎检测到 ENGINE_ERROR 后自动重建
+ *      会话并重试当前分块，避免超分能力永久失效(见 QNN EP 文档 HTP SubSystem Restart)。
  */
 #include "sr_qnn.h"
 
@@ -38,7 +43,7 @@
 // ---------------------------------------------------------------- 基础工具
 namespace {
 
-const char* kVersion = "sr_qnn 1.1.0 (ONNX Runtime QNN EP / HEXAGON HTP)";
+const char* kVersion = "sr_qnn 1.2.0 (ONNX Runtime QNN EP / HEXAGON HTP)";
 
 std::mutex g_errMutex;
 std::string g_lastError;
@@ -114,6 +119,14 @@ int EnvInt(const char* name, int def) {
         return def;
     }
     return atoi(v);
+}
+
+bool EnvFlag(const char* name, bool def) {
+    const char* v = getenv(name);
+    if (!v || !*v) {
+        return def;
+    }
+    return std::string(v) != "0";
 }
 
 // ---------------------------------------------------------------- 半精度转换
@@ -411,6 +424,15 @@ struct SessionHolder {
     int outTileW = 0;
     int outTileH = 0;
     std::string modelKey;
+
+    // 释放持有的 ORT 会话：会话被从缓存表摘除(SSR 恢复)或引擎停止时由共享指针归零触发。
+    // 注意：会话一旦交给本结构，其他地方不得再自行 Release(见 srq_stop / ReadSessionInfo)。
+    ~SessionHolder() {
+        if (session != nullptr && g_api != nullptr) {
+            g_api->ReleaseSession(session);
+            session = nullptr;
+        }
+    }
 };
 
 // 定义在下面；GetSession 里要用它做一次探针推理量真实输出边长
@@ -454,6 +476,21 @@ bool HasQnnLib() {
     return false;
 }
 
+/* HTP 共享内存分配器需要 rpcmem 库(libcdsprpc.so)。ORT 的 RpcMemLibrary 构造时会
+ * dlopen 它并取 rpcmem_alloc / rpcmem_free / rpcmem_to_fd 三个符号，任何一步失败都会
+ * 抛异常并导致 QNN EP 挂载失败。这里先按同样条件探测，只有确实可用才打开该优化项。 */
+bool SharedMemoryAvailable() {
+    void* handle = dlopen("libcdsprpc.so", RTLD_NOW | RTLD_LOCAL);
+    if (handle == nullptr) {
+        return false;
+    }
+    bool ok = dlsym(handle, "rpcmem_alloc") != nullptr
+              && dlsym(handle, "rpcmem_free") != nullptr
+              && dlsym(handle, "rpcmem_to_fd") != nullptr;
+    dlclose(handle);
+    return ok;
+}
+
 void PrepareQnnSearchPath() {
     Dl_info info;
     if (dladdr(reinterpret_cast<void*>(&srq_init), &info) == 0 || info.dli_fname == nullptr) {
@@ -474,9 +511,10 @@ void PrepareQnnSearchPath() {
     return;
 }
 
-/* 创建一个会话；useHtp 为 true 时挂 QNN EP */
+/* 创建一个会话；useHtp 为 true 时挂 QNN EP
+ * rich=true 时额外挂 HTP 提速项(会话优先级 / 共享内存零拷贝 / 内嵌缓存 / VTCM 共享) */
 OrtSession* CreateSession(const std::string& modelPath, const ModelEntry& entry, bool useHtp,
-                          bool strictHtp, bool useContextCache, std::string& err) {
+                          bool strictHtp, bool useContextCache, bool rich, std::string& err) {
     OrtSessionOptions* options = nullptr;
     OrtStatus* status = g_api->CreateSessionOptions(&options);
     if (status != nullptr) {
@@ -523,6 +561,26 @@ OrtSession* CreateSession(const std::string& modelPath, const ModelEntry& entry,
         std::string htpArch = EnvStr("JM_QNN_HTP_ARCH");
         if (!htpArch.empty()) {
             addOption("htp_arch", htpArch);
+        }
+        // ---- 合并的 QNN/HTP 提速项 -------------------------------------------------
+        // 全部可用环境变量关闭；任何一个不被当前 ORT/QNN/机型支持时，GetSession 会
+        // 自动退回"基础项"，因此这些优化项不会把原本能跑的设备降级到 CPU EP。
+        if (rich) {
+            // 会话优先级：DSP 上同时有其它 QNN 负载时降低本任务的排队延迟。
+            addOption("qnn_context_priority", EnvStr("JM_QNN_PRIORITY", "high"));
+            // HTP 共享内存分配器：CPU 与 HTP 之间零拷贝共享 I/O 张量，减少每块 tile
+            // 的来回复制(需 rpcmem/libcdsprpc.so，探测不到就自动跳过)。
+            if (EnvFlag("JM_QNN_SHARED_MEM", true)) {
+                if (SharedMemoryAvailable()) {
+                    addOption("enable_htp_shared_memory_allocator", "1");
+                } else if (g_debug) {
+                    printf("[sr_qnn] rpcmem(libcdsprpc.so) 不可用，跳过 HTP 共享内存分配器\n");
+                }
+            }
+            // 多会话共享 VTCM 备份缓冲(省内存)；与 context 内嵌缓存冲突，故默认关闭。
+            if (EnvFlag("JM_QNN_VTCM_SHARE", false)) {
+                addOption("enable_vtcm_backup_buffer_sharing", "1");
+            }
         }
         // 此时 keysStore/valuesStore 不会再变，取 c_str() 是安全的
         std::vector<const char*> keys;
@@ -571,10 +629,16 @@ OrtSession* CreateSession(const std::string& modelPath, const ModelEntry& entry,
                 // 缓存损坏，删除后重来
                 remove(ctxPath.c_str());
             }
-            return CreateSession(modelPath, entry, useHtp, strictHtp, false, err);
+            return CreateSession(modelPath, entry, useHtp, strictHtp, false, rich, err);
         }
         g_api->AddSessionConfigEntry(options, "ep.context_enable", "1");
         g_api->AddSessionConfigEntry(options, "ep.context_file_path", ctxPath.c_str());
+        // 把 context binary 内嵌进生成的单个 onnx(默认)，避免 .onnx 与分离的 .bin
+        // 一旦不同步就整块缓存失效；与 VTCM 备份缓冲共享冲突，故后者开启时让位。
+        if (rich && !EnvFlag("JM_QNN_VTCM_SHARE", false)) {
+            std::string embed = EnvStr("JM_QNN_EMBED_CTX", "1");
+            g_api->AddSessionConfigEntry(options, "ep.context_embed_mode", embed.c_str());
+        }
     }
 
     OrtSession* session = nullptr;
@@ -652,14 +716,21 @@ std::shared_ptr<SessionHolder> GetSession(const ModelEntry& entry, std::string& 
     bool wantHtp = g_device <= 0 && HasQnnLib();
     std::string lastErr;
     if (wantHtp) {
-        // 1) 严格 HTP(整图跑在 NPU 上)
-        OrtSession* session = CreateSession(path, entry, true, true, true, lastErr);
+        // 1) 严格 HTP + 全部提速项(整图跑在 NPU 上)
+        OrtSession* session = CreateSession(path, entry, true, true, true, true, lastErr);
+        if (session == nullptr) {
+            if (g_debug) {
+                printf("[sr_qnn] 严格 HTP(优化项) 失败，改用基础项: %s\n", lastErr.c_str());
+            }
+            // 2) 严格 HTP + 基础项(提速项本身可能不被当前 QNN/机型支持)
+            session = CreateSession(path, entry, true, true, true, false, lastErr);
+        }
         if (session == nullptr) {
             if (g_debug) {
                 printf("[sr_qnn] 严格 HTP 失败: %s\n", lastErr.c_str());
             }
-            // 2) HTP + 允许 CPU 兜底
-            session = CreateSession(path, entry, true, false, false, lastErr);
+            // 3) HTP + 允许 CPU 兜底
+            session = CreateSession(path, entry, true, false, false, false, lastErr);
         }
         if (session != nullptr) {
             holder->session = session;
@@ -668,8 +739,8 @@ std::shared_ptr<SessionHolder> GetSession(const ModelEntry& entry, std::string& 
         }
     }
     if (holder->session == nullptr) {
-        // 3) CPU EP 兜底，保证功能可用(慢，但不会让用户失去超分能力)
-        OrtSession* session = CreateSession(path, entry, false, false, false, lastErr);
+        // 4) CPU EP 兜底，保证功能可用(慢，但不会让用户失去超分能力)
+        OrtSession* session = CreateSession(path, entry, false, false, false, false, lastErr);
         if (session == nullptr) {
             err = lastErr;
             return nullptr;
@@ -682,6 +753,7 @@ std::shared_ptr<SessionHolder> GetSession(const ModelEntry& entry, std::string& 
     }
     if (!ReadSessionInfo(holder.get())) {
         g_api->ReleaseSession(holder->session);
+        holder->session = nullptr;   // 避免 SessionHolder 析构时二次释放
         err = "读取模型输入输出信息失败";
         return nullptr;
     }
@@ -839,6 +911,40 @@ bool RunTile(const std::shared_ptr<SessionHolder>& holder, const std::vector<flo
     return true;
 }
 
+/* HTP 子系统重启(SSR)后 ORT 会话即不可再用，官方要求上层重建会话(见 QNN EP 文档
+ * "HTP SubSystem Restart")。这里在检测到 ENGINE_ERROR/SSR 时把坏会话从缓存表摘掉
+ * 并重建一次；摘除时故意不立刻 Release(可能仍有其它工作线程在用)，交给共享指针归零
+ * 后由 SessionHolder 析构释放。 */
+bool RecoverHtpSession(const ModelEntry& entry, std::shared_ptr<SessionHolder>& holder,
+                       std::string& err) {
+    if (!holder->htp || !EnvFlag("JM_QNN_SSR_RECOVER", true)) {
+        return false;
+    }
+    if (err.find("ENGINE_ERROR") == std::string::npos && err.find("SSR") == std::string::npos) {
+        return false;
+    }
+    {
+        std::lock_guard<std::mutex> lock(g_sessionMutex);
+        auto it = g_sessions.find(holder->modelKey);
+        if (it != g_sessions.end() && it->second == holder) {
+            g_sessions.erase(it);
+        }
+    }
+    std::string rebuildErr;
+    auto fresh = GetSession(entry, rebuildErr);
+    if (fresh == nullptr) {
+        if (g_debug) {
+            printf("[sr_qnn] HTP 会话重建失败: %s\n", rebuildErr.c_str());
+        }
+        return false;
+    }
+    holder = fresh;
+    if (g_debug) {
+        printf("[sr_qnn] HTP 会话已重建(SSR 恢复)\n");
+    }
+    return true;
+}
+
 /* 处理一个任务：分块推理 + 拼接 + 目标尺寸缩放 */
 int ProcessTask(const std::shared_ptr<SrTask>& task, std::shared_ptr<SrOut>& result) {
     auto begin = std::chrono::steady_clock::now();
@@ -945,7 +1051,14 @@ int ProcessTask(const std::shared_ptr<SrTask>& task, std::shared_ptr<SrOut>& res
             }
             int outW = static_cast<int>(tile) * nativeScale;
             int outH = static_cast<int>(tile) * nativeScale;
-            if (!RunTile(holder, input, tile, output, outW, outH, err)) {
+            bool tileOk = RunTile(holder, input, tile, output, outW, outH, err);
+            if (!tileOk && RecoverHtpSession(*entry, holder, err)) {
+                // 会话已重建：重置输出几何后重试本块
+                outW = static_cast<int>(tile) * nativeScale;
+                outH = outW;
+                tileOk = RunTile(holder, input, tile, output, outW, outH, err);
+            }
+            if (!tileOk) {
                 result->status = -13;
                 SetError(err);
                 return -13;

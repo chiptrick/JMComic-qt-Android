@@ -20,6 +20,7 @@ python android/tools/prepare_models.py --src D:/waifu2x_onnx --tile 192 --verify
 # 3) 想要 HTP 上最快，再生成量化模型(QNN HTP 原生只吃量化模型)
 python android/tools/prepare_models.py --src D:/waifu2x_onnx --tile 192 \
        --quantize --calib-dir D:/anime_pics
+#    默认 uint16 激活 + uint8 权重(minmax 标定)；--act-type uint8 更快，--per-channel 更准
 
 # 4) 生成结果在本目录(或 --out 指定目录)，文件名要和 models.txt 对上
 ```
@@ -75,6 +76,30 @@ cunet 不是"输入多大输出就乘几倍"的等变网络，实测（`--tile 1
 `prepare_models.py --verify` 仍会打印真实输出边长，可用来核对手上的模型属于哪一类。
 
 
+## HTP 提速项(引擎已内置)
+
+`libsr_qnn.so` 挂 QNN EP 时会启用下列来自 QNN EP 官方文档的提速项。**任何一项不被当前
+ORT/QNN/机型支持，引擎会自动退回“基础项”再退回 CPU EP**，所以这些优化不会让原本能跑的
+设备丢掉 NPU：
+
+| 项 | 作用 |
+| --- | --- |
+| VTCM（`JM_QNN_VTCM`=8MB） | 给 HTP 更大的片上暂存，卷积类超分网络更快 |
+| 图编译优化档位（`JM_QNN_FINALIZE`=2） | 编译更久，但运行时的图更优 |
+| fp16（`JM_QNN_FP16`=1） | fp32 模型以 fp16 在 HTP 上推理，带宽/内存减半 |
+| 会话优先级（`JM_QNN_PRIORITY`=high） | DSP 上同时有其它 QNN 负载时降低排队延迟 |
+| HTP 共享内存零拷贝 I/O（`JM_QNN_SHARED_MEM`=1） | CPU 与 HTP 之间零拷贝共享 I/O 张量，省掉每块 tile 的来回复制（需 `libcdsprpc.so`，探测不到自动跳过） |
+| context 缓存内嵌（`JM_QNN_EMBED_CTX`=1） | 缓存做成单个 onnx，避免 `.onnx`/`.bin` 分离后不同步就整块失效 |
+| SSR 会话重建（`JM_QNN_SSR_RECOVER`=1） | HTP 子系统重启（SSR）后自动重建会话并重试当前分块，超分不会永久失效 |
+
+量化模型建议：默认 `uint16` 激活 + `uint8` 权重（`minmax` 标定，QNN 推荐），追求速度可用
+`--act-type uint8`，追求精度可加 `--per-channel`。
+
+参考：ONNX Runtime QNN EP 文档的 *EP Provider Options*、*QNN context binary cache feature*、
+*HTP SubSystem Restart* 小节（<https://onnxruntime.ai/docs/execution-providers/QNN-ExecutionProvider.html>），
+以及 ORT 1.23.2 源码 `onnxruntime/core/providers/qnn/qnn_execution_provider.cc`、
+`.../python/tools/quantization/execution_providers/qnn/quant_config.py`。
+
 ## 参数调试(环境变量)
 
 | 变量 | 默认 | 说明 |
@@ -84,6 +109,11 @@ cunet 不是"输入多大输出就乘几倍"的等变网络，实测（`--tile 1
 | `JM_QNN_FP16` | `1` | fp32 模型以 fp16 精度在 HTP 上推理 |
 | `JM_QNN_FINALIZE` | `2` | 图编译优化档位，越大越慢但更快 |
 | `JM_QNN_VTCM` | `8` | HTP VTCM 大小(MB) |
+| `JM_QNN_PRIORITY` | `high` | QNN 上下文优先级：`low`/`normal`/`normal_high`/`high` |
+| `JM_QNN_SHARED_MEM` | `1` | HTP 共享内存零拷贝 I/O(需 rpcmem/`libcdsprpc.so`) |
+| `JM_QNN_VTCM_SHARE` | `0` | 多会话共享 VTCM 备份缓冲(省内存；与缓存内嵌互斥) |
+| `JM_QNN_EMBED_CTX` | `1` | context 缓存内嵌成单个 onnx |
+| `JM_QNN_SSR_RECOVER` | `1` | HTP 子系统重启后自动重建会话 |
 | `JM_QNN_SOC_MODEL` / `JM_QNN_HTP_ARCH` | 空 | 机型需要时显式指定(见 QNN SDK) |
 | `JM_SR_CACHE` | `models/context` | QNN context binary 缓存目录 |
 | `JM_SR_MODELS` | 应用私有目录 | 模型目录 |

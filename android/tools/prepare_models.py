@@ -15,6 +15,8 @@ python prepare_models.py --src D:/waifu2x_onnx --tile 192 --fp16
 
 # 3) 生成量化模型(QNN HTP 原生只支持量化模型，速度最快，需要 onnxruntime x64)
 python prepare_models.py --src D:/waifu2x_onnx --tile 192 --quantize --calib-dir D:/anime_pics
+#    默认 uint16 激活 + uint8 权重(minmax 标定)；要更快加 --act-type uint8，
+#    要更准加 --per-channel(逐通道量化权重)
 
 # 4) 校验模型能不能跑(会打印输入输出信息与输出取值范围)
 python prepare_models.py --src D:/waifu2x_onnx --tile 192 --verify
@@ -126,12 +128,18 @@ def ConvertFp16(srcPath, outPath):
     return outPath
 
 
-def Quantize(srcPath, outPath, calibDir, tile):
-    """ 生成 QNN 友好的 QDQ 量化模型(uint16 激活 + uint8 权重) """
+def Quantize(srcPath, outPath, calibDir, tile, actType="uint16", calibMethod="minmax", perChannel=False):
+    """ 生成 QNN 友好的 QDQ 量化模型(默认 uint16 激活 + uint8 权重)
+
+    actType: uint16(更准，默认) / uint8(更快，HTP 上激活只需 8bit)
+    calibMethod: minmax(QNN 推荐) / entropy / percentile
+    perChannel: 卷积/反卷积权重按通道量化，精度更好(个别网络不支持)
+    """
     try:
         import numpy as np
         import onnxruntime
         from onnxruntime.quantization import CalibrationDataReader, QuantType, quantize
+        from onnxruntime.quantization.calibrate import CalibrationMethod
         from onnxruntime.quantization.execution_providers.qnn import (get_qnn_qdq_config,
                                                                       qnn_preprocess_model)
     except ImportError as es:
@@ -176,13 +184,20 @@ def Quantize(srcPath, outPath, calibDir, tile):
     preproc = outPath + ".preproc.onnx"
     changed = qnn_preprocess_model(srcPath, preproc)
     target = preproc if changed else srcPath
+    act = {"uint8": QuantType.QUInt8, "uint16": QuantType.QUInt16}.get(actType, QuantType.QUInt16)
+    calib = {"minmax": CalibrationMethod.MinMax,
+             "entropy": CalibrationMethod.Entropy,
+             "percentile": CalibrationMethod.Percentile}.get(calibMethod, CalibrationMethod.MinMax)
     config = get_qnn_qdq_config(target, Reader(images),
-                                activation_type=QuantType.QUInt16,
-                                weight_type=QuantType.QUInt8)
+                                calibrate_method=calib,
+                                activation_type=act,
+                                weight_type=QuantType.QUInt8,
+                                per_channel=perChannel)
     quantize(target, outPath, config)
     if os.path.exists(preproc):
         os.remove(preproc)
-    print("  生成量化模型: {}".format(os.path.basename(outPath)))
+    print("  生成量化模型: {} (激活={}, 标定={}{})".format(
+        os.path.basename(outPath), actType, calibMethod, ", 逐通道" if perChannel else ""))
     return outPath
 
 
@@ -210,7 +225,8 @@ def Verify(modelPath, tile, scale):
     return True
 
 
-def ProcessOne(srcPath, outDir, tile, scale, name, doFp16, doQuant, calibDir, verify):
+def ProcessOne(srcPath, outDir, tile, scale, name, doFp16, doQuant, calibDir, verify,
+               actType="uint16", calibMethod="minmax", perChannel=False):
     target = name or MapName(srcPath)
     if not target:
         base = os.path.splitext(os.path.basename(srcPath))[0]
@@ -225,7 +241,8 @@ def ProcessOne(srcPath, outDir, tile, scale, name, doFp16, doQuant, calibDir, ve
     if doFp16:
         ConvertFp16(outPath, os.path.join(outDir, target.replace(".onnx", ".fp16.onnx")))
     if doQuant:
-        Quantize(srcPath, os.path.join(outDir, target.replace(".onnx", ".qdq.onnx")), calibDir, tile)
+        Quantize(srcPath, os.path.join(outDir, target.replace(".onnx", ".qdq.onnx")), calibDir, tile,
+                 actType, calibMethod, perChannel)
     return ok
 
 
@@ -241,6 +258,12 @@ def Main():
     parser.add_argument("--fp16", action="store_true", help="额外生成 fp16 模型")
     parser.add_argument("--quantize", action="store_true", help="额外生成 QDQ 量化模型(HTP 最快)")
     parser.add_argument("--calib-dir", default="", help="量化标定图片目录")
+    parser.add_argument("--act-type", choices=["uint16", "uint8"], default="uint16",
+                        help="量化激活类型：uint16 更准(默认)，uint8 更快")
+    parser.add_argument("--calib-method", choices=["minmax", "entropy", "percentile"], default="minmax",
+                        help="标定方法，默认 minmax(QNN 推荐)")
+    parser.add_argument("--per-channel", action="store_true",
+                        help="卷积/反卷积权重按通道量化(精度更好，个别网络不支持)")
     parser.add_argument("--verify", action="store_true", help="用 CPU 推理校验")
     args = parser.parse_args()
 
@@ -267,7 +290,8 @@ def Main():
     for srcPath in sources:
         scale = args.scale or GuessScale(os.path.basename(srcPath))
         okAll = ProcessOne(srcPath, outDir, args.tile, scale, args.name, args.fp16,
-                           args.quantize, args.calib_dir, args.verify) and okAll
+                           args.quantize, args.calib_dir, args.verify,
+                           args.act_type, args.calib_method, args.per_channel) and okAll
     print("\n输出目录: {}".format(outDir))
     print("把该目录整体拷贝到手机的 JM_SR_MODELS 目录(默认 /data/data/<包名>/files/waifu2x-models)，")
     print("或重新打包 APK(见 android/README.md)。")
