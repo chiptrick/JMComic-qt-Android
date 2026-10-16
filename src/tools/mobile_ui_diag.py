@@ -585,8 +585,8 @@ def _GuardLines():
         lines.append("key diag: 按键={} Key_Back={} 窗口事件={} back处理={}".format(
             mobile_ui.KeyDiagStats.get("key"), mobile_ui.KeyDiagStats.get("back"), mobile_ui.KeyDiagStats.get("window"),
             mobile_ui.BackStats.get("count")))
-        lines.append("back 统计: count={} minimize={} last={}".format(
-            mobile_ui.BackStats.get("count"), mobile_ui.BackStats.get("minimize"), mobile_ui.BackStats.get("last") or "-"))
+        lines.append("back 统计: count={} quit={} last={}".format(
+            mobile_ui.BackStats.get("count"), mobile_ui.BackStats.get("quit"), mobile_ui.BackStats.get("last") or "-"))
     except Exception as es:
         lines.append("guard lines failed: {}".format(es))
     return lines

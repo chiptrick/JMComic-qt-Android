@@ -1,8 +1,10 @@
 # coding:utf-8
 """ 顶层窗口守卫（延后 show/hide/close + 子控件覆盖层）+ 返回键 """
+import os
+import shutil
+import time
 from PySide6.QtCore import QEvent, QObject, Qt
 from PySide6.QtWidgets import QApplication, QDialog, QToolButton, QWidget
-import time
 from tools.log import Log
 from tools.mobile_ui_base import *  # noqa: F401,F403
 from tools.mobile_ui_base import (_DescribeWidget, _WidgetAlive, _WindowType)
@@ -258,55 +260,168 @@ def _VisibleTopWindow(mainView):
     return None
 
 
-def MinimizeToDesktop(mainView):
-    """ 根页面按返回：**不能**用 showMinimized()
+def _VisibleMaskDialog(mainView):
+    """ 找一个盖在主窗口上的遮罩对话框(登录/收藏夹/模型选择/目录选择等)
 
-    真机实测(Android 16 + Qt6.11.2)：`showMinimized()` 只把 Qt 窗口隐藏了，
-    Activity 仍然是 `topResumedActivity`、窗口 `mViewVisibility=VISIBLE` ——
-    Android 那边还停在前台，但 Qt 已经不再绘制，屏幕上就是一片空白：
-    **这正是用户报的"白屏"**。真正的"退到桌面"要调 Android 的
-    `moveTaskToBack(true)`，而这个包调不到：
-
-      * pyjnius 不可用：`jnius.so` 在真机上 dlopen 失败
-        (cannot locate symbol "WebView_AndroidGetJNIEnv"，bootstrap=qt 没有那个符号)
-      * PySide6 6.11 没有绑定 QJniObject / QAndroidJniObject
-
-    所以这里**保持窗口可见**，只给一句提示，让用户用系统的手势/Home 回桌面
-    (这也是 Android 的标准做法)，至少不会留下白屏。
+    这类对话框(BaseMaskDialog)在手机端都改成了主窗口里的**子控件覆盖层**
+    (见 MakeChildOverlay：第二个顶层窗口一渲染就会 abort)，所以
+    _VisibleTopWindow 找不到它们；但返回键必须能把它们收掉，否则会退到
+    对话框下面的页面去。加载框(LoadingDialog)不算 —— 它自动消失，且对触摸透明。
     """
-    mobile_ui.BackStats["minimize"] += 1
-    Log.Warn("back: 根页面(不退到后台, 见 MinimizeToDesktop 注释) windowState={} visible={}".format(
-        mainView.windowState().name if hasattr(mainView.windowState(), "name") else "?",
-        mainView.isVisible()))
     try:
-        if not getattr(mainView, "_jmBackHintShown", False):
-            mainView._jmBackHintShown = True
-            # 本地导入：qt_owner 会间接 import component.label.msg_label -> tools.mobile_ui，
-            # 模块顶层导入会绕成循环导入(文件名很长，见 git 历史里的 NameError)
-            from qt_owner import QtOwner
-            QtOwner().ShowMsgOne("已在首页：用系统手势或 Home 返回桌面")
+        from component.dialog.base_mask_dialog import BaseMaskDialog
+        for widget in mainView.findChildren(BaseMaskDialog):
+            if widget.isVisible():
+                return widget
     except Exception as es:
         Log.Error(es)
-    return "stay"
+    return None
+
+
+def GoHomePage(mainView):
+    """ 第一级页面按返回：回到首页(与点抽屉里的"首页"按钮一致)
+
+    清掉页面栈只留首页一档，避免"回首页"只是把首页压进栈里(那样再按一次
+    返回又会回到原页面，来回翻倍)。
+    """
+    try:
+        indexView = getattr(mainView, "indexView", None)
+        stack = getattr(mainView, "subStackWidget", None)
+        if indexView is None or stack is None:
+            return False
+        index = stack.indexOf(indexView)
+        if index < 0 or stack.currentIndex() == index:
+            return False
+        before = CurrentPageName(mainView)
+        mainView.SwitchWidgetAndClear(index)
+        Log.Warn("back: 回首页 {} -> {}".format(before, CurrentPageName(mainView)))
+        return True
+    except Exception as es:
+        Log.Error(es)
+    return False
+
+
+def QuitAppAndCleanup(mainView):
+    """ 首页连按两次返回键：退出 app，并清理后台进程与临时缓存
+
+    这里只做"快"的清理(发结束信号、清内存对象池、删临时缓存文件)：
+    join 线程这类可能卡住的操作留给 start.Run() 里 app.exec() 返回后的
+    main.Close()，否则退出前界面会先假停几秒(HTTP 线程可能正堵在一个请求里)。
+    """
+    mobile_ui.BackStats["quit"] += 1
+    Log.Warn("back: 连按两次返回键，退出 app 并清理后台进程/临时缓存")
+    try:
+        # 1. 看图界面还开着：存阅读历史、清图片、停定时器
+        readView = getattr(mainView, "readView", None)
+        if readView is not None:
+            try:
+                if getattr(mainView, "totalStackWidget", None) is not None \
+                        and mainView.totalStackWidget.currentIndex() == 1:
+                    readView.Close()
+                else:
+                    readView.Stop()
+            except Exception as es:
+                Log.Error(es)
+        # 2. 后台任务/worker 发结束信号(不 join，避免退出前卡界面)
+        from task.task_multi import TaskMulti
+        from task.task_qimage import TaskQImage
+        from task.task_waifu2x import TaskWaifu2x
+        for task in (TaskMulti(), TaskQImage(), TaskWaifu2x()):
+            try:
+                task.Stop()
+            except Exception as es:
+                Log.Error(es)
+        # 3. 内存里的图片对象池清掉(退出后反正要重建)
+        try:
+            from view.read.read_pool import QtReadImgPoolManager
+            pool = QtReadImgPoolManager()
+            pool.proxyItem.clear()
+            pool.pixMapItem.clear()
+        except Exception as es:
+            Log.Error(es)
+        # 4. 临时缓存(看图图片/超分结果/NAS 临时文件等可再生数据)落盘清理
+        ClearTempCache()
+    except Exception as es:
+        Log.Error(es)
+    # 5. 退出事件循环：exec() 返回后 start.Run() 还会做一次完整的 Close()
+    try:
+        from qt_owner import QtOwner
+        app = QtOwner().app
+        if app is not None:
+            app.quit()
+    except Exception as es:
+        Log.Error(es)
+    return
+
+
+def ClearTempCache():
+    """ 清理临时缓存目录里的内容(看图图片/超分结果等可再生数据)
+
+    只删目录里的条目、不删目录本身(下次启动 Setting.Init 会重建)；
+    配置/数据/日志都在各自的目录里，不受影响。
+    """
+    try:
+        from config.setting import Setting
+        cachePath = Setting.GetCachePath()
+        if not cachePath or not os.path.isdir(cachePath):
+            return 0
+        count = 0
+        for name in os.listdir(cachePath):
+            path = os.path.join(cachePath, name)
+            try:
+                if os.path.isdir(path) and not os.path.islink(path):
+                    shutil.rmtree(path, ignore_errors=True)
+                else:
+                    os.remove(path)
+                count += 1
+            except Exception as es:
+                Log.Error(es)
+        Log.Warn("back: 临时缓存已清理 {} ({} 项)".format(cachePath, count))
+        return count
+    except Exception as es:
+        Log.Error(es)
+    return 0
+
+
+def CancelBackQuit():
+    """ 主动切换页面(点抽屉/首页)后取消"连按两次返回键退出"的待退出状态
+
+    否则"在首页按过一次返回(提示过)，又去点了导航，再按返回"会在没看到提示的
+    情况下直接退出。返回键自己的分支在 HandleBackKey 开头已经清零，这里补上
+    "不走返回键的导航"。
+    """
+    mobile_ui._backQuitTick = 0.0
+    return
 
 
 def HandleBackKey(mainView):
     """ 返回键统一处理；返回 True 表示已接管(事件必须 accept，不能再往下传)
 
-    优先级(和桌面端语义一致，只是补上了菜单/根页面两档)：
-        1. 看图界面的工具菜单(是子控件，不是窗口)
-        2. 盖在上面的顶层窗口(提示条/对话框/加载框)
-        3. 导航抽屉
-        4. 看图中 -> 退出看图回到上级(书详情等)
-        5. 页面栈回退一层
-        6. 根页面 -> 退到后台(回桌面)
+    优先级(与顶栏左上角"返回"按钮走的是同一条逻辑)：
+        0. 弹出窗口(下拉框列表/右键菜单) -> 关闭
+        1. 看图界面的工具菜单 -> 收起菜单，回到看图界面
+        2. 盖在上面的顶层窗口(提示条/对话框/加载框) -> 关闭
+        3. 盖在上面的遮罩对话框(手机端是子控件覆盖层，不是顶层窗口) -> 关闭
+        4. 导航抽屉 -> 收起
+        5. 看图界面 -> 退出看图，回到漫画详情页
+        6. 其余页面 -> 页面栈回退一层(复用左上角返回按钮的逻辑)
+        7. 第一级页面 -> 回到首页
+        8. 首页 -> 提示"再按一次返回键退出"；连按两次退出 app 并清理
+           后台进程和临时缓存
     """
+    if not IsEnabled():
+        # 桌面端不接管返回键/Esc，保持原有行为
+        return False
     now = time.time() * 1000.0
     if now - mobile_ui._backLastTick < BackDebounceMs:
         # Android 会给按下和抬起两个事件，同一按不能处理两次
         return True
     mobile_ui._backLastTick = now
     mobile_ui.BackStats["count"] += 1
+    # "连按两次退出"只在连续两次走到首页分支时生效：中间任何一次其它返回
+    # 动作都取消待退出状态(先取旧值再清零)
+    quitTick = mobile_ui._backQuitTick
+    mobile_ui._backQuitTick = 0.0
     try:
         # 0. 弹出窗口(下拉框列表/右键菜单)
         popup = QApplication.activePopupWidget()
@@ -332,18 +447,40 @@ def HandleBackKey(mainView):
                 Log.Error(es)
             return _BackDone("close-window:{}".format(_DescribeWidget(top)))
 
-        # 3. 抽屉
+        # 3. 遮罩对话框(手机端是主窗口里的子控件覆盖层，_VisibleTopWindow 找不到)
+        dialog = _VisibleMaskDialog(mainView)
+        if dialog is not None:
+            try:
+                dialog.close()
+            except Exception as es:
+                Log.Error(es)
+            return _BackDone("close-dialog:{}".format(_DescribeWidget(dialog)))
+
+        # 4. 抽屉
         if mobile_ui.IsDrawerOpen(mainView):
             mobile_ui.CloseDrawer(mainView)
             return _BackDone("close-drawer")
 
-        # 4. 看图 -> 退出看图
+        # 5. 看图 -> 退出看图回到漫画详情页
         if getattr(mainView, "totalStackWidget", None) is not None \
                 and mainView.totalStackWidget.currentIndex() == 1 and readView is not None:
+            # Close() 会把 bookId/isLocal 清掉，先记下来
+            bookId = getattr(readView, "bookId", "") or ""
+            isLocal = bool(getattr(readView, "isLocal", False))
             readView.Close()
+            # 回到漫画详情页：在线看书都是从详情页进来的，Close() 就回到详情页；
+            # 万一当前页不是详情页(自检直进等)，补切到这一本的详情页。
+            # 本地漫画没有在线详情页，回到本地列表即可。
+            if bookId and not isLocal:
+                stack = getattr(mainView, "subStackWidget", None)
+                cur = stack.currentWidget() if stack is not None else None
+                if cur is not None and cur not in (
+                        getattr(mainView, "bookInfoView", None),
+                        getattr(mainView, "bookInfoView2", None)):
+                    mainView.SwitchWidget(mainView.bookInfoView, bookId=bookId)
             return _BackDone("close-reader")
 
-        # 5. 页面栈回退
+        # 6. 页面栈回退一层(与左上角返回按钮一致)
         stack = getattr(mainView, "subStackWidget", None)
         subList = getattr(mainView, "subStackList", None) or []
         index = stack.currentIndex() if stack is not None else -1
@@ -353,12 +490,21 @@ def HandleBackKey(mainView):
             Log.Warn("back: 页面回退 {} -> {}".format(before, CurrentPageName(mainView)))
             return _BackDone("switch-widget-last")
 
-        # 6. 根页面
-        if mobile_ui.IsDrawerOpen(mainView):
-            mobile_ui.CloseDrawer(mainView)
-            return _BackDone("close-drawer")
-        MinimizeToDesktop(mainView)
-        return _BackDone("root-page")
+        # 7. 第一级页面 -> 回首页
+        if GoHomePage(mainView):
+            return _BackDone("goto-home")
+
+        # 8. 首页 -> 再按一次退出；连按两次退出并清理
+        if quitTick and now - quitTick <= BackQuitWindowMs:
+            QuitAppAndCleanup(mainView)
+            return _BackDone("quit")
+        mobile_ui._backQuitTick = now
+        try:
+            from qt_owner import QtOwner
+            QtOwner().ShowMsgOne("再按一次返回键退出")
+        except Exception as es:
+            Log.Error(es)
+        return _BackDone("quit-hint")
     except Exception as es:
         Log.Error(es)
         return _BackDone("error")

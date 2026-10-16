@@ -605,7 +605,8 @@ if (-not $readerBlock) {
                    " 次, v=" + $last.Groups[4].Value + "/" + $last.Groups[5].Value)
         }
 
-        # 返回键：先收菜单 -> 再退看图 -> 最后退到后台(不再白屏)
+        # 返回键：先收菜单 -> 再退看图回漫画详情页 -> 再回退页面 -> 第一级回首页
+        #         -> 首页按一次只提示"再按一次返回键退出"(连按两次退出放在脚本末尾)
         # 先看返回键有没有到 Qt 窗口(key diag 会记下来)。到不了就只能靠顶栏返回按钮。
         $keyDiag = [regex]::Match((DeviceText), "(?m)^key diag: 按键=(\d+) Key_Back=(\d+) 窗口事件=(\d+)")
         if ($keyDiag.Success) {
@@ -630,19 +631,22 @@ if (-not $readerBlock) {
         Check "⑧ 返回键能退出看图回到上级" `
               (($back2.Value -match "close-reader") -or ([int]$idx.Groups[1].Value -eq -1)) `
               ("最后一次 back=" + $back2.Value + " 页索引=" + $idx.Groups[1].Value)
-        # 连按返回，直到退到根页面(根页面**不能**把 Qt 窗口藏起来)
-        $rootOk = $false
+        # 连按返回直到回到首页(详情页/第一级页面再按一次返回即回首页)
+        $homeOk = $false
         for ($i = 0; $i -lt 6; $i++) {
             Adb shell input keyevent KEYCODE_BACK | Out-Null
             Start-Sleep -Seconds 2
-            if ((DeviceText) -match "(?m)^back: root-page") { $rootOk = $true; break }
+            if ((DeviceText) -match "(?m)^back: (switch-widget-last|goto-home)") { $homeOk = $true; break }
         }
+        # 首页按一次返回：只提示"再按一次返回键退出"，不能退出、不能白屏
+        Adb shell input keyevent KEYCODE_BACK | Out-Null
+        Start-Sleep -Seconds 3
+        $hint = [regex]::Match((DeviceText), "(?m)^back: quit-hint")
         $hideCount = [regex]::Matches((DeviceText), "ui: hideEvent").Count
-        $minCount = [regex]::Matches((DeviceText), "back: minimize-desktop").Count
         # 关键：不能再出现"Qt 窗口被隐藏而 Activity 还在前台"(实测那正是白屏)
-        Check "⑨ 根页面返回不再造成白屏(窗口没被藏起来, 也没用 showMinimized)" `
-              ($rootOk -and $hideCount -eq 0 -and $minCount -eq 0) `
-              ("back: root-page=$rootOk; hideEvent=$hideCount; showMinimized=$minCount; 最后一次 " +
+        Check "⑨ 回首页后按返回只提示不退出(窗口没被藏起来)" `
+              ($homeOk -and $hint.Success -and $hideCount -eq 0) `
+              ("回首页=$homeOk; quit-hint=$($hint.Success); hideEvent=$hideCount; 最后一次 " +
                ([regex]::Matches((DeviceText), "(?m)^back: (\S+).*$") | Select-Object -Last 1).Value)
     }
 
@@ -699,6 +703,35 @@ $backBtn = [regex]::Matches($app, "顶栏加了返回按钮").Count
 Check '⑧ 顶栏已加"返回"按钮(返回键到不了 Qt 时的兜底入口)' ($backBtn -ge 1) ("命中 $backBtn 次")
 $appAlive = ((Adb shell pidof $Pkg) -join "").Trim()
 Check "⑩ 应用进程仍然存活(没有崩溃退出)" ($appAlive -ne "") ("pid=" + $appAlive)
+
+# --- ⑩ 首页连按两次返回键：退出 app 并清理后台进程和临时缓存 ---
+# 放在最后：第二次按下去进程就退了，后面的检查还需要应用活着。
+# 上一次返回键测试已经把应用留在首页(并提示过"再按一次返回键退出")，
+# 但提示窗口(2.5s)早过了，所以这里重新按两次：第一次重新提示，第二次真退出。
+Write-Host ""
+Write-Host "=== 首页连按两次返回键退出 ==="
+$pidBeforeQuit = ((Adb shell pidof $Pkg) -join "").Trim()
+Adb shell input keyevent KEYCODE_BACK | Out-Null
+Start-Sleep -Milliseconds 900
+Adb shell input keyevent KEYCODE_BACK | Out-Null
+$pidAfterQuit = $pidBeforeQuit
+$quitDeadline = (Get-Date).AddSeconds(30)
+while ((Get-Date) -lt $quitDeadline) {
+    $pidAfterQuit = ((Adb shell pidof $Pkg) -join "").Trim()
+    if ($pidAfterQuit -eq "") { break }
+    Start-Sleep -Seconds 2
+}
+Check "⑩ 首页连按两次返回键退出 app" ($pidBeforeQuit -ne "" -and $pidAfterQuit -eq "") `
+      ("pid $pidBeforeQuit -> '$pidAfterQuit'")
+# 临时缓存(看图图片/超分结果等)应在退出前清掉：目录不存在或为空都算通过
+$cacheLeft = ((Adb shell "run-as $Pkg ls files/cache 2>/dev/null") -join "`n").Trim()
+Check "⑩ 退出时清理了临时缓存" ($cacheLeft -eq "") ("files/cache 剩余: '$cacheLeft'")
+$crashQuit = ((Adb logcat -d -b crash) -join "`n")
+$crashQuitNew = 0
+foreach ($line in ($crashQuit -split "`n")) {
+    if ($line -match "Fatal signal" -and $crashAfter -notmatch [regex]::Escape($line)) { $crashQuitNew++ }
+}
+Check "⑩ 双击退出过程没有新的 native 崩溃" ($crashQuitNew -eq 0) ("退出后新增崩溃记录 $crashQuitNew 条")
 
 Write-Host ""
 $results | Format-Table -AutoSize -Wrap

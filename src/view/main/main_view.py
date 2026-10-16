@@ -516,6 +516,8 @@ class MainView(Main, QtTaskBase):
         self.UpdateTabBar()
         # 手机端：点击导航后自动收起抽屉
         mobile_ui.CloseDrawer(self)
+        # 手机端：主动切换导航后取消"连按两次返回键退出"的待退出状态
+        mobile_ui.CancelBackQuit()
         return
 
     # def resizeEvent(self, e):
@@ -583,7 +585,8 @@ class MainView(Main, QtTaskBase):
         return
 
     def keyPressEvent(self, event) -> None:
-        # Android 返回键/手势：优先收看图菜单，其次退看图、回退页面，最后退到后台
+        # Android 返回键/手势：收菜单/对话框/抽屉 -> 退看图回详情页 -> 回退页面
+        # -> 第一级回首页 -> 首页连按两次退出并清理(与顶栏左上角返回按钮同一条逻辑)
         # (真机上按下和抬起都会来，去抖在 mobile_ui.HandleBackKey 里做)
         if event.key() in (Qt.Key_Escape, Qt.Key.Key_Back):
             if mobile_ui.HandleBackKey(self):
@@ -593,10 +596,11 @@ class MainView(Main, QtTaskBase):
 
     def keyReleaseEvent(self, event) -> None:
         # 返回键的按下已经在 keyPressEvent 里处理并 accept 了，抬起这里只做兜底
+        # (桌面端 HandleBackKey 直接返回 False，事件照旧往下走)
         if event.key() in (Qt.Key_Escape, Qt.Key.Key_Back):
-            mobile_ui.HandleBackKey(self)
-            event.accept()
-            return
+            if mobile_ui.HandleBackKey(self):
+                event.accept()
+                return
         return super(self.__class__, self).keyReleaseEvent(event)
 
     def mousePressEvent(self, event: QMouseEvent):

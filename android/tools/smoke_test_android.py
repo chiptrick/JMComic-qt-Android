@@ -1174,15 +1174,24 @@ assert mobile_ui.BackStats["action"] == "close-reader", mobile_ui.BackStats
 assert main.totalStackWidget.currentIndex() == 0, "第二次返回应退出看图回到上级"
 print("[ok] 返回键退出看图: %s" % mobile_ui.BackStats["last"])
 
-# 根页面：不能把 Qt 窗口藏起来(实测 showMinimized 只隐藏 Qt 窗口、Activity 仍在前台
-# -> 屏幕上就是一片白，正是用户报的"白屏")，所以要"保持可见 + 给一句提示"
-beforeMin = mobile_ui.BackStats["minimize"]
+# 第一级页面：再按一次返回回首页(不能把 Qt 窗口藏起来 —— 实测 showMinimized
+# 只隐藏 Qt 窗口、Activity 仍在前台，屏幕上就是一片白，正是用户报的"白屏")
 assert pressBack() is True
-assert mobile_ui.BackStats["action"] == "root-page", mobile_ui.BackStats
-assert mobile_ui.BackStats["minimize"] == beforeMin + 1
-assert main.isVisible(), "根页面按返回不能把主窗口藏起来(会白屏)"
-assert not main.isMinimized(), "根页面按返回不能用 showMinimized(真机上就是白屏)"
-print("[ok] 根页面返回: 保持窗口可见 + 提示(不会白屏): %s" % mobile_ui.BackStats["last"])
+assert mobile_ui.BackStats["action"] == "goto-home", mobile_ui.BackStats
+assert waitPage(main.subStackWidget.indexOf(main.indexView)), "第一级页面按返回应回首页"
+assert main.isVisible(), "回首页不能把主窗口藏起来(会白屏)"
+assert not main.isMinimized(), "不能用 showMinimized(真机上就是白屏)"
+print("[ok] 第一级页面返回: 回到首页: %s" % mobile_ui.BackStats["last"])
+
+# 首页按一次返回：只提示"再按一次返回键退出"，不能退出
+beforeQuit = mobile_ui.BackStats["quit"]
+assert pressBack() is True
+assert mobile_ui.BackStats["action"] == "quit-hint", mobile_ui.BackStats
+assert mobile_ui.BackStats["quit"] == beforeQuit, "首页按一次返回不能退出 app"
+assert main.isVisible() and not main.isMinimized()
+print("[ok] 首页按一次返回: 只提示不退出: %s" % mobile_ui.BackStats["last"])
+# 连按两次退出放在整份测试的最后(见文件末尾)：第二次按下去会停掉 TaskQImage 等
+# 后台线程，后面的图片分割/解码自检还需要它们活着
 main.showNormal()
 app.processEvents()
 
@@ -1241,5 +1250,18 @@ for line in pipeline:
     print("     |", line)
 print("[ok] 图片解码/拼图统计可读")
 
-print("\n全部冒烟测试通过")
+# ⑥ 首页连按两次返回键：退出 app 并清理后台进程和临时缓存
+# 放在最后：第二次按下去 QuitAppAndCleanup 会停掉 TaskQImage 等后台线程并清临时
+# 缓存，上面的自检还需要它们。此时应用还停在首页(返回键测试留下来的)，
+# 但"再按一次"的提示窗口(2.5s)早过了，所以连按两次：第一次重新提示，第二次真退出。
+assert main.subStackWidget.currentWidget() is main.indexView, "末尾应停在首页"
+mobile_ui._backQuitTick = 0.0  # 提示窗口已过，从头开始"两次"判定(与真机连按一致)
+assert pressBack() is True
+assert mobile_ui.BackStats["action"] == "quit-hint", mobile_ui.BackStats
+assert mobile_ui.BackStats["quit"] == beforeQuit, "按一次不能退出 app"
+assert pressBack() is True
+assert mobile_ui.BackStats["action"] == "quit", mobile_ui.BackStats
+assert mobile_ui.BackStats["quit"] == beforeQuit + 1, mobile_ui.BackStats
+print("[ok] 首页连按两次返回: 退出并清理: %s" % mobile_ui.BackStats["last"])
+
 print("\n全部冒烟测试通过")
