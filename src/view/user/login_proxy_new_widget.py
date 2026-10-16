@@ -713,8 +713,14 @@ class LoginProxyNewWidget(object):
         data = raw.get("data", "")
         st = raw["st"]
         label = getattr(self.owner, "label_api_" + str(i))
-        if float(data) > 0.0:
-            text = "<font color=#7fb80e>{}</font>".format(str(int(float(data))) + "ms")
+        try:
+            delay = float(data)
+        except (TypeError, ValueError):
+            # 回包不是数字时不要抛(float('') 会 ValueError)：以前会把这次回调整个
+            # 抛掉，任务表残留、后面几个 ping 的结果再也回不来，测速一直转。
+            delay = 0.0
+        if delay > 0.0:
+            text = "<font color=#7fb80e>{}</font>".format(str(int(delay)) + "ms")
             label.setText(text)
         else:
             text = "<font color=#d71345>{}</font>".format(Str.GetStr(st))

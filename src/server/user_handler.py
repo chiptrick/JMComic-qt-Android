@@ -1219,8 +1219,11 @@ class GetEchConfigReqHandler(object):
 @handler(req.SpeedTestPing2Req)
 class SpeedTestPingHandler(object):
     def __call__(self, task):
-        data = {"st": task.status, "data": task.res.GetText()}
-        if hasattr(task.res.raw, "elapsed"):
+        # task.res 可能还没建起来(请求在 Get() 之前就失败)，以前这里会抛
+        # AttributeError 且**什么都回不出去**，测速就一直卡在"进行中"。
+        text = task.res.GetText() if task.res is not None else ""
+        data = {"st": task.status, "data": text}
+        if task.res is not None and hasattr(task.res.raw, "elapsed"):
             if task.res.raw.status_code == 401 or task.res.raw.status_code == 200:
                 if isinstance(task.res.raw.elapsed, timedelta):
                     data["data"] = str(
