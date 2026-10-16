@@ -2,7 +2,9 @@
 . "$(dirname "${BASH_SOURCE[0]}")/env.sh"
 # 解出 APK 里的 libpybundle.so(其实是 tar)，确认 Python 运行时包含应用所需依赖
 set -uo pipefail
-APK="$JM_REPO/android/JMComic-0.1-arm64-v8a-debug.apk"
+# 取最新的 APK(版本号会随构建变化，不要写死文件名)
+APK="${APK:-$(ls -t "$JM_REPO"/android/*.apk 2>/dev/null | head -1)}"
+[ -n "$APK" ] || { echo "还没有 APK(先跑 wsl_collect_apk.sh)"; exit 1; }
 PY="$JM_WORK/venv311/bin/python"
 "$PY" - "$APK" <<'PYEOF'
 import io, sys, tarfile, zipfile

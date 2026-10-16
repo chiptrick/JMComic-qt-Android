@@ -51,6 +51,14 @@ AppRequirements = [
 # (作为 assets 打进 APK)；编出原生 curl-impersonate 后可改成走 recipes/curl_cffi。
 SkipRequirements = ["curl_cffi", "curl-cffi"]
 
+# APK 版本号(buildozer.spec 的 app.version，也就是 Android 的 versionName)。
+# p4a 的 get_android_numeric_version() 由它推导 versionCode：
+#     "10" + minSdk + 逐段(*100 累加)的版本号   →  0.1/minSdk34 = 10341，0.2 = 10342
+# 所以**只能往上改**：versionCode 变小会让 `adb install -r` 报
+# INSTALL_FAILED_VERSION_DOWNGRADE，手机上必须先卸载才能装。
+# 注意这是 Android 包版本，跟桌面端的 config.RealVersion(上游版本号，用于检查更新)无关。
+AppVersion = "0.2"
+
 # p4a 只把 source.include_exts 放行的文件复制进应用目录(再打成 private.tar)。
 # buildozer/工具生成的默认值是 "py,png,jpg,kv,atlas,qml,js"，**不含 onnx/txt**，
 # 于是 sr_qnn/models/*.onnx + models.txt 从来没有进过 APK —— 真机上超分后端
@@ -184,6 +192,8 @@ def Main():
     parser.add_argument("--models", default="", help="超分模型目录(有 .onnx 时才加入 assets)")
     parser.add_argument("--api", default="34", help="targetSdk，默认 34")
     parser.add_argument("--minapi", default="34", help="minSdk，默认 34(用户要求不考虑 Android 14 以下)")
+    parser.add_argument("--version", default="",
+                        help="APK 版本号(versionName)，默认用脚本里的 AppVersion")
     args = parser.parse_args()
 
     if not os.path.exists(args.spec):
@@ -208,6 +218,10 @@ def Main():
     merged = MergeRequirements(current, AppRequirements)
     if merged != current:
         spec.SetKey("app", "requirements", merged)
+
+    # 工具生成的 buildozer.spec 把 version 写死成 0.1，不覆盖的话每次打包都还是 0.1，
+    # 也就没法用 versionCode 区分"这一版到底含不含最新改动"。
+    spec.SetKey("app", "version", args.version.strip() or AppVersion)
 
     spec.SetKey("app", "android.api", str(args.api))
     spec.SetKey("app", "android.minapi", str(args.minapi))

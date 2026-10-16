@@ -28,6 +28,7 @@ FILES=(
     src/task/task_multi.py
     src/server/req.py
     src/server/server.py
+    src/server/user_handler.py
     src/view/main/main_view.py
     src/view/read/read_view.py
     src/view/setting/setting_view.py
@@ -83,7 +84,7 @@ done
 
 # 光看 app_src 还不够：APK 里是**编译后的 .pyc**。踩过的坑：
 # 构建还没结束就 collect，拿到的是上一版 APK(tool.pyc 里没有 SegmentationPictureQt)。
-APK="${APK:-$REPO/android/JMComic-0.1-arm64-v8a-debug.apk}"
+APK="${APK:-$(ls -t "$REPO"/android/*.apk 2>/dev/null | head -1)}"
 PY="${PY:-$W/venv311/bin/python3}"
 if [ -f "$APK" ] && [ -x "$PY" ]; then
     echo
@@ -99,6 +100,9 @@ checks = [
     ("tools/mobile_ui_grid.pyc", b"ScheduleGridCoverSize", "首屏网格去抖重排(mobile_ui_grid.py)"),
     ("component/list/comic_list_widget.pyc", b"ScheduleGridCoverSize",
      "加完封面就排重排(comic_list_widget.py)"),
+    ("server/req.pyc", b"DowngradeTlsOptions", "HTTP/3、ECH 失败降级(req.py)"),
+    ("server/server.pyc", b"DowngradeStatus", "接口降级白名单(server.py)"),
+    ("shims/curl_cffi/__init__.pyc", b"HTTP3_ECH_SUPPORTED", "垫片能力声明(shims)"),
 ]
 try:
     with zipfile.ZipFile(apk) as z:

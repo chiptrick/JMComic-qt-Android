@@ -4,7 +4,9 @@
 set -uo pipefail
 SDK="$JM_WORK/android-sdk"
 BT=$(ls -d "$SDK"/build-tools/* 2>/dev/null | sort -V | tail -1)
-APK="$JM_WORK/src/android/JMComic-0.1-arm64-v8a-debug.apk"
+# 取最新的 APK(版本号会随构建变化，不要写死文件名)
+APK="${APK:-$(ls -t "$JM_WORK"/src/android/bin/*.apk "$JM_WORK"/src/android/*.apk 2>/dev/null | head -1)}"
+[ -n "$APK" ] || { echo "还没有 APK(先跑 wsl_build_apk.sh)"; exit 1; }
 echo "build-tools: $BT"
 echo "APK: $APK"
 echo

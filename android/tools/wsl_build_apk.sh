@@ -116,7 +116,7 @@ echo "应用图标: $ICON ($(stat -c %s "$ICON") 字节, $(md5sum "$ICON" | cut 
     --p4a-dir "$P4A" --recipes "$ANDROID/recipes" \
     --libs "libs/arm64-v8a" --icon "$ICON" --models "$ANDROID/sr_qnn/models" 2>&1 | tail -30
 echo "--- 关键配置 ---"
-grep -E '^(requirements|source\.include_exts|android\.api|android\.minapi|android\.add_libs_arm64_v8a|android\.permissions|android\.add_assets|p4a\.source_dir|p4a\.local_recipes|android\.ndk_path|android\.sdk_path|package\.name|package\.domain|android\.archs|icon\.filename)' "$ANDROID/buildozer.spec"
+grep -E '^(requirements|version|source\.include_exts|android\.api|android\.minapi|android\.add_libs_arm64_v8a|android\.permissions|android\.add_assets|p4a\.source_dir|p4a\.local_recipes|android\.ndk_path|android\.sdk_path|package\.name|package\.domain|android\.archs|icon\.filename)' "$ANDROID/buildozer.spec"
 
 echo "===== [$(date +%T)] 3.5 修正 p4a bootstrap 的 PYTHONOPTIMIZE ==="
 # Qt bootstrap 硬编码 PYTHONOPTIMIZE=2 -> pycryptodome 放弃 cffi 后端、回落到在 Android 上

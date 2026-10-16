@@ -872,6 +872,14 @@ pyside6-android-deploy             # 用补丁后的 spec 正式打包
 （`libsr_qnn.so` + `libonnxruntime.so` + QNN 运行库进 APK 的 `lib/arm64-v8a/`）、
 超分模型 `add_assets`、网络权限、`p4a.source_dir`（用本地已改镜像的 p4a）。
 
+**APK 版本号**（`app.version`，即 Android 的 versionName）也在这一步注入：
+工具每次 `--init` 都会把它重置成 `0.1`，所以必须由补丁覆盖，值取
+`android/tools/patch_buildozer_spec.py` 里的 `AppVersion`（可用 `--version` 临时覆盖）。
+p4a 用 `"10" + minSdk + 逐段(*100 累加)的版本号` 推导 `versionCode`：
+`0.1/minSdk34 → 10341`、`0.2 → 10342`。**只能往上改** —— versionCode 变小会让
+`adb install -r` 报 `INSTALL_FAILED_VERSION_DOWNGRADE`（手机上得先卸载）。
+注意这是 Android 包版本，跟桌面端的 `config.RealVersion`（上游版本号，用于检查更新）无关。
+
 ### 9.2 Android 上的依赖取舍（实测）
 
 | 依赖 | 处理 |
@@ -922,7 +930,7 @@ python android/tools/patch_buildozer_spec.py ... --icon "$ICON"   # -> icon.file
 * 核对方式（不能比文件字节，aapt2 可能对 `res/` 下的 PNG 无损重编码）：
 
   ```bash
-  python android/tools/probe_apk_icon.py android/JMComic-0.1-arm64-v8a-debug.apk res/icon/logo_round.png
+  python android/tools/probe_apk_icon.py android/JMComic-0.2-arm64-v8a-debug.apk res/icon/logo_round.png
   #   res/mipmap/icon.png: PNG 512x512 456970 字节
   #       与期望图: 尺寸相同=True 不同像素=0/262144 最大通道差=0
   #       结论: 是我们换上的图标(逐像素一致)
