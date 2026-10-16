@@ -50,6 +50,12 @@ def MeasureGridAvail(root):
         pageWidth = mobile_ui.PortraitWidth(mobile_ui._mainView) if mobile_ui._mainView is not None else 0
         worst = 0
         for view in _SelfAndChildren(root, QListWidget):
+            # 只量**真的露出来**的列表：隐藏页里的列表视口是"没布局过"的假宽度
+            # (QTabWidget 只给当前页排几何，真机实测隐藏分区里的列表报 790px，
+            # 而被页宽上限夹到 366px)。拿它算出来的封面宽对真实视口(330px)来说太宽，
+            # 真机现象就是"切到别的分区还是一行 1 个，进一次设置页返回才变 2 个"。
+            if not view.isVisible():
+                continue
             viewport = view.viewport()
             width = viewport.width() if viewport is not None else view.width()
             if pageWidth >= 200 and width > pageWidth:
@@ -177,6 +183,10 @@ def _GridOverflow(root):
         from PySide6.QtWidgets import QListWidget
         worst = 0
         for view in _SelfAndChildren(root, QListWidget):
+            # 隐藏页的视口是假宽度(见 MeasureGridAvail)，量出来的"可用宽/列数"偏大，
+            # 就永远发现不了"item 对真实视口来说太宽"
+            if not view.isVisible():
+                continue
             viewport = view.viewport()
             avail = viewport.width() if viewport is not None else view.width()
             if avail <= 0 or not view.count():
@@ -191,6 +201,24 @@ def _GridOverflow(root):
     except Exception as es:
         Log.Error(es)
     return 0
+
+
+def ReflowGridCoverForPage(page):
+    """ 某个标签页/页面**刚露出来**时，按它现在的真实视口宽重排一次网格
+
+    首页的"分区"是 QTabWidget 的标签页，而 Qt 只给当前页排几何：隐藏页里的列表
+    视口宽是一个"没布局过"的假值(真机实测 790px)。用假值算封面宽/栅格都会偏大，
+    真机现象就是"切到别的分区依然一行 1 个封面，进一次设置页再返回才变一行 2 个"
+    (返回时重排了整个首页，那时列表已经可见，量到的是真实宽度)。所以切页之后要等
+    新页真的可见了再量一次。
+    """
+    if page is None:
+        return 0
+    count = ApplyGridCoverSize(page)
+    # 封面宽没变时 ApplyGridCoverSize 内部会短路(不调 RefreshItemSizeHints)，
+    # 但这个列表在隐藏期间根本没按真实视口定过栅格，这里必须补一次。
+    RefreshItemSizeHints(page)
+    return count
 
 
 def RefreshItemSizeHints(root):

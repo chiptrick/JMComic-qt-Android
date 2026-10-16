@@ -1,10 +1,13 @@
 # coding:utf-8
 """ 竖屏排版重排（并排改上下、拆行、折行、压扁、封面尺寸） """
+from functools import partial
+
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QIcon
-from PySide6.QtWidgets import QAbstractScrollArea, QBoxLayout, QComboBox, QCommandLinkButton, QSizePolicy, QToolButton, QWidget
+from PySide6.QtWidgets import QAbstractScrollArea, QBoxLayout, QComboBox, QCommandLinkButton, QSizePolicy, QTabWidget, QToolButton, QWidget
 from tools.log import Log
 from tools.mobile_ui_base import *  # noqa: F401,F403
+from tools.mobile_ui_base import (_SelfAndChildren)
 from tools import mobile_ui
 
 
@@ -604,3 +607,45 @@ def InstallReflowHook(mainView):
     # 首屏(下载路径之类的文字)是异步填的，隔一会儿再兜一次
     QTimer.singleShot(2500, ReflowPortrait)
     return
+
+
+def OnTabPageChanged(tabs, index):
+    """ QTabWidget 换页之后重排新页(封面是异步加的，这时也只能补一次) """
+    if not IsEnabled():
+        return
+    try:
+        page = tabs.widget(index)
+    except Exception as es:
+        Log.Error(es)
+        return
+    if page is None:
+        return
+    # 延后一点：先让 Qt 把新页的几何摆好，列表视口宽才是真的
+    DeferCall(lambda p=page: mobile_ui.ReflowGridCoverForPage(p), TabReflowMs)
+    return
+
+
+def InstallTabReflowHook(mainView):
+    """ 给所有 QTabWidget(首页的"分区"标签)装"换页后按真实视口重排网格"
+
+    首页的分区页是隐藏的，而 Qt 只给 QTabWidget 的当前页排几何：隐藏页里的列表
+    视口宽是一个"没布局过"的假值(真机实测 790px，被页宽夹成 366px)。往这些分区里
+    加的封面就按偏大的尺寸建好了，等用户真的切过去时，一行只放得下 1 个 —— 而
+    "进一次设置页再返回"会重排整个首页(那时列表已可见，量到的是真实宽度)，所以
+    看起来"过一会儿自己好了"。这里把那次重排补在换页之后。
+    """
+    if not IsEnabled() or mainView is None:
+        return 0
+    count = 0
+    for tabs in _SelfAndChildren(mainView, QTabWidget):
+        if getattr(tabs, "_jmTabReflow", False):
+            continue
+        try:
+            tabs.currentChanged.connect(partial(OnTabPageChanged, tabs))
+            tabs._jmTabReflow = True
+            count += 1
+        except Exception as es:
+            Log.Error(es)
+    if count:
+        Log.Warn("portrait: {} 个标签页装了换页重排(分区封面)".format(count))
+    return count

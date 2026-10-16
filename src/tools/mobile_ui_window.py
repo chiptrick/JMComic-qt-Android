@@ -281,6 +281,9 @@ def MinimizeToDesktop(mainView):
     try:
         if not getattr(mainView, "_jmBackHintShown", False):
             mainView._jmBackHintShown = True
+            # 本地导入：qt_owner 会间接 import component.label.msg_label -> tools.mobile_ui，
+            # 模块顶层导入会绕成循环导入(文件名很长，见 git 历史里的 NameError)
+            from qt_owner import QtOwner
             QtOwner().ShowMsgOne("已在首页：用系统手势或 Home 返回桌面")
     except Exception as es:
         Log.Error(es)

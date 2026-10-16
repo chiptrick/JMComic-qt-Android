@@ -23,12 +23,18 @@ def Apply(mainView):
         mobile_ui.SetupReadTool(getattr(mainView, "readView", None))
         mobile_ui.ApplyGridCoverSize(mainView)
         mobile_ui.EnableTouchScroll(mainView)
+        # 首页分区页是网络回来后逐个 AddTab 建的(EnableTouchScroll 那会儿还没有)：
+        # 装上"后建滚动区域自动接管"，后面建出来的列表/面板照样能手指滚动
+        mobile_ui.InstallScrollWatcher(mainView)
         mobile_ui.SetupBackButton(mainView)
         mobile_ui.InstallAppFilter(mainView)
         mobile_ui.InstallTouchGuard(mainView)
         mobile_ui.InstallWindowGuard(mainView)
         mobile_ui.ReflowPortrait(getattr(mainView, "subStackWidget", None))
         mobile_ui.InstallReflowHook(mainView)
+        # 首页/其它页面里的 QTabWidget(分区标签)：换页后按真实视口重排封面
+        # (标签条本身的横划滚动在 InstallTouchGuard 的滑动守卫里，见 mobile_ui_touch)
+        mobile_ui.InstallTabReflowHook(mainView)
         Log.Warn("mobile ui adapted, limit:{}".format(mobile_ui._limit))
     except Exception as es:
         Log.Error(es)
@@ -54,6 +60,8 @@ def OnShown(mainView):
         mobile_ui.ApplyGridCoverSize(mainView)
         mobile_ui.ReflowPortrait(getattr(mainView, "subStackWidget", None))
         mobile_ui.EnableTouchScroll(mainView)
+        mobile_ui.InstallScrollWatcher(mainView)
+        mobile_ui.InstallTabReflowHook(mainView)
         mobile_ui.MaybeSelfTest(mainView)
         mobile_ui.MaybeTouchSelfTest(mainView)
         mobile_ui.MaybeDeviceVerify(mainView)

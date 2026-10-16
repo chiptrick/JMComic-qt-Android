@@ -1,8 +1,9 @@
 # coding:utf-8
 """ 看图界面（工具菜单整宽 + 看图区拖动滚动） """
-from PySide6.QtCore import QEvent, QObject, QPointF
+from PySide6.QtCore import QEvent, QObject
 from tools.log import Log
 from tools.mobile_ui_base import *  # noqa: F401,F403
+from tools.mobile_ui_base import _EventLocalPos
 from tools import mobile_ui
 
 
@@ -77,7 +78,7 @@ class _ReaderDrag(QObject):
             if eventType == QEvent.Type.MouseButtonPress:
                 self._pressed = True
                 self._dragging = False
-                self._pressPos = self._Pos(event)
+                self._pressPos = _EventLocalPos(event)
                 self._lastPos = self._pressPos
                 self._carry = 0.0
                 return False
@@ -90,7 +91,7 @@ class _ReaderDrag(QObject):
                 return dragging
             if eventType != QEvent.Type.MouseMove or not self._pressed:
                 return False
-            pos = self._Pos(event)
+            pos = _EventLocalPos(event)
             if pos is None or self._lastPos is None:
                 return False
             dx = pos.x() - self._lastPos.x()
@@ -108,16 +109,6 @@ class _ReaderDrag(QObject):
         except Exception as es:
             Log.Error(es)
         return False
-
-    @staticmethod
-    def _Pos(event):
-        try:
-            return QPointF(event.position())
-        except Exception:
-            try:
-                return QPointF(event.pos())
-            except Exception:
-                return None
 
     def _Scroll(self, dx, dy):
         view = self._view

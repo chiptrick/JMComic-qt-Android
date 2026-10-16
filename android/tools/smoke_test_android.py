@@ -721,6 +721,276 @@ stale.hide()
 stale.deleteLater()
 app.processEvents()
 
+# ③.6 "首页上方的分区无法滑动 + 除最新上传外其它分区都没有双页"的回归
+#   ① 首页的分区是 QTabWidget 的标签页，而 Qt 只给**当前页**排几何：隐藏分区里的列表
+#      视口宽是一个"没布局过"的假值(真机 790px，被页宽夹成 366px)。用假值算封面宽/栅格
+#      都偏大 —— 往这些分区里加的封面按偏大的尺寸建好，等用户真的切过去时一行只放得下
+#      1 个；而"进一次设置页再返回"重排了整个首页(那时列表已可见，量到的是真实宽度)，
+#      所以看起来是"自己好了"。
+#   ② 标签条溢出时 Qt 只在两端放两个 16x32 的滚动箭头，手指横划完全没有反应
+#      (QTabBar 没有拖动滚动，也没有公开的滚动偏移 API)。走的是它的
+#      wheelEvent 里那条"设备带 PixelScroll 能力就按像素滚"的分支：
+#      把手指数十像素的位移合成成 QWheelEvent 喂进去(见 mobile_ui_touch._TabBarScroll)。
+from PySide6.QtWidgets import QTabWidget, QVBoxLayout, QWidget  # noqa: E402
+
+mobile_ui.ResetGridCover()
+_StopPendingGrid()
+tabsHost = QTabWidget()
+tabsHost.resize(avail, 480)
+tabsLists = []
+for i in range(9):
+    tabPage = QWidget()
+    tabLayout = QVBoxLayout(tabPage)
+    tabLayout.setContentsMargins(0, 0, 0, 0)
+    tabList = ComicListWidget(tabPage)
+    tabLayout.addWidget(tabList)
+    tabsHost.addTab(tabPage, "最新上传" if i == 0 else "分区%d" % i)
+    tabsLists.append(tabList)
+tabsHost.show()
+deadline = time.time() + 2.0
+while time.time() < deadline and not tabsHost.isVisible():
+    app.processEvents()
+    time.sleep(0.02)
+assert tabsHost.isVisible(), "测试用的 QTabWidget 没显示出来(顶层窗口是被延后显示的)"
+app.processEvents()
+mobile_ui.InstallTabReflowHook(tabsHost)
+tabBar = tabsHost.tabBar()
+# 真机顺序：先把(**隐藏的**)分区页填满，"最新上传"是网络回来后才填的
+for i in range(4):
+    tabsLists[1].AddBookItem("b%d" % i, "分区书%d" % i, "", "")
+app.processEvents()
+# 隐藏页里的列表不能被拿来量"可用宽"
+mobile_ui.ResetGridCover()
+_StopPendingGrid()
+mobile_ui.ApplyGridCoverSize(tabsLists[1])
+assert mobile_ui._gridAvail == 0, \
+    "隐藏标签页的列表被当成了可测量对象(量到 %dpx 的假宽度)" % mobile_ui._gridAvail
+# 点按第 2 个标签：既验证"点按仍能选中"(press 被扣住后靠重放补发)，也就是真机切分区的路径
+tabRect = tabBar.tabRect(1)
+assert tabRect.x() >= 0 and tabRect.right() < tabBar.width() - 60, \
+    "第 2 个标签不在可视区(标签条应该溢出): %s" % tabRect
+sendMouse(QEvent.Type.MouseButtonPress, tabBar, QPointF(tabRect.center().x(), tabRect.center().y()))
+sendMouse(QEvent.Type.MouseButtonRelease, tabBar, QPointF(tabRect.center().x(), tabRect.center().y()))
+app.processEvents()
+assert tabsHost.currentIndex() == 1, \
+    "点按标签应该选中它, 实际 currentIndex=%d" % tabsHost.currentIndex()
+# 切过去之后列表才真的可见 -> 换页重排应该把它收成"一行 2 个"
+deadline = time.time() + 3.0
+while time.time() < deadline:
+    app.processEvents()
+    time.sleep(0.02)
+    cell = tabsLists[1].gridSize().width()
+    if tabsLists[1].isVisible() and cell and \
+            cell * mobile_ui.GridColumns <= tabsLists[1].viewport().width() + 2:
+        break
+assert tabsLists[1].isVisible(), "切过去之后分区列表应该可见"
+over = mobile_ui._GridOverflow(tabsLists[1])
+cell = tabsLists[1].gridSize().width()
+assert over <= 0, "切到分区后封面仍然超出可用宽/2 共 %dpx(一行 1 个)" % over
+assert cell and cell * mobile_ui.GridColumns <= tabsLists[1].viewport().width() + 2, \
+    "分区列表的栅格 %dpx x %d 列放不进 %dpx 视口" % (cell, mobile_ui.GridColumns,
+                                                 tabsLists[1].viewport().width())
+print("[ok] 分区(隐藏标签页)封面: 隐藏时不参与测量 -> 切过去后 %d 个封面收成栅格 %dpx / "
+      "视口 %dpx -> 一行 2 个" % (tabsLists[1].count(), cell, tabsLists[1].viewport().width()))
+print("     |", mobile_ui.GridStatsLines(tabsLists[1])[0])
+# 横划滚动：内容要跟着手指走(1:1)，松手还要有惯性，而且不能顺带切换分区
+tabScroll = guard.TabScrollStats()
+feedsBefore = tabScroll.Feeds
+assert tabBar.count() == 9 and tabBar.tabRect(8).right() > tabBar.width(), \
+    "9 个标签应该溢出(最后一个在可视区外): %s" % tabBar.tabRect(8)
+barIndex = tabsHost.currentIndex()
+startX = tabBar.width() * 0.6
+sendMouse(QEvent.Type.MouseButtonPress, tabBar, QPointF(startX, 16.0))
+for step in range(1, 8):
+    app.processEvents()
+    time.sleep(0.008)                       # 真机上两帧之间有真实间隔(松手后的速度要用它算)
+    sendMouse(QEvent.Type.MouseMove, tabBar, QPointF(startX - step * 30.0, 16.0))
+sendMouse(QEvent.Type.MouseButtonRelease, tabBar, QPointF(startX - 7 * 30.0, 16.0))
+app.processEvents()
+assert tabsHost.currentIndex() == barIndex, \
+    "横划不应该顺带切换分区: %d -> %d" % (barIndex, tabsHost.currentIndex())
+scrolled = tabScroll.LastScrolled
+assert scrolled > 100, "手指横划 210px 只滚了 %dpx" % scrolled
+assert tabScroll.Flings >= 1, "松手后应该开始惯性滚动"
+deadline = time.time() + 1.5
+while time.time() < deadline and tabScroll.Running():
+    app.processEvents()
+    time.sleep(0.01)
+flinged = mobile_ui.TabBarOffset(tabBar)
+assert not tabScroll.Running(), "惯性应该在 1.5s 内自己停下来"
+assert flinged >= scrolled, \
+    "惯性只会往前滚: 松手时 %dpx -> 停住 %dpx" % (scrolled, flinged)
+print("[ok] 分区标签条横划: 手指划 210px -> 跟手滚 %dpx -> 惯性后共 %dpx (惯性 %d 次), "
+      "当前分区仍是 %d" % (scrolled, flinged, tabScroll.Flings, tabsHost.currentIndex()))
+tabsHost.hide()
+tabsHost.deleteLater()
+app.processEvents()
+
+# ③.7 "首页除最新上传以外，其它分区列表完全不能滑动"的回归 —— 所有滚动区域都要能手指滑动
+#   根因：分区页是网络回来后由 IndexView.InitBack 逐个 AddTab 建出来的，而
+#   EnableTouchScroll(mainView) 早在窗口 Apply/OnShown 时(那会儿这些页还不存在)就跑完了
+#   -> 分区列表从来没被 QScroller 接管(_jmTouchScroll=False)，手指在上面划一点不动。
+#   修法有两半，都要在这里量到：
+#     a) mobile_ui_touch._ScrollWatcher(App 级过滤器)：后建出来的滚动区域建立即接管
+#     b) _TouchGuard.OnPress 里的 _AdoptScrollArea：万一漏了，手指按上去时就地兜底补装
+#   滑动本身用合成触摸事件量：Qt 手势框架 -> QScroller -> 滚动条，和真机同一条路。
+#   (offscreen 上 QTest.touchEvent(QWindow*) 送不进应用主窗口的那一层，但 sendEvent
+#    这条路的手势识别/QScroller/惯性完全一样，主机上量到过 824px + 惯性)
+from PySide6.QtGui import QEventPoint, QInputDevice, QPointingDevice, QTouchEvent  # noqa: E402
+
+TOUCH_DEVICE = QPointingDevice("jm-smoke-touch", 1, QInputDevice.DeviceType.TouchScreen,
+                               QPointingDevice.PointerType.Finger,
+                               QInputDevice.Capability.PixelScroll, 10, 0)
+
+
+def sendTouch(kind, state, widget, localPos):
+    """ 给控件合成一个触摸事件(每个事件一条独立序列，和真机一样) """
+    point = QEventPoint(0, state, QPointF(localPos),
+                        QPointF(widget.mapToGlobal(localPos.toPoint())))
+    app.sendEvent(widget, QTouchEvent(kind, TOUCH_DEVICE,
+                                      Qt.KeyboardModifier.NoModifier, [point]))
+    return
+
+
+def touchDrag(area, dyPx=150, steps=8, holdSecs=0.4):
+    """ 在滚动区域视口上合成一次手指纵向拖动(内容往上滚 dyPx)，返回(跟手, 停稳)
+
+    跟手要在**手指还按着**的时候读：滚动条(SmoothScrollBar)对 setValue 有 500ms 缓动，
+    松手那一刻它还在半路上，等它走完(0.4s，OutQuint 已到 99%+)再读才是真实跟手量；
+    松手之后测到的增量才是惯性(所以不能拿它当跟手量)。
+    """
+    vp = area.viewport()
+    bar = area.verticalScrollBar()
+    before = bar.value()
+    x = max(4, vp.width() // 2)
+    y0 = vp.height() - 30
+    sendTouch(QEvent.Type.TouchBegin, QEventPoint.State.Pressed, vp, QPointF(x, y0))
+    for step in range(1, steps + 1):
+        app.processEvents()
+        time.sleep(0.01)                    # 真机两帧之间有真实间隔(松手后的速度靠它算)
+        sendTouch(QEvent.Type.TouchUpdate, QEventPoint.State.Updated, vp,
+                  QPointF(x, y0 - dyPx * step / float(steps)))
+    hold = time.time() + holdSecs           # 手指不动，等滚动条缓动走完(纯跟手，还没惯性)
+    while time.time() < hold:
+        app.processEvents()
+        time.sleep(0.01)
+    followed = bar.value() - before
+    sendTouch(QEvent.Type.TouchEnd, QEventPoint.State.Released, vp, QPointF(x, y0 - dyPx))
+    app.processEvents()
+    deadline = time.time() + 2.0            # 等惯性滚完
+    while time.time() < deadline:
+        app.processEvents()
+        time.sleep(0.02)
+    return followed, bar.value() - before
+
+
+def fillList(view, count=60):
+    for i in range(count):
+        view.AddBookItem("s%d" % i, "冒烟书%d" % i, "", "")
+    app.processEvents()
+    return
+
+
+# 造一个"分区页"宿主：第 1 页先有，第 2 页是**后加**的(真机就是网络回来后 AddTab 出来的)
+scanHost = QTabWidget()
+scanHost.resize(avail, 480)
+firstPage = QWidget()
+scanFirst = ComicListWidget(firstPage)
+firstLayout = QVBoxLayout(firstPage)
+firstLayout.setContentsMargins(0, 0, 0, 0)
+firstLayout.addWidget(scanFirst)
+scanHost.addTab(firstPage, "最新上传")
+scanHost.show()
+deadline = time.time() + 2.0
+while time.time() < deadline and not scanHost.isVisible():
+    app.processEvents()
+    time.sleep(0.02)
+assert scanHost.isVisible(), "测试用的 QTabWidget 没显示出来(顶层窗口是被延后显示的)"
+fillList(scanFirst)
+
+latePage = QWidget()
+lateList = ComicListWidget(latePage)
+lateLayout = QVBoxLayout(latePage)
+lateLayout.setContentsMargins(0, 0, 0, 0)
+lateLayout.addWidget(lateList)
+scanHost.addTab(latePage, "后建分区")
+deadline = time.time() + 2.0
+while time.time() < deadline and not getattr(lateList, "_jmTouchScroll", False):
+    app.processEvents()                     # watcher 用 0ms 定时器推到下一轮事件循环才扫
+    time.sleep(0.02)
+assert getattr(scanFirst, "_jmTouchScroll", False), "先建的列表也应该被接管"
+assert getattr(lateList, "_jmTouchScroll", False), \
+    "AddTab 之后新建的列表没有被自动接管 -> 真机上就是'分区列表完全不能滑'"
+watcherStats = mobile_ui.ScrollWatcherStats()
+assert watcherStats is not None and watcherStats["adopted"] > 0, \
+    "后建滚动区域自动接管(watcher)没生效: %s" % watcherStats
+print("[ok] 后建滚动区域自动接管: AddTab 出来的 %s._jmTouchScroll=%s, watcher=%s"
+      % (type(lateList).__name__, getattr(lateList, "_jmTouchScroll", False), watcherStats))
+
+# 切到后建的分区再量跟手(隐藏页不量：视口几何是"没布局过"的假值)
+scanHost.setCurrentIndex(1)
+deadline = time.time() + 2.0
+while time.time() < deadline and not lateList.isVisible():
+    app.processEvents()
+    time.sleep(0.02)
+assert lateList.isVisible(), "切到后建的分区页之后列表应该可见"
+fillList(lateList)
+followed, settled = touchDrag(lateList)
+assert followed >= 150 * 0.9, \
+    "后建分区列表划 150px 只跟了 %dpx(应该 1:1 跟手)" % followed
+print("[ok] 后建分区列表手指滑动: 划 150px -> 跟手 %dpx(1:1，含 500ms 缓动走完)" % followed)
+# 松手后的惯性：手指快速划完就抬手(速度估得出来) -> 停稳应该明显超过手指位移
+_, flung = touchDrag(lateList, holdSecs=0.0)
+assert flung >= 150 + 40, "后建分区列表松手后没有惯性(只走了 %dpx)" % flung
+print("[ok] 后建分区列表松手惯性: 再划 150px -> 停稳共 %dpx(手指只划了 150px)" % flung)
+
+# 兜底那一半：抹掉接管标记(模拟"建的时候 watcher 没看见")，手指按上去必须就地补装
+lateList._jmTouchScroll = False
+pressesBefore = guard.Presses
+lowPoint = QPointF(lateList.viewport().width() / 2.0, lateList.viewport().height() - 30.0)
+sendMouse(QEvent.Type.MouseButtonPress, lateList.viewport(), lowPoint)
+assert getattr(lateList, "_jmTouchScroll", False), \
+    "手指按上去时应该兜底补装 QScroller(_AdoptScrollArea 没生效)"
+assert guard.Presses == pressesBefore + 1, \
+    "补装要发生在判定模式之前：同一次按下就该算进'已接管滚动区域'"
+sendMouse(QEvent.Type.MouseButtonRelease, lateList.viewport(), lowPoint)
+print("[ok] 兜底补装: 抹掉接管标记后按下 -> 就地重新接管，同一次按下即算进滑动区")
+
+# 启动时就存在的页面也要能手指滑动(接管状态 + 有内容时量跟手)
+scanHost.hide()
+scanHost.deleteLater()
+app.processEvents()
+for label, page, area in (("首页 最新上传", main.indexView, main.indexView.newListWidget),
+                          ("详情页", main.bookInfoView, main.bookInfoView.scrollArea),
+                          ("设置页", main.settingView, main.settingView.scrollArea)):
+    main.SwitchWidgetAndClear(main.subStackWidget.indexOf(page))
+    app.processEvents()
+    if label == "设置页":
+        # 上面 §9c 在设置页滚动条上按了一下没松(那是刻意留着的)，补一个抬起，
+        # 否则滚动条会跟着后面合成的鼠标移动走拖动逻辑，把"跟手量"弄成大一圈的假值
+        sendMouse(QEvent.Type.MouseButtonRelease, area.vScrollBar, QPointF(4, 4))
+        app.processEvents()
+    deadline = time.time() + 2.0
+    while time.time() < deadline and not area.isVisible():
+        app.processEvents()
+        time.sleep(0.02)
+    assert getattr(area, "_jmTouchScroll", False), "%s 的滚动区域没被接管手指滚动" % label
+    bar = area.verticalScrollBar()
+    if area.isVisible() and bar.maximum() >= 150:
+        followed, settled = touchDrag(area)
+        assert followed >= 150 * 0.9, "%s 划 150px 只跟了 %dpx" % (label, followed)
+        print("[ok] %s 手指滑动: 划 150px -> 跟手 %dpx -> 停稳 %dpx"
+              % (label, followed, settled))
+    else:
+        print("     | %s: 已接管(可滚范围 %dpx，不量跟手)" % (label, bar.maximum()))
+assert not [a for a in mobile_ui.TouchScrollAreas(main) if not getattr(a, "_jmTouchScroll", False)
+            and type(a).__name__ not in ("QGraphicsView", "ReadGraphicsView")], \
+    "还有滚动区域没被接管: %s" % [(type(a).__name__, a.objectName())
+                                for a in mobile_ui.TouchScrollAreas(main)
+                                if not getattr(a, "_jmTouchScroll", False)]
+print("[ok] 全量清点: %d 个滚动区域里只剩看图控件(QGraphicsView 自己拖动翻页)没接管"
+      % len(mobile_ui.TouchScrollAreas(main)))
+
 # ④ "在下拉框/数值框附近滑动会误触它们"
 #    下拉框/数值框在 **press** 时就生效，所以守卫要连 press 一起扣住，点按时再重放。
 main.SwitchWidgetAndClear(main.subStackWidget.indexOf(main.settingView))

@@ -1,11 +1,32 @@
 # coding:utf-8
 """ 手机竖屏/触摸界面适配层（模块状态 + 门面）
 
-行为与拆分前完全一致。所有会话级可变状态都定义在本模块，其它
-`mobile_ui_*` 子模块通过 `mobile_ui.<name>` 读写它，因此外部
-（含 android/tools 下的宿主回归）对 `mobile_ui.<name>` 的读取/
-写入语义不变。本模块用 `__getattr__` 惰性转发子模块里的函数，
-`from tools import mobile_ui` / `mobile_ui.X` 的调用方式不变。 """
+只在 Android(platform_mobile.IsAndroid()) 下生效，桌面端不会调用这里，
+因此桌面端的布局与交互保持原样(不影响主要功能)。
+
+适配内容：
+    1. 左侧固定 240px 导航栏 -> 抽屉式浮动面板(竖屏下不挤压内容宽度)
+    2. 对话框/页面里写死的过宽最小尺寸 -> 按屏幕宽度自动放宽
+    3. 漫画详情页/设置页/分流设置页 等"左导航 + 右内容"左右并排 -> 上下堆叠
+    4. 滚动区域全部支持手指拖动(动量滚动)
+    5. 顶部分页按钮在窄屏下压缩字号，避免溢出
+    6. 触摸防误触：滑动永远不会触发手指下的控件(下拉框/数值框/勾选框)
+    7. 返回键:先收菜单/抽屉 -> 再退出看图 -> 再回退页面 -> 最后退到后台
+    8. 看图界面的工具菜单改为整宽(原来固定 400px，在 384px 屏上跑到屏幕外)
+    9. 首页/列表每行放 2 个封面(原来按桌面 250px 封面尺寸只放得下 1 个)
+   10. 顶层窗口的 show/hide 延后到当前输入事件处理结束(见 DeferCall 注释)
+   11. 首页顶部的"分区"标签条支持手指横划滚动 + 惯性(与所有滑动共用一套判定，用合成的像素滚轮事件驱动，见 mobile_ui_touch)；切分区后按新页的真实视口宽重排封面
+       (隐藏页的列表视口是"没布局过"的假值，见 mobile_ui_grid.ReflowGridCoverForPage)
+   12. 后建出来的滚动区域(首页分区页、详情页/设置页里的滚动区、看图工具菜单等)自动接管手指滚动：
+       这些页面是网络回来后/进详情页时才建的，Apply/OnShown 那一次全量扫描够不着它们，
+       真机现象就是"首页只有最新上传能滑"(见 mobile_ui_touch._ScrollWatcher)
+
+实现按关注点拆到同目录的 `mobile_ui_*.py`(base/hooks/window/drawer/layout/
+reader/grid/touch/diag)；本模块只持有会话级可变状态，并对外保持
+`mobile_ui.X` 门面(`__getattr__` 惰性转发)。所有会话级可变状态都定义在本模块，
+子模块通过 `mobile_ui.<name>` 读写它，因此外部(含 android/tools 下的宿主回归)
+对 `mobile_ui.<name>` 的读取/写入语义不变，`from tools import mobile_ui` /
+`mobile_ui.X` 的调用方式也不变。 """
 from tools.mobile_ui_base import *  # noqa: F401,F403
 from tools.mobile_ui_base import (_DescribeWidget, _GuardMode, _InPopup, _InTouchArea, _IsDescendant, _SelfAndChildren, _WidgetAlive, _WindowType)
 
@@ -64,6 +85,11 @@ _readerDrag = None
 
 
 # ---------------------------------------------------------------------------
+# 滑动只有一处：`_TouchGuard` 这个 App 级过滤器把每一次手指滑动只判定一次
+# (点按 / 滚动 / 标签条横划)，点按再原样重放给控件；滚动区域的手势交给 Qt 自己的
+# QScroller(见 mobile_ui_touch.EnableTouchScroll)，只有 QTabBar 没有公开的偏移
+# API，才用合成的"逐像素滚轮事件"驱动(见 mobile_ui_touch._TabBarScroll)。
+#
 # 触摸防误触(tap guard)
 # ---------------------------------------------------------------------------
 #
@@ -92,6 +118,9 @@ _readerDrag = None
 #   * Qt::Popup 弹窗(下拉列表、右键菜单)里的点击/滚动不拦，否则列表没法点
 
 _touchGuard = None
+
+# "后来才建的滚动区域自动接管"(见 mobile_ui_touch._ScrollWatcher)
+_scrollWatcher = None
 
 
 # ---------------------------------------------------------------------------
