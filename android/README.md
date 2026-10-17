@@ -646,18 +646,37 @@ wsl -u root -e bash -lc 'bash <仓库根>/android/tools/wsl_build_apk.sh --versi
 ```
 
 **为什么解包进 site-packages 就能用**：pycryptodome 的 cffi 扩展（`Crypto/Cipher/_raw_*.so`）
-走的就是这条路 —— `.so` 随 private.tar 解包到应用数据目录后 `dlopen`，targetSdk 34 真机上已验证可用。
+走的就是这条路。注意**落点不是 `assets/private.tar`** —— p4a 的 qt bootstrap 把整个
+site-packages 打成 `lib/arm64-v8a/libpybundle.so`（一个 tar.gz 伪装成 .so，102MB），
+运行时由 `PythonUtil` 解包到应用私有目录的 `_python_bundle/` 下再 `import`，
+所以 `.so` 能按正常路径 `dlopen`。排查时 `unzip -p apk lib/arm64-v8a/libpybundle.so | tar tz`
+（或本仓库的 `wsl_verify_new_apk.sh`），别去 private.tar 里找 site-packages。
 
 **自动生效**：真包进 site-packages 后 `import curl_cffi` 优先命中真包（垫片只在真包缺失时才被
 `android/main.py` 加进 `sys.path`）；`IsAdvancedTlsSupported()` 找不到 `HTTP3_ECH_SUPPORTED`
 属性 → 返回 True，3.9 那套 HTTP/3、ECH 失败降级链路自动启用。
 
-**验证**（`wsl_verify_new_apk.sh` / `wsl_check_sync.sh` 已加对应断言）：
-`libpython3.14.so` + `libc++_shared-d523468d.so` 在 `lib/arm64-v8a/`、
-`curl_cffi/_wrapper.abi3.so` 与 `curl_cffi/fingerprints.pyc` 在 private.tar 里。
+**验证**（`wsl_verify_new_apk.sh` / `wsl_check_sync.sh` / `wsl_collect_apk.sh` 已加对应断言）：
+`libpython3.14.so` + `libc++_shared-d523468d.so` 在 `lib/arm64-v8a/`；`libpybundle.so` 里
+有 `_python_bundle/site-packages/curl_cffi/_wrapper.abi3.so`、`curl_cffi/fingerprints.pyc`、
+`curl_cffi/requests/session.pyc`、`curl_cffi.libs/libc++_shared-d523468d.so` 与
+`_cffi_backend.so`（cffi 2.1.1）。
 
 > 仍是**构建期自洽 + 宿主冒烟**的验证：本机没有真机（`adb devices` 为空），
 > "TLS 指纹伪装真的绕过 CF"要你在真机上确认。
+
+**3.14 迁移踩过的坑**（都已修在脚本里）：
+
+| 坑 | 现象 | 处理 |
+| --- | --- | --- |
+| p4a 自带 `3.14_armv7l_fix.patch` 是按 3.14.0 写的 | 3.14.8 上 `patch` 报 `Hunk #1 FAILED` | 上游 3.14.8 已含该修复（`Lib/sysconfig/__init__.py` 里有 `"arm": "armeabi_v7a"`），recipe 改成 `_p_version < Version("3.14.8")` 才打 |
+| `wsl_fix_recipe_urls.sh` 会强设 Python 版本 | 单独跑会把 3.14.8 改回 3.11.13 | 默认 `PYVER` 改成 3.14.8，且 `wsl_build_apk.sh` 里 fix 之后固定再跑 `wsl_patch_p4a_versions.sh` |
+| 被 kill 的构建留下截断源码包 | 大小够、`tar xf` 报 `unexpected EOF` | `wsl_seed_native_pkgs.sh` 用 `tar -tzf`/`unzip -t` 做完整性校验，不过就删掉重下 |
+| `distutils` 在 3.12 已移除 | `batch_sr_tool_view.py` import 直接崩 | 实测是死 import（全文件无调用），删掉 |
+| PySide6 6.12 剥掉了 `__doc__` | `host_test_file_dialog.py` 断 docstring 里的 `Tuple[str, str]` 失败 | 改成 docstring 非空才断言，为空则跳过（形状在 6.11 已验证，委托是原样转发） |
+| 宿主装了真 curl_cffi | `host_test_net_fallback.py` A 段"垫片语义"误命中真包 | shims 从 `sys.path.append` 改 `insert(0)` |
+| 旧 Qt wheel 混在 wheels/ 目录 | 构建脚本 `ls \| head -1` 按字符串序选中 6.11.2（cp311） | fetch 脚本把非目标版本归档进 `wheels/archive/`，build 脚本再加 abi3 断言 |
+
 
 ---
 
@@ -929,9 +948,11 @@ pyside6-android-deploy             # 用补丁后的 spec 正式打包
 工具每次 `--init` 都会把它重置成 `0.1`，所以必须由补丁覆盖，值取
 `android/tools/patch_buildozer_spec.py` 里的 `AppVersion`（可用 `--version` 临时覆盖）。
 p4a 用 `"10" + minSdk + 逐段(*100 累加)的版本号` 推导 `versionCode`：
-`0.1/minSdk34 → 10341`、`0.2 → 10342`。**只能往上改** —— versionCode 变小会让
+`0.1/minSdk34 → 10341`、`0.2 → 10342`、`0.3 → 10343`。**只能往上改** —— versionCode 变小会让
 `adb install -r` 报 `INSTALL_FAILED_VERSION_DOWNGRADE`（手机上得先卸载）。
-注意这是 Android 包版本，跟桌面端的 `config.RealVersion`（上游版本号，用于检查更新）无关。
+`wsl_build_apk.sh --version 0.3` 会把值透传给补丁脚本（detached 启动脚本也支持透传）。
+注意这是 Android 包版本，跟桌面端的 `config.RealVersion`（上游版本号，用于检查更新）无关，
+**迁移 CPython 3.14 也没有动它**。
 
 ### 9.2 Android 上的依赖取舍（实测）
 
@@ -940,7 +961,7 @@ p4a 用 `"10" + minSdk + 逐段(*100 累加)的版本号` 推导 `versionCode`�
 | lxml / pillow / pycryptodome | p4a 有 recipe，正常编译（`tools/tool.py` 顶层 import lxml，缺了应用起不来） |
 | bs4 / natsort / tqdm / pysmb / requests / webdavclient3 / pysocks 等 | 纯 python，p4a 用 pip 装（走清华镜像） |
 | **jmcomic** | 自定义 recipe `android/recipes/jmcomic`，用 `--no-deps` 安装：它的依赖 `curl-cffi` 在 Android 上编不出来，装本体即可 |
-| **curl_cffi** | 不进 requirements；由 `android/shims/curl_cffi` 垫片顶替（随 APK 作为 assets 打包，`main.py` 检测不到真库时加入 sys.path）。代价：没有 Chrome TLS 指纹 |
+| **curl_cffi** | 现在走 `android/recipes/curl_cffi` **解包官方 android wheel**（0.16.3 cp314，带 TLS 指纹 + HTTP/3 + ECH，见 §3.10）；`android/shims/curl_cffi` 垫片仍在 APK 里，但只在真包缺失时兜底 |
 | smbprotocol / cryptography | 暂不打包（需要 Rust 交叉编译）；SMBv3 上传功能在 Android 上不可用 |
 
 ### 9.3 引擎自测结论（x86_64 宿主实测）
