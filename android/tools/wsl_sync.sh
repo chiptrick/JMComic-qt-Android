@@ -16,6 +16,7 @@ rsync -a --delete \
     --exclude 'android/libs/' --exclude 'android/wheels/' \
     --exclude 'android/*.apk' --exclude 'android/build_logs/' \
     --exclude 'android/deployment/' \
+    --exclude '.workbuddy/' \
     "$WIN/" "$WORK/src/"
 echo "同步完成 -> $WORK/src"
 echo "sr_qnn/cpp: $(ls "$WORK/src/android/sr_qnn/cpp" 2>/dev/null | tr '\n' ' ')"

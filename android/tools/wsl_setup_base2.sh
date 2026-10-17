@@ -34,6 +34,7 @@ rsync -a --delete \
     --exclude '.git' --exclude '.vs' --exclude 'build_out' --exclude 'logs' \
     --exclude '__pycache__' --exclude 'android/.venv' --exclude 'android/app_src' \
     --exclude 'android/libs' --exclude 'android/.work' --exclude 'android/wheels' \
+    --exclude '.workbuddy' \
     "$SRC/" "$WORK/src/"
 echo "仓库副本大小: $(du -sh "$WORK/src" | cut -f1)"
 ls "$WORK/src"
