@@ -21,7 +21,7 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "${HERE}/.." && pwd)"
 
 # ------------------------------------------------------------------ 可调参数
-ORT_VERSION="${ORT_VERSION:-1.23.2}"           # onnxruntime-android-qnn 版本
+ORT_VERSION="${ORT_VERSION:-1.29.0}"           # onnxruntime-android-qnn 版本
 ANDROID_PLATFORM="${ANDROID_PLATFORM:-android-34}"  # 最低 Android 14
 ABI="${ABI:-arm64-v8a}"
 BUILD_TYPE="${BUILD_TYPE:-debug}"              # debug -> apk, release -> aab

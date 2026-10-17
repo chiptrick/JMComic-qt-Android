@@ -108,7 +108,15 @@ class TaskWaifu2x(TaskBase):
                 err = ""
                 if config.CanWaifu2x:
                     if task.saveParams:
-                        task.imgData = TaskMulti().GetJmPicResultsResult(task.imgData, task.saveParams[0], task.saveParams[1], task.saveParams[2])
+                        # 在线页是"打乱"的，超分前必须先还原(还原失败就别硬跑，
+                        # 否则超分会作用在错位的像素上，出图也是花的)
+                        data = TaskMulti().GetJmPicResultsResult(task.imgData, task.saveParams[0], task.saveParams[1], task.saveParams[2])
+                        if not data:
+                            Log.Warn("Waifu2x segment failed, taskId: {}, 跳过本页超分".format(str(task.taskId)))
+                            task.status = Status.FileFormatError
+                            self.taskObj.convertBack.emit(taskId)
+                            continue
+                        task.imgData = data
 
                     from sr_vulkan import sr_vulkan as sr
                     scale = task.model.get("scale", 0)
@@ -118,7 +126,8 @@ class TaskWaifu2x(TaskBase):
                         sts = sr.add(task.imgData, task.model.get('model', 0), task.taskId, task.model.get("width", 0), task.model.get("high", 0), format=mat, tileSize=tileSize)
                     else:
                         sts = sr.add(task.imgData, task.model.get('model', 0), task.taskId, scale, format=mat, tileSize=tileSize)
-
+                    Log.Info("[SRUI] sr.add taskId:{}, scale:{}, sts:{}, imgLen:{}B".format(
+                        task.taskId, scale, sts, len(task.imgData) if task.imgData else 0))
                     if sts <= 0:
                         err = sr.getLastError()
 
@@ -150,6 +159,8 @@ class TaskWaifu2x(TaskBase):
                 break
             t1 = CTime()
             data, format, taskId, tick = info
+            Log.Info("[SRUI] sr.load 拿到结果 taskId:{}, len:{}B, format:{}, tick:{:.2f}s".format(
+                taskId, len(data) if data else 0, format, tick))
             info = self.tasks.get(taskId)
             tick = round(tick, 2)
             if not info:
@@ -160,10 +171,19 @@ class TaskWaifu2x(TaskBase):
                 lenData = len(data)
             if lenData <= 0:
                 info.status = Status.FileFormatError
-                Log.Warn("convert error, taskId: {}, dataLen:{}, sts:{} tick:{}, skip:{}".format(str(taskId), lenData,
-                                                                                          str(format),
-                                                                                          str(tick), str(Setting.IsSkipPic.value)))
-                if info.savePath and Setting.IsSkipPic.value:
+                err = ""
+                try:
+                    if config.CanWaifu2x:
+                        from sr_vulkan import sr_vulkan as sr
+                        err = sr.getLastError() or ""
+                except Exception:
+                    err = ""
+                Log.Warn("convert error, taskId: {}, dataLen:{}, sts:{} tick:{}, skip:{}, err:{}".format(
+                    str(taskId), lenData, str(format), str(tick), str(Setting.IsSkipPic.value), str(err)))
+                # 只有引擎没有明确报错(如偶发超时)时才允许用原图顶替；
+                # 明确报错(模型文件缺失等)必须走错误状态——把原图当超分结果
+                # 存盘，表现就是"超分没生效但任务显示成功"
+                if info.savePath and Setting.IsSkipPic.value and not err:
                     info.status = Status.Ok
                     data = info.imgData
 
@@ -205,11 +225,13 @@ class TaskWaifu2x(TaskBase):
         info.preDownPath = preDownPath
         info.noSaveCache = noSaveCache
         info.saveParams = saveParams
-        if not noSaveCache and path and Setting.SavePath.value:
+        # 超分结果一律进应用缓存目录(不再依赖"下载保存目录"是否设置)：
+        # 手机上算一张 2x 页可能要好几秒甚至几十秒，翻走再翻回来必须能秒开，
+        # 否则每次都要重算一遍，表现就是"超分一直没生效"。
+        if not noSaveCache and path:
             a = crc32(json.dumps(model).encode("utf-8"))
-            if Setting.SavePath.value:
-                path = os.path.join(Setting.GetCachePath(), config.Waifu2xPath, path)
-                info.cachePath = path + "-{}".format(a)
+            cachePath = os.path.join(Setting.GetCachePath(), config.Waifu2xPath, path)
+            info.cachePath = cachePath + "-{}".format(a)
 
         if cleanFlag:
             info.cleanFlag = cleanFlag

@@ -130,6 +130,16 @@ echo "===== [$(date +%T)] 3. 阶段2：补丁 buildozer.spec ====="
 # 插件放进 libs/arm64-v8a 后由 patch_buildozer_spec.py 自动并入 android.add_libs_arm64_v8a
 bash "$JM_REPO/android/tools/wsl_install_qt_plugins.sh"
 
+# 可选的厂商原生库(android/vendor_libs/*.so)。
+# 主要用途：QNN HTP 懒加载 libcdsprpc.so(FastRPC) 与 DSP 通信，如果机型没把它列进
+# public.libraries.txt，应用命名空间里就找不到它，HTP 设备建不起来 —— 表现是
+# "QNN 会话能建但一个节点都不接"。把 `adb pull /vendor/lib64/libcdsprpc.so` 放进
+# android/vendor_libs/ 重新打包，它就会随 app 的 lib 目录一起加载。
+if compgen -G "$ANDROID/vendor_libs/*.so" >/dev/null; then
+    cp -f "$ANDROID/vendor_libs/"*.so "$SRC/android/libs/arm64-v8a/" 2>/dev/null || true
+    echo "已并入厂商库: $(ls "$ANDROID/vendor_libs" | tr '\n' ' ')"
+fi
+
 # 应用图标：工具生成的 buildozer.spec 默认指向 PySide6 自带的 pyside_icon.jpg，
 # 装到手机上启动器图标就是 PySide 的 logo。这里用仓库里的 res/icon/logo_round.png
 # (与主窗口/托盘图标同一张图，512x512 带 alpha)。

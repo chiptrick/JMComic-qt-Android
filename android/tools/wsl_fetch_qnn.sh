@@ -6,7 +6,7 @@ set -euo pipefail
 WORK="${WORK:-"$JM_WORK"}"
 SRC="$WORK/src"
 LIBS="$SRC/android/libs/arm64-v8a"
-QNN_VER="${QNN_VER:-2.37.1}"
+QNN_VER="${QNN_VER:-2.42.0}"
 mkdir -p "$LIBS" "$WORK/tools" "$WORK/logs"
 exec > >(tee -a "$WORK/logs/fetch_qnn.log") 2>&1
 

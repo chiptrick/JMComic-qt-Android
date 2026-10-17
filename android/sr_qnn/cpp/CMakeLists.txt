@@ -56,3 +56,33 @@ set_target_properties(sr_qnn PROPERTIES
     OUTPUT_NAME "sr_qnn"
     BUILD_RPATH "$ORIGIN"
     INSTALL_RPATH "$ORIGIN")
+
+# ---------------------------------------------------------------------------
+# 独立进程入口(见 sr_qnn_proc.cpp 头注释)：App 进程的链接器命名空间加载不了
+# /vendor/lib64/libcdsprpc.so(FastRPC)，HTP 因此永远起不来；放到子进程里用
+# LD_LIBRARY_PATH 就能用设备自带的厂商库 —— local-dream 等项目的通行做法。
+# 产物按 buildozer 约定命名成 libsr_qnn_proc.so 随 APK 分发(extractNativeLibs
+# 会解到 nativeLibraryDir，可执行)。
+# 注意：可执行文件**故意不链接** libonnxruntime.so(下面 target_link_libraries 里没有
+# ONNXRUNTIME_LIB)。App lib 目录在 exec 出来的进程里不在链接器搜索路径内，DT_NEEDED
+# 会导致 main() 之前就被 "CANNOT LINK EXECUTABLE" 杀掉；改为运行时 dlopen 注入。
+add_executable(sr_qnn_proc sr_qnn.cpp sr_qnn_proc.cpp)
+target_include_directories(sr_qnn_proc PRIVATE ${ONNXRUNTIME_INCLUDE_DIR})
+target_link_libraries(sr_qnn_proc PRIVATE dl)
+target_compile_definitions(sr_qnn_proc PRIVATE SRQ_NO_DIRECT_ORT=1)
+# 注意：这里**故意不链接 log / android**。
+# 真机上 exec 报过：
+#   CANNOT LINK EXECUTABLE ".../libsr_qnn_proc.so": cannot locate symbol
+#   fmt::v11::vformat ... referenced by "/system/lib64/libinput.so"
+# 原因是 libandroid.so 会把系统的 libinput.so 带进依赖链，而它在这个命名空间里
+# 找不到 fmt 提供者，于是进程起不来。引擎只用 printf/fprintf(不调 ALOG)，
+# 所以把这两个 Android 专属库去掉，NEEDED 只剩 libc/libm/libdl —— 启动路径最短。
+target_compile_options(sr_qnn_proc PRIVATE -O3)
+# $ORIGIN：让可执行文件从自己所在目录(nativeLibraryDir)解析 libonnxruntime.so。
+# Android 上 app uid 进程是否认 LD_LIBRARY_PATH 并不保证，RUNPATH 一定会被用上 ——
+# 少了这个，子进程 exec 后会直接因为找不到 libonnxruntime.so 死掉(静默退出)。
+target_link_options(sr_qnn_proc PRIVATE "-Wl,-rpath,$ORIGIN")
+set_target_properties(sr_qnn_proc PROPERTIES
+    OUTPUT_NAME "sr_qnn_proc"
+    BUILD_RPATH "$ORIGIN"
+    INSTALL_RPATH "$ORIGIN")

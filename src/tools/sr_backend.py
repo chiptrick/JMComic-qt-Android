@@ -68,8 +68,20 @@ def IsQnn():
 
 
 def GetEngineName():
+    """ 引擎显示名；QNN 后端还要带上真实挂载状态
+
+    会话建立前 GetBackendInfo() 返回空；建立后可能返回
+    "QNN HTP (部分算子 CPU 回退)" / "CPU (ONNX Runtime, QNN 未生效)"。
+    这类降级必须让用户在日志里一眼看到，否则会被当成"QNN 超分很慢"。
+    """
     if IsQnn():
-        return "Qualcomm QNN (NPU/HTP)"
+        info = ""
+        try:
+            import sr_qnn
+            info = sr_qnn.GetBackendInfo()
+        except Exception:
+            pass
+        return "Qualcomm QNN / {}".format(info or "NPU/HTP")
     if _engineType == "vulkan":
         return "Vulkan"
     return "None"

@@ -327,6 +327,15 @@ class ReadTool(QtWidgets.QWidget, Ui_ReadImg):
     def OpenCurWaifu(self):
         if self.curWaifu2x.isChecked():
             self.readImg.SetIsWaifu2x(1)
+            # NPU 没生效时给一次明确提示：手机上纯 CPU 跑 cunet 单块就要 0.5s 左右，
+            # 一页要几十秒，用户只会觉得"超分点了没反应"。别让他白等。
+            try:
+                from tools import sr_backend
+                name = sr_backend.GetEngineName()
+                if "CPU" in name:
+                    QtOwner().ShowMsg("超分未使用 NPU（{}），单页可能需要数十秒".format(name))
+            except Exception:
+                pass
         else:
             self.readImg.SetIsWaifu2x(0)
         # self.scrollArea.changeScale.emit(self.scaleCnt)

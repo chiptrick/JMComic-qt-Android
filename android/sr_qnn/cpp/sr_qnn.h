@@ -22,6 +22,8 @@ typedef struct SrqResult {
 
 /* 初始化：加载模型表、创建 ONNX Runtime 环境。>=0 成功 */
 int srq_init(void);
+/* 进程模式专用：注入 OrtGetApiBase 函数指针(可执行文件不链接 libonnxruntime.so) */
+void srq_set_ort_api_base(void* fn);
 /* 设备/线程配置：device 为设备序号(getGpuInfo 顺序)，threads<=0 时自动 */
 int srq_init_set(int device, int threads);
 void srq_set_debug(int enable);
@@ -32,6 +34,8 @@ int srq_has_htp(void);
 int srq_get_cpu_core_num(void);
 int srq_get_gpu_core_num(void);
 const char* srq_get_last_error(void);
+/* 第一次"严格 HTP"失败的原始报错(QNN 一个节点都不接时，真正原因只在这里) */
+const char* srq_get_htp_error(void);
 
 /* 模型目录(存放 models.txt 与 .onnx)，不设置则用 JM_SR_MODELS 环境变量 */
 int srq_set_model_dir(const char* dir);

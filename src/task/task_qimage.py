@@ -82,6 +82,9 @@ class TaskQImage(TaskBase):
                     Stats["null"] += 1
                     Stats["lastError"] = "empty data"
                     Log.Warn("task_qimage: empty data, skip taskId:{}".format(taskId))
+                    # 必须回调一次 None：上层(看图页)是靠任务号判断"正在转换"的，
+                    # 失败却静默不回，页面就会永远停在"转换中"，超分图也再也不会被换上
+                    self.taskObj.imageBack.emit(taskId, None)
                     continue
 
                 # 分块还原("图片分割合成")：Android 上直接在 QImage 域里做 ——
@@ -106,6 +109,7 @@ class TaskQImage(TaskBase):
                     Stats["lastError"] = "segmentation returned no data"
                     Log.Error("task_qimage: segmentation failed, taskId:{}".format(taskId))
                     info.data = None
+                    self.taskObj.imageBack.emit(taskId, None)
                     continue
 
                 newQ = self.ConverQImage(info, q)
@@ -115,6 +119,7 @@ class TaskQImage(TaskBase):
                     Log.Error("task_qimage: decode failed (null QImage), taskId:{} len:{} head:{}".format(
                         taskId, len(info.data) if info.data else 0, _HexHead(info.data)))
                     info.data = None
+                    self.taskObj.imageBack.emit(taskId, None)
                     continue
                 Stats["ok"] += 1
 
@@ -128,6 +133,7 @@ class TaskQImage(TaskBase):
                         info.data = None
                 except Exception:
                     pass
+                self.taskObj.imageBack.emit(taskId, None)
                 continue
 
             # 只有真正解出来的图片才回调，绝不发 None/上一页的图

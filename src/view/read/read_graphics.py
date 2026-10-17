@@ -695,6 +695,9 @@ class ReadGraphicsView(QGraphicsView, SmoothScroll):
 
     def SetPixIem(self, index, data, isWaifu2x=False):
         if not self.allItems and ReadMode.isScroll(self.readImg.stripModel):
+            if isWaifu2x:
+                Log.Info("[SRUI] SetPixIem 被拦截(滚动模式但 allItems 空), index:{}, mode:{}".format(
+                    index, self.readImg.stripModel))
             return
         notPic = False
         if not data:
@@ -742,6 +745,9 @@ class ReadGraphicsView(QGraphicsView, SmoothScroll):
         label.setPos(pos)
         # print("set index, {}".format(index))
         label.setPixmap(newData)
+        if isWaifu2x:
+            Log.Info("[SRUI] SetPixIem 已写入超分 pixmap, index:{}, 物理{}x{}, DPR={}, 屏幕{}x{}".format(
+                index, newData.width(), newData.height(), radio, self.width(), self.height()))
         self.allItemsScale[index] = self.scaleCnt
         if not notPic:
             if isWaifu2x:

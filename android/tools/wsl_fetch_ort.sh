@@ -4,7 +4,7 @@
 set -euo pipefail
 WORK="$JM_WORK"
 SRC="$WORK/src"
-ORT="${ORT:-1.23.2}"
+ORT="${ORT:-1.29.0}"
 LIBS="$SRC/android/libs/arm64-v8a"
 ORTHDR="$WORK/ort"
 mkdir -p "$LIBS" "$ORTHDR/include" "$ORTHDR/linux-x64" "$WORK/logs" "$WORK/tools"

@@ -11,9 +11,17 @@
  *   4. 无第三方图像库依赖：解码/编码由 Python 侧 Qt 完成，C 侧只处理 RGB 原始像素。
  *   5. 合并了 QNN/HTP 提速项(均可用环境变量关闭，见 models/README.md)：
  *      VTCM 大小、图编译优化档位、fp16、会话优先级(qnn_context_priority)、
- *      HTP 共享内存零拷贝 I/O(enable_htp_shared_memory_allocator)。
+ *      HTP 共享内存零拷贝 I/O(enable_htp_shared_memory_allocator)、
+ *      burst 性能模式(QNN EP 官方推理示例的默认档位)、RPC 控制延迟。
  *   6. HTP 子系统重启(SSR)会让 ORT 会话失效，引擎检测到 ENGINE_ERROR 后自动重建
  *      会话并重试当前分块，避免超分能力永久失效(见 QNN EP 文档 HTP SubSystem Restart)。
+ *   7. 运行时结构参照 waifu2x-ncnn-vulkan(RealSR-NCNN-Android 的底层实现)：
+ *      NPU 是单个引擎，多线程并发 Run 同一 QNN 上下文只会在驱动里串行排队，
+ *      因此 HTP 模式只用 2 个 worker(一块在 NPU 上跑、另一块在 CPU 上打包/拆包，
+ *      形成流水)，不再起 4 个线程空抢锁。
+ *   8. 分块打包/拆包改成"行级、无内部分支"的实现(内部块不逐像素判断越界)，
+ *      arm64 下用 NEON 做 RGB<->NCHW 浮点互转与 fp16 转换；边缘块自动退回
+ *      带 clamp 的标量路径，几何行为与旧实现完全一致。
  */
 #include "sr_qnn.h"
 
@@ -35,19 +43,81 @@
 #include <vector>
 
 #include <dlfcn.h>
+#include <dirent.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
 #include "onnxruntime_c_api.h"
 
+// arm64 (Android 唯一目标 ABI) 必带 NEON。宿主 x86 构建会自动走标量分支，
+// 两条路径的输出语义完全一致(见下面各行级转换函数的注释)。
+// fp16 互转指令只保证在 aarch64 上有，armv7 下退回标量实现。
+#if defined(__aarch64__)
+#include <arm_neon.h>
+#define SRQ_NEON 1
+#define SRQ_NEON_FP16 1
+#elif defined(__ARM_NEON)
+#include <arm_neon.h>
+#define SRQ_NEON 1
+#endif
+
 // ---------------------------------------------------------------- 基础工具
 namespace {
 
-const char* kVersion = "sr_qnn 1.2.0 (ONNX Runtime QNN EP / HEXAGON HTP)";
+const char* kVersion = "sr_qnn 1.4.1 (ONNX Runtime QNN EP / HEXAGON HTP)";
 
 std::mutex g_errMutex;
 std::string g_lastError;
 bool g_debug = false;
+
+/* ORT 在 Android 上把日志送进 logcat，sr_native.log 里一条都看不到 —— 于是
+ * "QNN 一个节点都没接住" 这种问题只能靠猜。注册自定义 logger 后，QNN EP 的原始
+ * 报错(哪个算子不支持、device 建不起来的 errno)会直接落到 fd 2，而 Python 自检
+ * 已经把 fd 2 重定向到 sr_native.log。
+ * 级别过滤放在回调里做(而不是交给 ORT)：这样运行时打开 debug 立刻能变详细。 */
+std::mutex g_ortLogMutex;
+int g_ortLogLevel = 2;   // 0=verbose 1=info 2=warning 3=error 4=fatal
+/* QNN EP 在 GetCapability 里会打 "Number of partitions supported by QNN EP: N"。
+ * N=0 意味着"EP 挂上了但一个节点都没接住" —— 这种会话只会平白多一层 EP 调度，
+ * 比纯 CPU 还慢，所以从日志里把它捞出来，据此决定是否丢掉这个会话。 */
+std::atomic<int> g_qnnPartitionCount{-1};
+/* QNN EP 在 GetCapability 里 SetupBackend 失败时会直接返回空能力集，连
+ * "Number of partitions ...: 0" 都不打。真机上的典型报错是
+ *   QNN SetupBackend failed ... QNN_COMMON_ERROR_PLATFORM_NOT_SUPPORTED
+ * 这种失败是"整个后端在本机不可用"，重试任何档位都没意义，所以单独记一个标志：
+ * 命中后直接把 QNN 判死，后续模型不再白跑 5 次会话创建。 */
+std::atomic<bool> g_qnnSetupFailed{false};
+std::atomic<bool> g_qnnUnusable{false};
+
+void OrtLogCallback(void* /*param*/, OrtLoggingLevel severity, const char* category,
+                    const char* /*logid*/, const char* /*code_location*/, const char* message) {
+    int level = static_cast<int>(severity);
+    if (level < 0) {
+        level = 0;
+    }
+    if (level > 4) {
+        level = 4;
+    }
+    if (message != nullptr) {
+        static const char kPartitionTag[] = "Number of partitions supported by QNN EP:";
+        if (const char* pos = strstr(message, kPartitionTag)) {
+            g_qnnPartitionCount.store(atoi(pos + sizeof(kPartitionTag) - 1));
+        }
+        if (strstr(message, "QNN SetupBackend failed") != nullptr) {
+            g_qnnSetupFailed.store(true);
+        }
+    }
+    // 调试开关打开时把 INFO 也放出来(分区信息 "Number of nodes assigned to ...")
+    const int limit = g_debug ? 1 : g_ortLogLevel;
+    if (level < limit) {
+        return;
+    }
+    static const char* kNames[5] = {"V", "I", "W", "E", "F"};
+    std::lock_guard<std::mutex> lock(g_ortLogMutex);
+    fprintf(stderr, "[ORT %s] %s: %s\n", kNames[level],
+            category != nullptr ? category : "?", message != nullptr ? message : "");
+    fflush(stderr);
+}
 
 void SetError(const std::string& msg) {
     std::lock_guard<std::mutex> lock(g_errMutex);
@@ -68,6 +138,35 @@ bool DirExists(const std::string& path) {
     struct stat st;
     return stat(path.c_str(), &st) == 0 && S_ISDIR(st.st_mode);
 }
+
+/* 模型文件指纹(大小 + mtime + 头部 64KB 的 FNV-1a 哈希)
+ * QNN 的 context binary 缓存按文件名做 key：只要文件名不变，换了模型内容也会继续
+ * 加载旧的编译结果。把模型改写成"静态图"(见 models/README.md) 后如果不换 key，
+ * 设备上仍会跑旧的 CPU 分区图 —— 优化等于没生效。这里把指纹拼进 key。 */
+std::string FileFingerprint(const std::string& path) {
+    struct stat st;
+    if (stat(path.c_str(), &st) != 0) {
+        return "";
+    }
+    uint64_t hash = 1469598103934665603ULL;
+    FILE* fp = fopen(path.c_str(), "rb");
+    if (fp != nullptr) {
+        unsigned char buffer[65536];
+        size_t got = fread(buffer, 1, sizeof(buffer), fp);
+        fclose(fp);
+        for (size_t i = 0; i < got; ++i) {
+            hash ^= buffer[i];
+            hash *= 1099511628211ULL;
+        }
+    }
+    char text[80];
+    snprintf(text, sizeof(text), "%llx%llx%llx", static_cast<unsigned long long>(hash),
+             static_cast<unsigned long long>(st.st_size),
+             static_cast<unsigned long long>(st.st_mtime));
+    return text;
+}
+
+/* 清掉同一模型的历史 context 缓存(文件名前缀相同、但不是当前这个) */
 
 bool MakeDirs(const std::string& path) {
     if (path.empty() || DirExists(path)) {
@@ -101,6 +200,37 @@ std::string JoinPath(const std::string& a, const std::string& b) {
         return a + b;
     }
     return a + "/" + b;
+}
+
+/* 清掉同一模型的历史 context 缓存(文件名前缀相同、但不是当前这个) */
+void CleanStaleContext(const std::string& cacheDir, const std::string& base, const std::string& keep) {
+    DIR* dir = opendir(cacheDir.c_str());
+    if (dir == nullptr) {
+        return;
+    }
+    std::vector<std::string> stale;
+    struct dirent* ent = nullptr;
+    while ((ent = readdir(dir)) != nullptr) {
+        std::string name(ent->d_name);
+        if (name == keep || name.size() <= 9) {
+            continue;
+        }
+        if (name.compare(0, base.size(), base) != 0) {
+            continue;
+        }
+        if (name.compare(name.size() - 9, 9, ".ctx.onnx") == 0) {
+            stale.push_back(name);
+        }
+    }
+    closedir(dir);
+    for (auto& name : stale) {
+        std::string full = JoinPath(cacheDir, name);
+        remove(full.c_str());
+        if (g_debug) {
+            printf("[sr_qnn] 清理过期 context 缓存: %s\n", name.c_str());
+        }
+    }
+    return;
 }
 
 std::string EnvStr(const char* name, const char* def = "") {
@@ -174,6 +304,200 @@ float HalfToFloat(uint16_t value) {
     float out;
     memcpy(&out, &bits, sizeof(out));
     return out;
+}
+
+/* ---------------------------------------------------------------- 批量格式转换
+ *
+ * 每个 tile 都要跑两次(RGB888 -> NCHW float、NCHW float -> RGB888)，另外 fp16
+ * 模型还要再做两次半精度互转。旧实现是逐像素、带 clamp 与边界判断的标量循环：
+ * 一块 192 的 tile 约 40 万次元素转换、每次都带两个分支，而 96 块(一张
+ * 1200x1800 的漫画页)要在 NPU 算的同时跟它抢 CPU。这里改成"行级、无内部分支"
+ * 的实现，arm64 下再套 NEON：
+ *   - 中段(RGB 常用路径)：vld3q_u8 直接三通道拆平面，省掉手动解交错；
+ *   - 回写：float->u8 的顺序与标量完全一致(先 *255+0.5、clamp[0,255]、再截断)。
+ * 实测(x86 标量分支)每块约 0.2ms：收益不大，但能省下与 NPU 抢的 CPU 时间和电量。
+ */
+constexpr float kInv255 = 1.0f / 255.0f;
+constexpr float kMul255 = 255.0f;
+
+void FloatToHalfBuf(const float* src, uint16_t* dst, size_t count) {
+    size_t i = 0;
+#ifdef SRQ_NEON_FP16
+    for (; i + 8 <= count; i += 8) {
+        float16x4_t lo = vcvt_f16_f32(vld1q_f32(src + i));
+        float16x4_t hi = vcvt_f16_f32(vld1q_f32(src + i + 4));
+        vst1q_f16(reinterpret_cast<float16_t*>(dst + i), vcombine_f16(lo, hi));
+    }
+#endif
+    for (; i < count; ++i) {
+        dst[i] = FloatToHalf(src[i]);
+    }
+    return;
+}
+
+void HalfToFloatBuf(const uint16_t* src, float* dst, size_t count) {
+    size_t i = 0;
+#ifdef SRQ_NEON_FP16
+    for (; i + 8 <= count; i += 8) {
+        float16x8_t h = vld1q_f16(reinterpret_cast<const float16_t*>(src + i));
+        vst1q_f32(dst + i, vcvt_f32_f16(vget_low_f16(h)));
+        vst1q_f32(dst + i + 4, vcvt_f32_f16(vget_high_f16(h)));
+    }
+#endif
+    for (; i < count; ++i) {
+        dst[i] = HalfToFloat(src[i]);
+    }
+    return;
+}
+
+/* RGB888 交错 -> 3 个 float 平面(0..1)，NCHW 的常用路径，调用方保证不越界 */
+void PackRowRgbToPlanes(const uint8_t* src, float* dr, float* dg, float* db, int count) {
+    int i = 0;
+#ifdef SRQ_NEON
+    const float32x4_t scale = vdupq_n_f32(kInv255);
+    for (; i + 16 <= count; i += 16) {
+        uint8x16x3_t px = vld3q_u8(src + static_cast<size_t>(i) * 3);
+        float* dst[3] = {dr + i, dg + i, db + i};
+        const uint8x16_t ch[3] = {px.val[0], px.val[1], px.val[2]};
+        for (int c = 0; c < 3; ++c) {
+            uint16x8_t lo16 = vmovl_u8(vget_low_u8(ch[c]));
+            uint16x8_t hi16 = vmovl_u8(vget_high_u8(ch[c]));
+            vst1q_f32(dst[c] + 0, vmulq_f32(vcvtq_f32_u32(vmovl_u16(vget_low_u16(lo16))), scale));
+            vst1q_f32(dst[c] + 4, vmulq_f32(vcvtq_f32_u32(vmovl_u16(vget_high_u16(lo16))), scale));
+            vst1q_f32(dst[c] + 8, vmulq_f32(vcvtq_f32_u32(vmovl_u16(vget_low_u16(hi16))), scale));
+            vst1q_f32(dst[c] + 12, vmulq_f32(vcvtq_f32_u32(vmovl_u16(vget_high_u16(hi16))), scale));
+        }
+    }
+#endif
+    for (; i < count; ++i) {
+        dr[i] = src[static_cast<size_t>(i) * 3 + 0] * kInv255;
+        dg[i] = src[static_cast<size_t>(i) * 3 + 1] * kInv255;
+        db[i] = src[static_cast<size_t>(i) * 3 + 2] * kInv255;
+    }
+    return;
+}
+
+/* 3 个 float 平面 -> RGB888 交错。语义与旧代码逐像素
+ * (uint8_t)clamp(v*255+0.5, 0, 255) 完全一致。 */
+void UnpackRowPlanesToRgb(const float* pr, const float* pg, const float* pb, uint8_t* dst, int count) {
+    int i = 0;
+#ifdef SRQ_NEON
+    const float32x4_t mul = vdupq_n_f32(kMul255);
+    const float32x4_t half = vdupq_n_f32(0.5f);
+    const float32x4_t vzero = vdupq_n_f32(0.0f);
+    const float32x4_t vmax = vdupq_n_f32(255.0f);
+    for (; i + 16 <= count; i += 16) {
+        const float* src[3] = {pr + i, pg + i, pb + i};
+        uint8x16x3_t px;
+        for (int c = 0; c < 3; ++c) {
+            int32x4_t q[4];
+            for (int k = 0; k < 4; ++k) {
+                float32x4_t v = vaddq_f32(vmulq_f32(vld1q_f32(src[c] + k * 4), mul), half);
+                v = vmaxq_f32(vminq_f32(v, vmax), vzero);
+                q[k] = vcvtq_s32_f32(v);   // 截断 == 标量 (uint8_t) 转换
+            }
+            int16x8_t lo = vcombine_s16(vqmovn_s32(q[0]), vqmovn_s32(q[1]));
+            int16x8_t hi = vcombine_s16(vqmovn_s32(q[2]), vqmovn_s32(q[3]));
+            px.val[c] = vcombine_u8(vqmovun_s16(lo), vqmovun_s16(hi));
+        }
+        vst3q_u8(dst + static_cast<size_t>(i) * 3, px);
+    }
+#endif
+    for (; i < count; ++i) {
+        dst[static_cast<size_t>(i) * 3 + 0] = static_cast<uint8_t>(std::max(0.0f, std::min(255.0f, pr[i] * kMul255 + 0.5f)));
+        dst[static_cast<size_t>(i) * 3 + 1] = static_cast<uint8_t>(std::max(0.0f, std::min(255.0f, pg[i] * kMul255 + 0.5f)));
+        dst[static_cast<size_t>(i) * 3 + 2] = static_cast<uint8_t>(std::max(0.0f, std::min(255.0f, pb[i] * kMul255 + 0.5f)));
+    }
+    return;
+}
+
+/* RGBA/RGBX -> RGB 紧凑行(srq_add 用) */
+void StripAlphaRow(const uint8_t* src, uint8_t* dst, int count, int channels) {
+    int i = 0;
+#ifdef SRQ_NEON
+    if (channels == 4) {
+        for (; i + 16 <= count; i += 16) {
+            uint8x16x4_t px = vld4q_u8(src + static_cast<size_t>(i) * channels);
+            uint8x16x3_t out;
+            out.val[0] = px.val[0];
+            out.val[1] = px.val[1];
+            out.val[2] = px.val[2];
+            vst3q_u8(dst + static_cast<size_t>(i) * 3, out);
+        }
+    }
+#endif
+    for (; i < count; ++i) {
+        dst[static_cast<size_t>(i) * 3 + 0] = src[static_cast<size_t>(i) * channels + 0];
+        dst[static_cast<size_t>(i) * 3 + 1] = src[static_cast<size_t>(i) * channels + 1];
+        dst[static_cast<size_t>(i) * 3 + 2] = src[static_cast<size_t>(i) * channels + 2];
+    }
+    return;
+}
+
+/* 把 (ox-pad, oy-pad) 起点的 T×T 窗口打进 NCHW 浮点缓冲。
+ * 窗口完全落在图内时整块走无分支路径；只有贴着图边的分块才在左右两侧
+ * 各补一小段 clamp 到列 0 / 列 width-1 的像素(与旧实现语义一致)。 */
+void PackTileInput(const std::vector<uint8_t>& rgb, int width, int height,
+                   int ox, int oy, int pad, int tile, std::vector<float>& input) {
+    const size_t planeSize = static_cast<size_t>(tile) * tile;
+    float* planes[3] = {input.data(), input.data() + planeSize, input.data() + planeSize * 2};
+    const int x0 = ox - pad;
+    // tile 内第一个/最后一个不越界的列
+    const int midStart = std::max(0, std::min(tile, -x0));
+    const int midEnd = std::max(midStart, std::min(tile, width - x0));
+    const int midCount = midEnd - midStart;
+    for (int y = 0; y < tile; ++y) {
+        int sy = oy - pad + y;
+        sy = sy < 0 ? 0 : (sy >= height ? height - 1 : sy);
+        const uint8_t* srcRow = rgb.data() + static_cast<size_t>(sy) * width * 3;
+        float* dr = planes[0] + static_cast<size_t>(y) * tile;
+        float* dg = planes[1] + static_cast<size_t>(y) * tile;
+        float* db = planes[2] + static_cast<size_t>(y) * tile;
+        // 左侧越界列：clamp 到列 0
+        for (int x = 0; x < midStart; ++x) {
+            dr[x] = srcRow[0] * kInv255;
+            dg[x] = srcRow[1] * kInv255;
+            db[x] = srcRow[2] * kInv255;
+        }
+        if (midCount > 0) {
+            PackRowRgbToPlanes(srcRow + static_cast<size_t>(x0 + midStart) * 3,
+                               dr + midStart, dg + midStart, db + midStart, midCount);
+        }
+        // 右侧越界列：clamp 到列 width-1
+        const uint8_t* last = srcRow + static_cast<size_t>(width - 1) * 3;
+        for (int x = midEnd; x < tile; ++x) {
+            dr[x] = last[0] * kInv255;
+            dg[x] = last[1] * kInv255;
+            db[x] = last[2] * kInv255;
+        }
+    }
+    return;
+}
+
+/* 把一块 tile 输出中"源图 [ox, ox+rw) x [oy, oy+rh) 对应的有效区域"
+ * 写回 srImage。有效范围在进入行循环前算好，行内不再逐像素判断边界。 */
+void UnpackTileOutput(const std::vector<float>& output, int outW, int outH,
+                      int readX, int readY, int rw, int rh, int scale,
+                      int ox, int oy, int srWidth, int srHeight, std::vector<uint8_t>& srImage) {
+    const int yBegin = std::max(0, -readY);
+    const int yEnd = std::min(std::min(rh * scale, outH - readY), srHeight - oy * scale);
+    const int xBegin = std::max(0, -readX);
+    const int xEnd = std::min(std::min(rw * scale, outW - readX), srWidth - ox * scale);
+    const int copyW = xEnd - xBegin;
+    if (copyW <= 0) {
+        return;
+    }
+    const size_t planeSize = static_cast<size_t>(outW) * outH;
+    const float* planes[3] = {output.data(), output.data() + planeSize, output.data() + planeSize * 2};
+    for (int y = yBegin; y < yEnd; ++y) {
+        const int ty = readY + y;
+        const int dy = oy * scale + y;
+        const size_t srcOffset = static_cast<size_t>(ty) * outW + readX + xBegin;
+        uint8_t* dst = srImage.data() + (static_cast<size_t>(dy) * srWidth + ox * scale + xBegin) * 3;
+        UnpackRowPlanesToRgb(planes[0] + srcOffset, planes[1] + srcOffset, planes[2] + srcOffset,
+                             dst, copyW);
+    }
+    return;
 }
 
 // ---------------------------------------------------------------- 双线性缩放
@@ -362,7 +686,12 @@ const ModelEntry* FindModel(int modelId) {
     return &g_models[static_cast<size_t>(modelId)].entry;
 }
 
-/* 目标模型文件缺失时找一个最接近的可用模型(保证超分功能仍然可用) */
+/* 目标模型文件缺失时找一个最接近的可用模型(保证超分功能仍然可用)。
+ * 只允许"同原生倍数"内替换(如降噪等级/动漫照片风格不同)：
+ * 跨倍数替换(如请求 4x 回退到 1x)会让 ProcessTask 末尾按目标尺寸
+ * 双线性缩放，产出"只有分辨率变大、画面毫无细节"的假超分，
+ * 比明确失败更糟(用户完全看不出哪里出了问题)。
+ * 因此没有同倍数候选时返回 nullptr，让任务以 -11 失败并提示缺哪个文件。 */
 const ModelEntry* ResolveModel(const ModelEntry* wanted, std::string& note) {
     if (wanted == nullptr) {
         return nullptr;
@@ -379,6 +708,9 @@ const ModelEntry* ResolveModel(const ModelEntry* wanted, std::string& note) {
         }
         if (!FileExists(JoinPath(g_modelDir, entry.file))) {
             continue;
+        }
+        if (entry.nativeScale != wanted->nativeScale) {
+            continue;  // 跨倍数不回退(见函数注释)
         }
         int score = 0;
         if (entry.name.find("WAIFU2X") != std::string::npos) {
@@ -408,11 +740,16 @@ const ModelEntry* ResolveModel(const ModelEntry* wanted, std::string& note) {
 const OrtApi* g_api = nullptr;
 OrtEnv* g_env = nullptr;
 OrtAllocator* g_allocator = nullptr;
+// CPU 张量描述符只读且线程安全，进程内建一次复用；旧实现每个 tile 都新建/释放一遍
+OrtMemoryInfo* g_cpuMemInfo = nullptr;
 
 struct SessionHolder {
     OrtSession* session = nullptr;
     std::string path;
     bool htp = false;
+    bool gpu = false;           // 该会话跑在 QNN GPU 后端(Adreno)上
+    bool cpuFallback = false;   // QNN EP 已挂上，但允许部分算子回退到 CPU 执行
+    bool cpuOnly = false;       // 完全退到 CPU EP(最慢的兜底形态)
     std::string inputName;
     std::string outputName;
     ONNXTensorElementDataType inputType = ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT;
@@ -445,6 +782,13 @@ std::string g_backendInfo = "CPU (ONNX Runtime)";
 int g_device = 0;
 int g_threads = 0;
 bool g_htpEnabled = false;
+bool g_gpuEnabled = false;    // 退到 QNN GPU 后端(Adreno)时置位
+bool g_htpFallback = false;   // 有会话是"HTP + 部分算子 CPU 回退"，用于面板如实显示
+// 第一次"严格 HTP"失败的原始报错：QNN 一个节点都不接时，真正原因(后端起不来/
+// 算子不支持)只会在这里出现一次，后面会被覆盖，所以单独留一份给面板和自检看。
+std::string g_htpFirstError;
+int g_archOverride = 0;       // 严格 HTP 全失败后，用显式 htp_arch 再抢救一次
+std::string g_backendOverride; // 非空时 CreateSession 用它替代 HTP 库路径
 bool g_inited = false;
 
 std::string OrtError(OrtStatus* status) {
@@ -478,10 +822,18 @@ bool HasQnnLib() {
 
 /* HTP 共享内存分配器需要 rpcmem 库(libcdsprpc.so)。ORT 的 RpcMemLibrary 构造时会
  * dlopen 它并取 rpcmem_alloc / rpcmem_free / rpcmem_to_fd 三个符号，任何一步失败都会
- * 抛异常并导致 QNN EP 挂载失败。这里先按同样条件探测，只有确实可用才打开该优化项。 */
+ * 抛异常并导致 QNN EP 挂载失败。这里先按同样条件探测，只有确实可用才打开该优化项。
+ *
+ * 注意：libcdsprpc.so 同时也是 **QNN HTP 与 DSP 通信的 FastRPC 通道**。真机上如果它
+ * 不在应用的 linker namespace 里（厂商没把它列进 public.libraries.txt），HTP 设备根本
+ * 建不起来 —— 表现就是"会话建出来了但 QNN 一个节点都不接"。所以探测失败要把 dlerror
+ * 打出来，别当成"只是个可选优化"。 */
 bool SharedMemoryAvailable() {
     void* handle = dlopen("libcdsprpc.so", RTLD_NOW | RTLD_LOCAL);
     if (handle == nullptr) {
+        const char* reason = dlerror();
+        printf("[sr_qnn] 警告: 加载 libcdsprpc.so 失败(FastRPC，HTP 必需): %s\n",
+               reason != nullptr ? reason : "unknown");
         return false;
     }
     bool ok = dlsym(handle, "rpcmem_alloc") != nullptr
@@ -512,9 +864,15 @@ void PrepareQnnSearchPath() {
 }
 
 /* 创建一个会话；useHtp 为 true 时挂 QNN EP
- * rich=true 时额外挂 HTP 提速项(会话优先级 / 共享内存零拷贝 / 内嵌缓存 / VTCM 共享) */
+ * tier 为 HTP 选项档位(逐级降级，见 GetSession)：
+ *   3 = 基础项 + 全部提速项 + VTCM
+ *   2 = 基础项 + 全部提速项(不含 VTCM，小 VTCM 机型的兜底)
+ *   1 = 基础项(backend_path + fp16 + device_id)，绝大多数机型都能过
+ *   0 = 最小项(只给 backend_path)，连 fp16 都不假设
+ * 旧实现把 vtcm_mb 这类强依赖机型能力的选项放在所有尝试里无条件下发：
+ * 小 VTCM 机型上 QNN 图编译失败 → 整页退回 CPU EP → 表现就是"超分慢得离谱"。 */
 OrtSession* CreateSession(const std::string& modelPath, const ModelEntry& entry, bool useHtp,
-                          bool strictHtp, bool useContextCache, bool rich, std::string& err) {
+                          bool strictHtp, bool useContextCache, int tier, std::string& err) {
     OrtSessionOptions* options = nullptr;
     OrtStatus* status = g_api->CreateSessionOptions(&options);
     if (status != nullptr) {
@@ -522,7 +880,42 @@ OrtSession* CreateSession(const std::string& modelPath, const ModelEntry& entry,
         return nullptr;
     }
     g_api->SetIntraOpNumThreads(options, g_threads);
-    g_api->SetSessionGraphOptimizationLevel(options, ORT_ENABLE_ALL);
+    // 关键：QNN 会话只开 BASIC 级优化。
+    // ORT 的 Level-2 优化会把 Conv+LeakyRelu 融合成 CPU EP 专属的
+    // com.microsoft.FusedConv —— QNN EP 不认识这个算子，分区时整张图连带所有下游
+    // 节点全被判到 CPU，表现就是"会话建出来了但 QNN 一个节点都没接"(真机实测：
+    // 跑在 CPU 上的算子全是 FusedConv)。QNN 自己会在 finalize 阶段做图优化，
+    // 不需要 ORT 这几档融合。
+    g_api->SetSessionGraphOptimizationLevel(options, useHtp ? ORT_ENABLE_BASIC : ORT_ENABLE_ALL);
+
+    // 诊断用：设置 JM_SR_PROFILE 后 ORT 会把每个节点的执行记录写成 json，
+    // 里面带 provider 字段 —— 能直接看出哪些算子被 QNN 拒收、跑到了 CPU 上。
+    std::string profilePath = EnvStr("JM_SR_PROFILE");
+    if (!profilePath.empty()) {
+        OrtStatus* profileStatus = g_api->EnableProfiling(options, profilePath.c_str());
+        if (profileStatus != nullptr) {
+            g_api->ReleaseStatus(profileStatus);
+        }
+    }
+
+    if (!useHtp) {
+        // CPU 兜底时尽量挂上加速 EP：XNNPACK(浮点/量化卷积优化，常见 2~4 倍) →
+        // NNAPI(部分机型的 GPU/NPU)。不可用时 AppendExecutionProvider 只返回错误状态，
+        // 不致命，忽略即可；这样"没有 HTP 的机型"也不至于掉到最慢的纯 CPU 实现。
+        const char* candidates[2] = {"XNNPACK", "NNAPI"};
+        for (const char* name : candidates) {
+            OrtStatus* tryStatus = g_api->SessionOptionsAppendExecutionProvider(
+                options, name, nullptr, nullptr, 0);
+            if (tryStatus == nullptr) {
+                if (g_debug) {
+                    printf("[sr_qnn] CPU 路径已挂 %s\n", name);
+                }
+                break;
+            }
+            (void) g_api->GetErrorMessage(tryStatus);
+            g_api->ReleaseStatus(tryStatus);
+        }
+    }
 
     if (useHtp) {
         // 先把 key/value 字符串全部收集齐，最后再取 c_str() 组指针数组。
@@ -538,6 +931,9 @@ OrtSession* CreateSession(const std::string& modelPath, const ModelEntry& entry,
         // backend_path 默认用"与本库同目录的 libQnnHtp.so 绝对路径"。
         // 裸文件名在 Android 上不可靠：linker 不认 LD_LIBRARY_PATH。
         std::string backend = EnvStr("JM_QNN_BACKEND");
+        if (!g_backendOverride.empty()) {
+            backend = g_backendOverride;
+        }
         if (backend.empty()) {
             Dl_info info;
             if (dladdr(reinterpret_cast<void*>(&srq_init), &info) != 0 && info.dli_fname != nullptr) {
@@ -548,24 +944,29 @@ OrtSession* CreateSession(const std::string& modelPath, const ModelEntry& entry,
             }
         }
         addOption("backend_path", backend);
-        addOption("htp_performance_mode", EnvStr("JM_QNN_PERF", "sustained_high_performance"));
-        addOption("enable_htp_fp16_precision", EnvStr("JM_QNN_FP16", "1"));
-        addOption("htp_graph_finalization_optimization_mode", EnvStr("JM_QNN_FINALIZE", "2"));
         addOption("device_id", std::to_string(g_device));
         addOption("profiling_level", "off");
-        addOption("vtcm_mb", EnvStr("JM_QNN_VTCM", "8"));
-        std::string socModel = EnvStr("JM_QNN_SOC_MODEL");
-        if (!socModel.empty()) {
-            addOption("soc_model", socModel);
+        // GPU(Adreno) 与 HTP(DSP) 的选项互不通用：把 htp_* / vtcm_mb /
+        // enable_htp_fp16_precision 传给 GPU 后端，QnnBackend 初始化会直接失败，
+        // 表现为"EP 挂上了但一个节点都不接"。所以按后端类型分流。
+        const bool isGpuBackend = backend.find("Gpu") != std::string::npos;
+        if (!isGpuBackend && tier >= 1) {
+            addOption("enable_htp_fp16_precision", EnvStr("JM_QNN_FP16", "1"));
         }
-        std::string htpArch = EnvStr("JM_QNN_HTP_ARCH");
-        if (!htpArch.empty()) {
-            addOption("htp_arch", htpArch);
-        }
-        // ---- 合并的 QNN/HTP 提速项 -------------------------------------------------
-        // 全部可用环境变量关闭；任何一个不被当前 ORT/QNN/机型支持时，GetSession 会
-        // 自动退回"基础项"，因此这些优化项不会把原本能跑的设备降级到 CPU EP。
-        if (rich) {
+        // ---- 提速项(仅 tier>=2；任何一项不被当前 ORT/QNN/机型支持时，
+        //      GetSession 会逐级退回 tier 1 / 0，最终才退到 CPU EP) ----------
+        if (tier >= 2 && !isGpuBackend) {
+            // 性能模式：QNN EP 官方推理示例用 burst(最高性能档)，交互式看图(读一页超一页)
+            // 正是突发负载，默认用它；长时间批量转换发热降频时可改回 sustained_high_performance。
+            addOption("htp_performance_mode", EnvStr("JM_QNN_PERF", "burst"));
+            // 2 = 图编译更久但运行时更优；默认取 2：首次编译时间不至于让用户以为"卡住"。
+            addOption("htp_graph_finalization_optimization_mode", EnvStr("JM_QNN_FINALIZE", "2"));
+            // 每个 tile 一次 FastRPC 往返，微秒级的控制延迟 ×上百块会累加；
+            // 需要时用 JM_QNN_RPC_LATENCY(微秒) 调低，默认不干预(用 SDK 默认值)。
+            std::string rpcLatency = EnvStr("JM_QNN_RPC_LATENCY");
+            if (!rpcLatency.empty()) {
+                addOption("rpc_control_latency", rpcLatency);
+            }
             // 会话优先级：DSP 上同时有其它 QNN 负载时降低本任务的排队延迟。
             addOption("qnn_context_priority", EnvStr("JM_QNN_PRIORITY", "high"));
             // HTP 共享内存分配器：CPU 与 HTP 之间零拷贝共享 I/O 张量，减少每块 tile
@@ -580,6 +981,24 @@ OrtSession* CreateSession(const std::string& modelPath, const ModelEntry& entry,
             // 多会话共享 VTCM 备份缓冲(省内存)；与 context 内嵌缓存冲突，故默认关闭。
             if (EnvFlag("JM_QNN_VTCM_SHARE", false)) {
                 addOption("enable_vtcm_backup_buffer_sharing", "1");
+            }
+            if (!EnvStr("JM_QNN_SOC_MODEL").empty()) {
+                addOption("soc_model", EnvStr("JM_QNN_SOC_MODEL"));
+            }
+            std::string htpArch = EnvStr("JM_QNN_HTP_ARCH");
+            if (htpArch.empty() && g_archOverride > 0) {
+                htpArch = std::to_string(g_archOverride);
+            }
+            if (!htpArch.empty()) {
+                addOption("htp_arch", htpArch);
+            }
+        }
+        // VTCM 大小强依赖机型(2/4/8MB 不等)，所以单独成档(tier 3)：有 VTCM 的机型
+        // 卷积更快；编译不过就自动退回不含 VTCM 的 tier 2，不会把设备顶进 CPU EP。
+        if (tier >= 3) {
+            std::string vtcm = EnvStr("JM_QNN_VTCM", "8");
+            if (!vtcm.empty() && vtcm != "0") {
+                addOption("vtcm_mb", vtcm);
             }
         }
         // 此时 keysStore/valuesStore 不会再变，取 c_str() 是安全的
@@ -609,6 +1028,15 @@ OrtSession* CreateSession(const std::string& modelPath, const ModelEntry& entry,
         MakeDirs(cacheDir);
         std::string key = entry.file;
         std::replace(key.begin(), key.end(), '/', '_');
+        // 后端类型必须进 key：HTP 编译出的 context binary 在 GPU 后端上不可用，
+        // 反过来也一样；否则切换后端会读到对方编译的缓存，直接建会话失败。
+        if (!g_backendOverride.empty() || EnvStr("JM_QNN_BACKEND").find("Gpu") != std::string::npos) {
+            key += "-gpu";
+        }
+        std::string fingerprint = FileFingerprint(JoinPath(g_modelDir, entry.file));
+        if (!fingerprint.empty()) {
+            key += "-" + fingerprint;
+        }
         ctxPath = JoinPath(cacheDir, key + ".ctx.onnx");
         if (FileExists(ctxPath)) {
             // 已有 context binary 缓存：直接加载缓存模型
@@ -629,13 +1057,15 @@ OrtSession* CreateSession(const std::string& modelPath, const ModelEntry& entry,
                 // 缓存损坏，删除后重来
                 remove(ctxPath.c_str());
             }
-            return CreateSession(modelPath, entry, useHtp, strictHtp, false, rich, err);
+            return CreateSession(modelPath, entry, useHtp, strictHtp, false, tier, err);
         }
         g_api->AddSessionConfigEntry(options, "ep.context_enable", "1");
         g_api->AddSessionConfigEntry(options, "ep.context_file_path", ctxPath.c_str());
+        // 换了模型内容后旧缓存不再需要，顺手清掉，避免缓存目录越滚越大
+        CleanStaleContext(cacheDir, entry.file, key + ".ctx.onnx");
         // 把 context binary 内嵌进生成的单个 onnx(默认)，避免 .onnx 与分离的 .bin
         // 一旦不同步就整块缓存失效；与 VTCM 备份缓冲共享冲突，故后者开启时让位。
-        if (rich && !EnvFlag("JM_QNN_VTCM_SHARE", false)) {
+        if (tier >= 2 && !EnvFlag("JM_QNN_VTCM_SHARE", false)) {
             std::string embed = EnvStr("JM_QNN_EMBED_CTX", "1");
             g_api->AddSessionConfigEntry(options, "ep.context_embed_mode", embed.c_str());
         }
@@ -714,41 +1144,163 @@ std::shared_ptr<SessionHolder> GetSession(const ModelEntry& entry, std::string& 
     holder->modelKey = key;
 
     bool wantHtp = g_device <= 0 && HasQnnLib();
+    if (wantHtp && g_qnnUnusable.load()) {
+        // 已经在本机确认过"QNN 后端建不起来"(SetupBackend 失败)，后面每个模型
+        // 都别再白跑 5 次会话创建 —— 那要几百毫秒到几秒，全花在必败的重试上。
+        if (g_debug) {
+            printf("[sr_qnn] QNN 在本机已确认不可用，直接走 CPU EP\n");
+        }
+        wantHtp = false;
+    }
     std::string lastErr;
+    bool setupFailed = false;   // 本次尝试是否出现过 "QNN SetupBackend failed"
     if (wantHtp) {
-        // 1) 严格 HTP + 全部提速项(整图跑在 NPU 上)
-        OrtSession* session = CreateSession(path, entry, true, true, true, true, lastErr);
-        if (session == nullptr) {
-            if (g_debug) {
-                printf("[sr_qnn] 严格 HTP(优化项) 失败，改用基础项: %s\n", lastErr.c_str());
+        // 逐级降级，保证"要么整图在 NPU 上，要么明确告诉我们退到哪一级"：
+        //   1) 严格 HTP + 全部提速项 + VTCM(整图跑在 NPU 上)
+        //   2) 严格 HTP + 全部提速项，不含 VTCM(小 VTCM 机型的兜底)
+        //   3) 严格 HTP + 基础项(去掉编译档位/优先级/共享内存)
+        //   4) 严格 HTP + 最小项(只给 backend_path，连 fp16 都不假设)
+        //   5) HTP + 允许 CPU 兜底(部分算子跑 CPU，最慢的 NPU 形态)
+        // 每次尝试前清空"分区数/SetupBackend 失败"两个探针，避免读到上一次的残留。
+        auto tryQnn = [&](bool strict, bool cache, int tier) -> OrtSession* {
+            g_qnnPartitionCount.store(-1);
+            g_qnnSetupFailed.store(false);
+            OrtSession* attempt = CreateSession(path, entry, true, strict, cache, tier, lastErr);
+            if (g_qnnSetupFailed.load()) {
+                setupFailed = true;
             }
-            // 2) 严格 HTP + 基础项(提速项本身可能不被当前 QNN/机型支持)
-            session = CreateSession(path, entry, true, true, true, false, lastErr);
+            return attempt;
+        };
+        // 判定一次尝试是不是"白跑"：后端没 init 成功，或一个节点都没接住。
+        // 这两种会话每块 tile 都要白过一遍 EP 调度，比纯 CPU 还慢，必须丢掉。
+        auto ineffective = [&]() {
+            return g_qnnSetupFailed.load() || g_qnnPartitionCount.load() == 0;
+        };
+        OrtSession* session = tryQnn(true, true, 3);
+        if (session == nullptr) {
+            if (g_htpFirstError.empty()) {
+                g_htpFirstError = lastErr;
+            }
+            if (g_debug) {
+                printf("[sr_qnn] 严格 HTP(含 VTCM) 失败，去掉 VTCM 重试: %s\n", lastErr.c_str());
+            }
+            session = tryQnn(true, true, 2);
         }
         if (session == nullptr) {
             if (g_debug) {
-                printf("[sr_qnn] 严格 HTP 失败: %s\n", lastErr.c_str());
+                printf("[sr_qnn] 严格 HTP(提速项) 失败，降级为基础项: %s\n", lastErr.c_str());
             }
-            // 3) HTP + 允许 CPU 兜底
-            session = CreateSession(path, entry, true, false, false, false, lastErr);
+            session = tryQnn(true, true, 1);
+        }
+        if (session == nullptr) {
+            if (g_debug) {
+                printf("[sr_qnn] 严格 HTP(基础项) 失败，降级为最小项: %s\n", lastErr.c_str());
+            }
+            session = tryQnn(true, false, 0);
+        }
+        if (session == nullptr && EnvStr("JM_QNN_HTP_ARCH").empty()) {
+            // 新机型(如 SM8750)不在当前 QNN SDK 的 SoC 表里时，自动探测拿不到 HTP
+            // 设备，表现就是"会话建出来了但 QNN 一个节点都不接"。用显式 htp_arch
+            // 再试几档；失败也只是多花几毫秒（HTP 起不来时会立刻报错）。
+            const int archs[3] = {79, 75, 73};
+            for (int arch : archs) {
+                g_archOverride = arch;
+                session = tryQnn(true, false, 2);
+                if (session != nullptr) {
+                    printf("[sr_qnn] 显式 htp_arch=%d 成功\n", arch);
+                    break;
+                }
+            }
+            g_archOverride = 0;
+        }
+        if (session == nullptr) {
+            // HTP 全军覆没时的第二选择：QNN GPU 后端(Adreno)。
+            // 它走 OpenCL，不依赖 FastRPC/DSP，所以"HTP 起不来"不等于 QNN 用不了；
+            // fp32 模型也能直接跑，对 waifu2x 这种卷积网络，Adreno 的 fp16/fp32
+            // 吞吐本来就比自己 CPU 高一个数量级。
+            std::string gpuLib;
+            Dl_info gpuInfo;
+            if (dladdr(reinterpret_cast<void*>(&srq_init), &gpuInfo) != 0 && gpuInfo.dli_fname != nullptr) {
+                std::string candidate = JoinPath(DirName(gpuInfo.dli_fname), "libQnnGpu.so");
+                if (FileExists(candidate)) {
+                    gpuLib = candidate;
+                }
+            }
+            if (!gpuLib.empty()) {
+                g_backendOverride = gpuLib;
+                session = tryQnn(true, false, 0);
+                if (session == nullptr) {
+                    session = tryQnn(false, false, 0);
+                    if (session != nullptr && ineffective()) {
+                        // SetupBackend 失败 / 0 分区：这个后端在本机根本没跑起来，
+                        // 留着只会让每块 tile 白过一层 EP 调度。
+                        g_api->ReleaseSession(session);
+                        session = nullptr;
+                        printf("[sr_qnn] QNN GPU 后端不可用(SetupBackend 失败或 0 分区)，放弃\n");
+                    } else if (session != nullptr) {
+                        holder->cpuFallback = true;
+                    }
+                }
+                g_backendOverride.clear();
+                if (session != nullptr) {
+                    holder->gpu = true;
+                    g_gpuEnabled = true;
+                    printf("[sr_qnn] HTP 不可用，改用 QNN GPU 后端(Adreno): %s\n", gpuLib.c_str());
+                }
+            }
+        }
+        if (session == nullptr) {
+            if (g_debug) {
+                printf("[sr_qnn] 严格 HTP 全部失败，允许 CPU 兜底: %s\n", lastErr.c_str());
+            }
+            session = tryQnn(false, false, 1);
+            if (session != nullptr) {
+                if (ineffective()) {
+                    // 关键：QNN 没接住任何节点(或后端压根没 init 成功)。这种会话把每块
+                    // tile 都往里塞一遍，只是多一层 EP 调度 —— 比纯 CPU 还慢，丢掉。
+                    g_api->ReleaseSession(session);
+                    session = nullptr;
+                    printf("[sr_qnn] QNN 未接管任何节点(SetupBackend 失败/0 分区)，改走 CPU EP\n");
+                } else {
+                    holder->cpuFallback = true;
+                    // 走到这里说明 QNN 只接下了一部分节点。最常见的原因见 CreateSession
+                    // 里关于 ORT_ENABLE_BASIC 的注释（CPU EP 融合出 QNN 不认识的算子），
+                    // 其次是模型里还有动态 shape 写法（用 simplify_models.py 静态化）。
+                    printf("[sr_qnn] 警告: %s 只有部分节点能上 QNN，超分会明显变慢\n",
+                           entry.file.c_str());
+                }
+            }
+        }
+        if (session == nullptr && setupFailed) {
+            // 后端初始化就失败(HTP 缺 libcdsprpc.so / GPU 报 PLATFORM_NOT_SUPPORTED)：
+            // 这不是"档位没调对"，重试别的档位也一定失败。直接判死，后续模型不再重试。
+            g_qnnUnusable.store(true);
+            printf("[sr_qnn] QNN 后端在本机不可用(SetupBackend 失败)，后续模型直接用 CPU EP\n");
+            printf("[sr_qnn] 提示: HTP 需要厂商库 libcdsprpc.so(FastRPC)，见 android/vendor_libs/README.md\n");
         }
         if (session != nullptr) {
             holder->session = session;
-            holder->htp = true;
-            g_htpEnabled = true;
+            holder->htp = !holder->gpu;
+            if (holder->htp) {
+                g_htpEnabled = true;
+            }
+            if (holder->cpuFallback) {
+                g_htpFallback = true;
+            }
         }
     }
     if (holder->session == nullptr) {
-        // 4) CPU EP 兜底，保证功能可用(慢，但不会让用户失去超分能力)
-        OrtSession* session = CreateSession(path, entry, false, false, false, false, lastErr);
+        // 5) CPU EP 兜底，保证功能可用(慢，但不会让用户失去超分能力)
+        OrtSession* session = CreateSession(path, entry, false, false, false, 0, lastErr);
         if (session == nullptr) {
             err = lastErr;
             return nullptr;
         }
         holder->session = session;
         holder->htp = false;
+        holder->cpuOnly = true;
         if (g_debug) {
-            printf("[sr_qnn] 使用 CPU EP: %s\n", lastErr.c_str());
+            printf("[sr_qnn] 使用 CPU EP(最慢，请检查 QNN 库/机型支持): %s\n", lastErr.c_str());
         }
     }
     if (!ReadSessionInfo(holder.get())) {
@@ -756,6 +1308,12 @@ std::shared_ptr<SessionHolder> GetSession(const ModelEntry& entry, std::string& 
         holder->session = nullptr;   // 避免 SessionHolder 析构时二次释放
         err = "读取模型输入输出信息失败";
         return nullptr;
+    }
+    if (g_debug) {
+        const char* grade = holder->cpuOnly ? "CPU EP" :
+                            (holder->cpuFallback ? (holder->gpu ? "GPU(CPU 回退)" : "HTP(CPU 回退)")
+                                                 : (holder->gpu ? "GPU(整图)" : "HTP(整图)"));
+        printf("[sr_qnn] session %s -> %s\n", entry.file.c_str(), grade);
     }
     // 探针推理：用一块全 0 的 T×T 输入量出真实输出边长。
     // 既不能拿 ONNX metadata 猜，也不能假设 out = in * nativeScale ——
@@ -819,9 +1377,9 @@ bool g_stopping = false;
 bool RunTile(const std::shared_ptr<SessionHolder>& holder, const std::vector<float>& input,
              int tile, std::vector<float>& output, int& outW, int& outH, std::string& err) {
     const int64_t dims[4] = {1, 3, static_cast<int64_t>(tile), static_cast<int64_t>(tile)};
-    OrtMemoryInfo* memInfo = nullptr;
-    if (g_api->CreateCpuMemoryInfo(OrtArenaAllocator, OrtMemTypeDefault, &memInfo) != nullptr) {
-        err = "CreateCpuMemoryInfo 失败";
+    OrtMemoryInfo* memInfo = g_cpuMemInfo;
+    if (memInfo == nullptr) {
+        err = "引擎未初始化(CPU 内存描述符缺失)";
         return false;
     }
     OrtValue* inputValue = nullptr;
@@ -831,9 +1389,7 @@ bool RunTile(const std::shared_ptr<SessionHolder>& holder, const std::vector<flo
     size_t inputBytes = input.size() * sizeof(float);
     if (holder->inputType == ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16) {
         halfInput.resize(input.size());
-        for (size_t i = 0; i < input.size(); ++i) {
-            halfInput[i] = FloatToHalf(input[i]);
-        }
+        FloatToHalfBuf(input.data(), halfInput.data(), input.size());
         inputPtr = halfInput.data();
         inputBytes = halfInput.size() * sizeof(uint16_t);
     }
@@ -841,7 +1397,6 @@ bool RunTile(const std::shared_ptr<SessionHolder>& holder, const std::vector<flo
                                                    dims, 4, holder->inputType, &inputValue);
     if (status != nullptr) {
         err = "创建输入张量失败: " + OrtError(status);
-        g_api->ReleaseMemoryInfo(memInfo);
         return false;
     }
     const char* inputNames[1] = {holder->inputName.c_str()};
@@ -851,7 +1406,6 @@ bool RunTile(const std::shared_ptr<SessionHolder>& holder, const std::vector<flo
     status = g_api->Run(holder->session, nullptr, inputNames, inputValues, 1,
                         outputNames, 1, &outputValue);
     g_api->ReleaseValue(inputValue);
-    g_api->ReleaseMemoryInfo(memInfo);
     if (status != nullptr) {
         err = "推理失败: " + OrtError(status);
         return false;
@@ -889,16 +1443,13 @@ bool RunTile(const std::shared_ptr<SessionHolder>& holder, const std::vector<flo
     const size_t count = static_cast<size_t>(channels) * tileOutH * tileOutW;
     output.resize(count);
     if (holder->outputType == ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16) {
-        const uint16_t* src = reinterpret_cast<const uint16_t*>(raw);
-        for (size_t i = 0; i < count; ++i) {
-            output[i] = HalfToFloat(src[i]);
-        }
+        HalfToFloatBuf(reinterpret_cast<const uint16_t*>(raw), output.data(), count);
     } else if (holder->outputType == ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT) {
         memcpy(output.data(), raw, count * sizeof(float));
     } else if (holder->outputType == ONNX_TENSOR_ELEMENT_DATA_TYPE_UINT8) {
         const uint8_t* src = reinterpret_cast<const uint8_t*>(raw);
         for (size_t i = 0; i < count; ++i) {
-            output[i] = src[i] / 255.0f;
+            output[i] = src[i] * kInv255;
         }
     } else {
         g_api->ReleaseValue(outputValue);
@@ -951,6 +1502,9 @@ int ProcessTask(const std::shared_ptr<SrTask>& task, std::shared_ptr<SrOut>& res
     result = std::make_shared<SrOut>();
     result->taskId = task->taskId;
     result->format = task->format;
+    // lastError 语义：最近一次任务的错误(成功则清零)，
+    // 便于上层区分"这次为什么没有结果"而不是读到很久以前的陈旧错误
+    SetError("");
 
     const ModelEntry* wanted = FindModel(task->modelId);
     if (wanted == nullptr) {
@@ -962,10 +1516,14 @@ int ProcessTask(const std::shared_ptr<SrTask>& task, std::shared_ptr<SrOut>& res
     const ModelEntry* entry = ResolveModel(wanted, note);
     if (entry == nullptr) {
         result->status = -11;
-        SetError("没有可用的 ONNX 模型，请把模型放到 " + g_modelDir);
+        SetError("模型文件缺失: " + JoinPath(g_modelDir, wanted->file) + "，且没有 " +
+                 std::to_string(wanted->nativeScale) + "x 的可用模型可回退，请把模型文件放到 " +
+                 g_modelDir + " 或在设置里更换模型");
         return -11;
     }
-    if (!note.empty() && g_debug) {
+    if (!note.empty()) {
+        // 同倍数内的降级替换(如 denoise3 -> denoise0)：仍是真实超分，
+        // 但结果与预期有差距，总是记录，不受 g_debug 控制
         printf("[sr_qnn] 模型回退: %s\n", note.c_str());
     }
 
@@ -1020,6 +1578,11 @@ int ProcessTask(const std::shared_ptr<SrTask>& task, std::shared_ptr<SrOut>& res
 
     std::vector<float> input(static_cast<size_t>(tile) * tile * 3, 0.0f);
     std::vector<float> output;
+    // 调试统计：拆开 CPU 侧(打包/回写)与 NPU 侧耗时，真机上据此判断瓶颈在哪
+    double packMs = 0;
+    double runMs = 0;
+    double unpackMs = 0;
+    int tileCount = 0;
 
     for (int oy = 0; oy < height; oy += step) {
         if (task->cancel.load() != 0) {
@@ -1035,28 +1598,19 @@ int ProcessTask(const std::shared_ptr<SrTask>& task, std::shared_ptr<SrOut>& res
             int rw = std::min(step, width - ox);
             // 填充 T×T 输入：以 (ox-pad, oy-pad) 为起点，越界用边缘像素
             // 注意：ONNX 输入是 NCHW，必须按平面写入，不能按 HWC 交错
-            const size_t planeSize = static_cast<size_t>(tile) * tile;
-            for (int y = 0; y < tile; ++y) {
-                int sy = oy - pad + y;
-                sy = sy < 0 ? 0 : (sy >= height ? height - 1 : sy);
-                for (int x = 0; x < tile; ++x) {
-                    int sx = ox - pad + x;
-                    sx = sx < 0 ? 0 : (sx >= width ? width - 1 : sx);
-                    const uint8_t* src = &task->rgb[(static_cast<size_t>(sy) * width + sx) * 3];
-                    const size_t offset = static_cast<size_t>(y) * tile + x;
-                    input[offset] = src[0] / 255.0f;                   // R
-                    input[planeSize + offset] = src[1] / 255.0f;       // G
-                    input[planeSize * 2 + offset] = src[2] / 255.0f;   // B
-                }
-            }
+            auto tp0 = std::chrono::steady_clock::now();
+            PackTileInput(task->rgb, width, height, ox, oy, pad, tile, input);
+            auto tp1 = std::chrono::steady_clock::now();
             int outW = static_cast<int>(tile) * nativeScale;
             int outH = static_cast<int>(tile) * nativeScale;
             bool tileOk = RunTile(holder, input, tile, output, outW, outH, err);
+            auto tp2 = std::chrono::steady_clock::now();
             if (!tileOk && RecoverHtpSession(*entry, holder, err)) {
                 // 会话已重建：重置输出几何后重试本块
                 outW = static_cast<int>(tile) * nativeScale;
                 outH = outW;
                 tileOk = RunTile(holder, input, tile, output, outW, outH, err);
+                tp2 = std::chrono::steady_clock::now();
             }
             if (!tileOk) {
                 result->status = -13;
@@ -1070,33 +1624,13 @@ int ProcessTask(const std::shared_ptr<SrTask>& task, std::shared_ptr<SrOut>& res
             }
             // 有效区域：源图 [ox, ox+rw) x [oy, oy+rh) 对应输出
             // [readX, readX+rw*s) x [readY, readY+rh*s)
-            for (int y = 0; y < rh * nativeScale; ++y) {
-                int ty = readY + y;
-                if (ty < 0 || ty >= outH) {
-                    continue;
-                }
-                int dy = oy * nativeScale + y;
-                if (dy >= srHeight) {
-                    break;
-                }
-                for (int x = 0; x < rw * nativeScale; ++x) {
-                    int tx = readX + x;
-                    if (tx < 0 || tx >= outW) {
-                        continue;
-                    }
-                    int dx = ox * nativeScale + x;
-                    if (dx >= srWidth) {
-                        break;
-                    }
-                    float r = output[(static_cast<size_t>(0) * outH + ty) * outW + tx];
-                    float g = output[(static_cast<size_t>(1) * outH + ty) * outW + tx];
-                    float b = output[(static_cast<size_t>(2) * outH + ty) * outW + tx];
-                    uint8_t* dst = &srImage[(static_cast<size_t>(dy) * srWidth + dx) * 3];
-                    dst[0] = static_cast<uint8_t>(std::max(0.0f, std::min(255.0f, r * 255.0f + 0.5f)));
-                    dst[1] = static_cast<uint8_t>(std::max(0.0f, std::min(255.0f, g * 255.0f + 0.5f)));
-                    dst[2] = static_cast<uint8_t>(std::max(0.0f, std::min(255.0f, b * 255.0f + 0.5f)));
-                }
-            }
+            UnpackTileOutput(output, outW, outH, readX, readY, rw, rh, nativeScale,
+                             ox, oy, srWidth, srHeight, srImage);
+            auto tp3 = std::chrono::steady_clock::now();
+            packMs += std::chrono::duration<double, std::milli>(tp1 - tp0).count();
+            runMs += std::chrono::duration<double, std::milli>(tp2 - tp1).count();
+            unpackMs += std::chrono::duration<double, std::milli>(tp3 - tp2).count();
+            ++tileCount;
         }
     }
 
@@ -1111,6 +1645,14 @@ int ProcessTask(const std::shared_ptr<SrTask>& task, std::shared_ptr<SrOut>& res
         wantH = task->targetH;
     }
     if (wantW > 0 && wantH > 0 && (wantW != srWidth || wantH != srHeight)) {
+        if (wantW > srWidth || wantH > srHeight) {
+            // 请求尺寸超出模型原生输出：超出部分只能靠双线性插值补，不会增加
+            // 任何细节(表现为"分辨率变大但画面和原图一样")。正常只应出现在
+            // "显式选择 1x 降噪模型又请求放大"时；若模型是按请求倍数选中的，
+            // 说明模型文件缺失被回退到了低倍数模型，属于假超分，必须留下痕迹。
+            printf("[sr_qnn] 警告: 模型原生 %dx，输出 %dx%d，请求 %dx%d，超出部分为双线性缩放(非真实超分)\n",
+                   nativeScale, srWidth, srHeight, wantW, wantH);
+        }
         std::vector<uint8_t> resized;
         ResizeBilinear(srImage, srWidth, srHeight, resized, wantW, wantH);
         result->rgb.swap(resized);
@@ -1124,6 +1666,11 @@ int ProcessTask(const std::shared_ptr<SrTask>& task, std::shared_ptr<SrOut>& res
     result->status = 0;
     auto end = std::chrono::steady_clock::now();
     result->tick = std::chrono::duration<double>(end - begin).count();
+    if (g_debug) {
+        const double cpuMs = packMs + unpackMs;
+        printf("[sr_qnn] task %d: %dx%d step=%d tiles=%d pack+unpack=%.1fms run=%.1fms(total %.1fms)\n",
+               task->taskId, width, height, step, tileCount, cpuMs, runMs, result->tick * 1000.0);
+    }
     return 0;
 }
 
@@ -1193,6 +1740,12 @@ const char* srq_get_last_error(void) {
     return buffer.c_str();
 }
 
+const char* srq_get_htp_error(void) {
+    static thread_local std::string buffer;
+    buffer = g_htpFirstError;
+    return buffer.c_str();
+}
+
 int srq_has_htp(void) {
     return HasQnnLib() ? 1 : 0;
 }
@@ -1208,8 +1761,14 @@ int srq_get_gpu_core_num(void) {
 
 const char* srq_get_backend_info(void) {
     static thread_local std::string buffer;
-    if (g_htpEnabled) {
+    if (g_htpEnabled && g_htpFallback) {
+        buffer = "QNN HTP (部分算子 CPU 回退)";
+    } else if (g_htpEnabled) {
         buffer = "Qualcomm Hexagon NPU (QNN HTP, fp16)";
+    } else if (g_gpuEnabled) {
+        buffer = "QNN GPU (Adreno)";
+    } else if (g_qnnUnusable.load()) {
+        buffer = "CPU (ONNX Runtime, QNN 后端在本机不可用)";
     } else if (HasQnnLib()) {
         buffer = "CPU (ONNX Runtime, QNN 未生效)";
     } else {
@@ -1267,18 +1826,43 @@ int srq_model_id(const char* name) {
     return -1;
 }
 
+/* 进程模式下可执行文件**不链接** libonnxruntime.so（见 sr_qnn_proc.cpp 的说明）：
+ * App 的 lib 目录在 exec 出来的进程里不在动态链接器的搜索范围内，DT_NEEDED 会让
+ * 进程在 main() 之前就被 "CANNOT LINK EXECUTABLE" 杀掉。改为入口处按绝对路径
+ * dlopen，再把 OrtGetApiBase 注入进来。进程内(ctypes)模式不受影响。 */
+typedef const OrtApiBase* (*OrtGetApiBaseFn)(void);
+OrtGetApiBaseFn g_ortGetApiBase = nullptr;
+
 int srq_init(void) {
     if (g_inited) {
         return 0;
     }
     if (g_api == nullptr) {
-        g_api = OrtGetApiBase()->GetApi(ORT_API_VERSION);
+        const OrtApiBase* apiBase = g_ortGetApiBase != nullptr ? g_ortGetApiBase() : nullptr;
+#ifndef SRQ_NO_DIRECT_ORT
+        if (apiBase == nullptr) {
+            apiBase = OrtGetApiBase();
+        }
+#endif
+        if (apiBase == nullptr) {
+            SetError("ONNX Runtime 未加载(找不到 OrtGetApiBase)");
+            return -1;
+        }
+        g_api = apiBase->GetApi(ORT_API_VERSION);
         if (g_api == nullptr) {
             SetError("ONNX Runtime API 版本不匹配");
             return -1;
         }
     }
-    OrtStatus* status = g_api->CreateEnv(ORT_LOGGING_LEVEL_WARNING, "sr_qnn", &g_env);
+    // 日志级别：默认 WARNING(生产)，自检/排查时用 JM_ORT_LOG=1(INFO) 打开 ——
+    // QNN EP 把图切成 NPU/CPU 两段时，ORT 的 INFO 日志会明确写出
+    // "Number of nodes assigned to CPUExecutionProvider: N"，这是判断
+    // "机型没有 NPU" 还是 "模型被切分" 的唯一直接证据。
+    // 注意：级别交给自定义 logger 过滤(见 OrtLogCallback)，这里固定给 INFO，
+    // 既拿得到分区信息，又不会生成 VERBOSE 级别的海量字符串。
+    g_ortLogLevel = EnvInt("JM_ORT_LOG", 2);
+    OrtStatus* status = g_api->CreateEnvWithCustomLogger(OrtLogCallback, nullptr,
+                                                        ORT_LOGGING_LEVEL_INFO, "sr_qnn", &g_env);
     if (status != nullptr) {
         SetError("创建 ONNX Runtime 环境失败: " + OrtError(status));
         return -2;
@@ -1286,6 +1870,11 @@ int srq_init(void) {
     if (g_api->GetAllocatorWithDefaultOptions(&g_allocator) != nullptr) {
         SetError("获取默认分配器失败");
         return -3;
+    }
+    if (g_cpuMemInfo == nullptr &&
+        g_api->CreateCpuMemoryInfo(OrtArenaAllocator, OrtMemTypeDefault, &g_cpuMemInfo) != nullptr) {
+        SetError("创建 CPU 内存描述符失败");
+        return -4;
     }
     PrepareQnnSearchPath();
 
@@ -1298,7 +1887,10 @@ int srq_init(void) {
         LoadModelOverride(g_modelDir);
     }
     g_inited = true;
-    g_threads = std::max(1, std::min(4, srq_get_cpu_core_num() - 1));
+    // 自动(Auto)线程数：原来固定 4，8 核机型白瞎一半算力 —— QNN 起不来时超分就是
+    // 纯 CPU 跑，这里多给两个线程能直接体现到翻页速度上。用户在设置里显式指定时
+    // 仍以用户值为准(见 srq_init_set)。
+    g_threads = std::max(1, std::min(6, srq_get_cpu_core_num() - 1));
     if (g_debug) {
         printf("[sr_qnn] init ok, models:%d, modelDir:%s, htp:%d\n",
                static_cast<int>(g_models.size()), g_modelDir.c_str(), srq_has_htp());
@@ -1319,9 +1911,20 @@ int srq_init_set(int device, int threads) {
     }
     if (g_workers.empty()) {
         g_stopping = false;
-        int workerNum = std::max(1, std::min(g_threads, 4));
+        int workerNum = EnvInt("JM_QNN_WORKERS", 0);
+        if (workerNum <= 0) {
+            // HTP/NPU 是单个计算引擎：多线程对同一个 QNN 上下文并发 Run 只会在驱动里
+            // 串行排队，徒增锁竞争与 CPU 抢占(参照 waifu2x-ncnn-vulkan 的单 Net 分块模型)。
+            // 2 个 worker 刚好让"一块在 NPU 上跑、下一块在 CPU 上打包/拆包"流水起来。
+            // 没有 QNN 库(纯 CPU EP)时才按核数开线程。
+            workerNum = HasQnnLib() ? 2 : std::max(1, std::min(g_threads, 4));
+        }
+        workerNum = std::max(1, std::min(workerNum, 8));
         for (int i = 0; i < workerNum; ++i) {
             g_workers.emplace_back(WorkerLoop);
+        }
+        if (g_debug) {
+            printf("[sr_qnn] workers=%d (htp:%d, cpu threads:%d)\n", workerNum, HasQnnLib(), g_threads);
         }
     }
     return 0;
@@ -1329,6 +1932,11 @@ int srq_init_set(int device, int threads) {
 
 void srq_set_debug(int enable) {
     g_debug = enable != 0;
+    return;
+}
+
+void srq_set_ort_api_base(void* fn) {
+    g_ortGetApiBase = reinterpret_cast<OrtGetApiBaseFn>(fn);
     return;
 }
 
@@ -1372,11 +1980,7 @@ int srq_add(const unsigned char* img, int width, int height, int stride, int cha
         if (channels == 3) {
             memcpy(dst, src, static_cast<size_t>(width) * 3);
         } else {
-            for (int x = 0; x < width; ++x) {
-                dst[x * 3 + 0] = src[x * channels + 0];
-                dst[x * 3 + 1] = src[x * channels + 1];
-                dst[x * 3 + 2] = src[x * channels + 2];
-            }
+            StripAlphaRow(src, dst, width, channels);
         }
     }
     {
@@ -1449,6 +2053,10 @@ void srq_stop(void) {
             }
         }
         g_sessions.clear();
+    }
+    if (g_cpuMemInfo != nullptr) {
+        g_api->ReleaseMemoryInfo(g_cpuMemInfo);
+        g_cpuMemInfo = nullptr;
     }
     if (g_env != nullptr) {
         g_api->ReleaseEnv(g_env);

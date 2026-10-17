@@ -513,17 +513,21 @@ class ReadView(QtWidgets.QWidget, QtTaskBase):
                 p.cacheWaifu2xImage = None
                 p.cacheWaifu2xImageScale = self.frame.scaleCnt
                 p.cacheWaifu2xImageTaskId = self.AddQImageTask(p.waifuData, self.devicePixelRatio(), toW, toH, model, None, self.ConvertQImageWaifu2xBack, index)
+                Log.Info("[SRUI] 发起 waifu2x QImage 转换, index:{}, taskId:{}, waifuData:{}B".format(
+                    index, p.cacheWaifu2xImageTaskId, len(p.waifuData)))
                 return True
         return False
 
     def ConvertQImageBack(self, data, index):
-        assert isinstance(data, QImage)
         p = self.pictureData.get(index)
         if not p:
             return
         assert isinstance(p, QtFileData)
-        p.cacheImage = data
         p.cacheImageTaskId = 0
+        if not isinstance(data, QImage) or data.isNull():
+            Log.Warn("QImage 转换失败, index:{}, 保留旧画面".format(index))
+            return
+        p.cacheImage = data
 
         start = max(0, self.curIndex - 1)
         if index == self.curIndex:
@@ -654,7 +658,8 @@ class ReadView(QtWidgets.QWidget, QtTaskBase):
             self.qtTool.UpdateText(p.model)
 
         if self.frame.scrollArea.IsAlreadLoad(index, waifu2x):
-            # print("already load, {}".format(index))
+            if waifu2x:
+                Log.Info("[SRUI] ShowImg 跳过(index={}, 已加载过 waifu2x)".format(index))
             return
 
         if p.isGif and not ReadMode.isScroll(self.stripModel):
@@ -665,6 +670,8 @@ class ReadView(QtWidgets.QWidget, QtTaskBase):
         else:
             pixMap = QPixmap(p2)
             pixMap.setDevicePixelRatio(p2.devicePixelRatio())
+            if waifu2x:
+                Log.Info("[SRUI] ShowImg 替换为超分图, index:{}, {}x{}".format(index, p2.width(), p2.height()))
             # print("set index 1, {}".format(index))
             self.scrollArea.SetPixIem(index, pixMap, waifu2x)
         # self.graphicsView.setSceneRect(QRectF(QPointF(0, 0), QPointF(pixMap.width(), pixMap.height())))
@@ -810,6 +817,14 @@ class ReadView(QtWidgets.QWidget, QtTaskBase):
             Log.Error("Not found waifu2xId ：{}, index: {}".format(str(waifu2xId), str(index)))
             return
         p.SetWaifuData(data, round(tick, 2))
+        if not data:
+            # 超分失败(引擎报错/取消)：这里必须留一条日志，否则界面只会"没反应"，
+            # 排查时完全看不出是超分没出图还是出了图没换上
+            Log.Warn("waifu2x 无结果, index:{}, taskId:{}, 状态:{}".format(
+                index, p.waifu2xTaskId, p.waifuState))
+        else:
+            Log.Info("waifu2x 完成, index:{}, {} bytes, {}x{}, {:.2f}s".format(
+                index, len(data), p.scaleW, p.scaleH, round(tick, 2)))
         start = max(0, self.curIndex - 1)
         if data:
             model = self.qtTool.stripModel
@@ -829,14 +844,24 @@ class ReadView(QtWidgets.QWidget, QtTaskBase):
             self.CheckLoadPicture()
 
     def ConvertQImageWaifu2xBack(self, data, index):
-        assert isinstance(data, QImage)
         p = self.pictureData.get(index)
         if not p:
             return
         assert isinstance(p, QtFileData)
 
-        p.cacheWaifu2xImage = data
+        # 任务号必须无条件复位：转换失败时 QImage 任务回调的是 None，如果只在
+        # 成功分支里清 0，这一页就会永远被当成"正在转换"，超分图再也不会被换上
+        # (真机表现就是"超分跑完了但看图界面还是原图")。
         p.cacheWaifu2xImageTaskId = 0
+        if not isinstance(data, QImage) or data.isNull():
+            Log.Warn("waifu2x QImage 转换失败, index:{}, 回退原图".format(index))
+            self.ShowImg(index)
+            self.CheckSetWaifu2xProcess()
+            return
+
+        p.cacheWaifu2xImage = data
+        Log.Info("[SRUI] waifu2x QImage 转换成功, index:{}, {}x{}".format(
+            index, data.width(), data.height()))
         start = max(0, self.curIndex - 1)
         if index == self.curIndex:
             self.ShowImg(index)
@@ -872,6 +897,8 @@ class ReadView(QtWidgets.QWidget, QtTaskBase):
 
             info.waifu2xTaskId = self.AddConvertTask(path, info.data, info.model, self.Waifu2xBack, i, saveParams=info.saveParams,
                                                      preDownPath=filePath)
+        Log.Info("[SRUI] 发起超分, index:{}, taskId:{}, model:{}, saveParams:{}".format(
+            i, info.waifu2xTaskId, info.model.get("model"), bool(info.saveParams)))
         if i == self.curIndex:
             self.qtTool.SetData(waifuState=info.waifuState)
             self.frame.waifu2xProcess.show()

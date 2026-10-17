@@ -14,7 +14,7 @@ LIBS="$SRC/android/libs/arm64-v8a"
 VPY="$WORK/venv311/bin/python"
 [ -x "$VPY" ] || VPY="$WORK/venv-host/bin/python"
 MIRROR="${MIRROR:-https://pypi.tuna.tsinghua.edu.cn/simple}"
-ORT_VER="${ORT_VER:-1.23.2}"
+ORT_VER="${ORT_VER:-1.29.0}"
 mkdir -p "$WORK/logs"
 exec > >(tee -a "$WORK/logs/build_native.log") 2>&1
 
@@ -60,12 +60,18 @@ cmake -S "$SRC/android/sr_qnn/cpp" -B "$WORK/build-android" \
     -DCMAKE_BUILD_TYPE=Release 2>&1 | tail -8
 cmake --build "$WORK/build-android" -j"$(nproc)" 2>&1 | tail -25
 cp "$WORK/build-android/libsr_qnn.so" "$LIBS/libsr_qnn.so"
+# 独立进程入口：命名成 lib*.so 才会随 buildozer 打进 APK(extractNativeLibs 后
+# 位于 nativeLibraryDir，允许 exec)。它的用途见 sr_qnn_proc.cpp 头注释。
+cp "$WORK/build-android/sr_qnn_proc" "$LIBS/libsr_qnn_proc.so"
+chmod +x "$LIBS/libsr_qnn_proc.so"
 TOOLCHAIN="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin"
 echo "--- 产物校验 ---"
-ls -sh "$LIBS/libsr_qnn.so"
+ls -sh "$LIBS/libsr_qnn.so" "$LIBS/libsr_qnn_proc.so"
 "$TOOLCHAIN/llvm-readelf" -h "$LIBS/libsr_qnn.so" | grep -E "Class|Machine|Type"
+"$TOOLCHAIN/llvm-readelf" -h "$LIBS/libsr_qnn_proc.so" | grep -E "Class|Machine|Type"
 echo "导出符号数: $("$TOOLCHAIN/llvm-nm" -D --defined-only "$LIBS/libsr_qnn.so" | grep -c ' T srq_')"
 "$TOOLCHAIN/llvm-readelf" -d "$LIBS/libsr_qnn.so" | grep NEEDED || true
+echo "sr_qnn_proc NEEDED: $("$TOOLCHAIN/llvm-readelf" -d "$LIBS/libsr_qnn_proc.so" | grep -c NEEDED) 项"
 
 echo "===== [$(date +%T)] B) 宿主 x86_64 构建 ====="
 cmake -S "$SRC/android/sr_qnn/cpp" -B "$WORK/build-host" \
