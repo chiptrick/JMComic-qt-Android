@@ -45,11 +45,17 @@ AppRequirements = [
     "typing-extensions",
     "commonx",                               # jmcomic 依赖
     "jmcomic",                               # 走 android/recipes/jmcomic(--no-deps)
+    # 原生 curl_cffi：走 android/recipes/curl_cffi 解包官方 android wheel
+    # (curl_cffi-0.16.3-cp314-android_24_arm64_v8a)，带 TLS 指纹伪装 + HTTP/3 + ECH。
+    # 依赖目标 CPython 3.14(见 tools/wsl_patch_p4a_versions.sh)。
+    # android/shims/curl_cffi 垫片仍在 APK 里，但 site-packages 里的真包 import 优先，
+    # 垫片只是"真包缺失时"的兜底。
+    "curl_cffi",
 ]
 
-# 说明：curl_cffi 不在 requirements 里，Android 上由 android/shims/curl_cffi 垫片提供
-# (作为 assets 打进 APK)；编出原生 curl-impersonate 后可改成走 recipes/curl_cffi。
-SkipRequirements = ["curl_cffi", "curl-cffi"]
+# curl-cffi(PyPI 连字符写法)不是 recipe 名，真会被 p4a 当成 pip 包去装 —— 那样会拉到
+# manylinux wheel，在 bionic 上加载不了。真名 curl_cffi 走上面的 recipe。
+SkipRequirements = ["curl-cffi"]
 
 # APK 版本号(buildozer.spec 的 app.version，也就是 Android 的 versionName)。
 # p4a 的 get_android_numeric_version() 由它推导 versionCode：

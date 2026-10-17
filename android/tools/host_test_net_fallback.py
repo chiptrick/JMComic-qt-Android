@@ -40,7 +40,12 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.normpath(os.path.join(HERE, "..", ".."))
 sys.path.insert(0, os.path.join(REPO, "src"))
 sys.path.insert(0, os.path.join(REPO, "android"))
-sys.path.append(os.path.join(REPO, "android", "shims"))
+# 强制垫片优先(insert 到最前)：A 段与结尾的"还原本机探测"断言的都是垫片语义
+# (IsAdvancedTlsSupported()=False)，宿主 site-packages 里装了真 curl_cffi
+# 也不该命中(否则在装好真包的宿主上 A 段会误失败)。
+# B/C 段的"真 curl_cffi 降级语义"靠 monkeypatch IsAdvancedTlsSupported 模拟，
+# 不依赖真包本身。
+sys.path.insert(0, os.path.join(REPO, "android", "shims"))
 os.chdir(TMP)
 
 from PySide6.QtWidgets import QApplication  # noqa: E402

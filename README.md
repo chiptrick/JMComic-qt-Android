@@ -43,6 +43,7 @@
 | **Waifu2x 走高通 NPU** | `libsr_qnn.so`（QNN/HTP）+ `onnxruntime-android-qnn`，9 组共 39 个固定 shape 模型，可选 fp16 / 量化 |
 | **两处 Android 专有的坑** | `bootstrap=qt` 下 AES 解密必须补 `ctypes.util`；`PYTHONOPTIMIZE=2` 会让 ctypes 后端在 Android 上必死 —— 详见 [android/README.md](android/README.md) §3.1/§3.2 |
 | **HTTP/3、ECH 失败自动降级** | 打开这两个选项遇到 UDP 被封 / ECH 配置过期时，失败一次就整体关掉、改走 HTTP/2 + 普通 SNI，不再让每个请求都白等一轮超时 —— 详见 [android/README.md](android/README.md) §3.9 |
+| **原生 curl_cffi（TLS 指纹 + HTTP/3 + ECH）** | 用官方 android wheel（0.16.3 cp314）解包进 site-packages；代价是目标 Python 整机迁到 **3.14**（Qt 6.12.0 abi3 wheel 同样绑 `libpython3.14.so`）—— 详见 [android/README.md](android/README.md) §3.10 |
 
 ## 下载与安装
 

@@ -53,13 +53,27 @@ for i in assets[:12]:
 py = [i for i in z.infolist() if i.filename.endswith(('.py', '.pyc'))]
 print("打包的 python 文件数:", len(py))
 print("APK 总大小: %.1f MB" % (sum(i.file_size for i in z.infolist()) / 1024 / 1024))
-# 关键模块是否在包里
-for need in ("jincomic",):
-    pass
-for mod in ("jmcomic/__init__.py", "lxml/__init__.py", "PIL/__init__.py", "PySide6/__init__.py",
-            "curl_cffi/__init__.py", "shims/curl_cffi/__init__.py"):
-    hit = any(mod in i.filename for i in z.infolist())
+# 关键模块是否在包里：python 代码分三处——private.tar(app_src/recipes/shims)、
+# libpybundle.so(site-packages，qt bootstrap 的 tar.gz 伪装 .so)、少量顶层 .pyc
+import tarfile, io
+names = set(z.namelist())
+for asset in ("assets/private.tar", "lib/arm64-v8a/libpybundle.so"):
+    if asset in z.namelist():
+        try:
+            with tarfile.open(fileobj=io.BytesIO(z.read(asset))) as t:
+                names |= set(t.getnames())
+        except Exception as es:
+            print("   展开 %s 失败: %s" % (asset, es))
+for mod in ("jmcomic/__init__", "PIL/__init__", "PySide6/__init__",
+            "curl_cffi/__init__", "curl_cffi/_wrapper.abi3.so",
+            "shims/curl_cffi/__init__"):
+    hit = any(n.endswith(mod + ".py") or n.endswith(mod + ".pyc") or n.endswith(mod)
+              for n in names)
     print("   %-34s %s" % (mod, "✓" if hit else "✗"))
+# lxml 在 Android 上**故意不装**(p4a 静态构建太脆，tools/tool.py 回退 etree)，
+# 所以这里是"预期缺失"，不是错误
+has_lxml = any(n.endswith("lxml/__init__.pyc") or n.endswith("lxml/__init__.py") for n in names)
+print("   %-34s %s" % ("lxml/__init__(Android 预期不装)", "有(意外)" if has_lxml else "无(正常)"))
 EOF
 
 echo

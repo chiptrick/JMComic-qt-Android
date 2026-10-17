@@ -39,6 +39,10 @@ FILES=(
     android/main.py
     android/sr_qnn/__init__.py
     android/tools/patch_buildozer_spec.py
+    android/tools/wsl_patch_p4a_versions.sh
+    android/tools/wsl_reset_py314_cache.sh
+    android/tools/wsl_setup_venv314.sh
+    android/recipes/curl_cffi/__init__.py
     android/shims/curl_cffi/__init__.py
     android/shims/curl_cffi/requests/__init__.py
 )
@@ -103,6 +107,9 @@ checks = [
     ("server/req.pyc", b"DowngradeTlsOptions", "HTTP/3、ECH 失败降级(req.py)"),
     ("server/server.pyc", b"DowngradeStatus", "接口降级白名单(server.py)"),
     ("shims/curl_cffi/__init__.pyc", b"HTTP3_ECH_SUPPORTED", "垫片能力声明(shims)"),
+    # 原生 curl_cffi(官方 android wheel)进了 site-packages：这些模块垫片里没有
+    ("curl_cffi/fingerprints.pyc", b"chrome110", "原生 curl_cffi(指纹表)"),
+    ("curl_cffi/requests/session.pyc", b"curl_options", "原生 curl_cffi(Session)"),
 ]
 try:
     with zipfile.ZipFile(apk) as z:
@@ -113,6 +120,18 @@ try:
         for name in t.getnames():
             if name.endswith(".pyc"):
                 members[name] = t.extractfile(name).read()
+    # site-packages 的 pyc 不在 private.tar，而在 lib/arm64-v8a/libpybundle.so
+    # (tar.gz 伪装成 .so，qt bootstrap 运行时解包)。原生 curl_cffi 就在这里。
+    with zipfile.ZipFile(apk) as z:
+        pb = "lib/arm64-v8a/libpybundle.so"
+        if pb in z.namelist():
+            pbdata = z.read(pb)
+            with tarfile.open(fileobj=io.BytesIO(pbdata)) as t:
+                for name in t.getnames():
+                    if name.endswith(".pyc"):
+                        members[name] = t.extractfile(name).read()
+        else:
+            print("  !! APK 里没有 {}".format(pb))
     for suffix, marker, label in checks:
         hits = [(n, b) for n, b in members.items() if n.endswith(suffix)]
         if not hits:

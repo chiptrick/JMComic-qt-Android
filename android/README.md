@@ -17,7 +17,7 @@
 | 超分(waifu2x) | `sr_qnn`：ONNX Runtime **QNN Execution Provider** → Hexagon NPU (HTP) | 微软官方 Android QNN 包(`onnxruntime-android-qnn`)，头文件/库都现成；模型可量化 |
 | 与现有代码接合 | `sr_qnn` 提供与 `sr_vulkan` **同构**的 API，并在 `sys.modules` 里注册成 `sr_vulkan` | `task_waifu2x.py` / `main_view.py` / `tool.py` 等原有调用点一行都不用改 |
 | 存储 | 应用私有目录（内部）+ 应用外部私有目录（下载） | Android 14 上**不需要任何存储权限**，也不用处理分区存储 |
-| 网络 | 原生 `curl_cffi`（curl-impersonate 指纹）优先；没有时用纯 python 垫片 | 保留桌面端的 Cloudflare 绕过能力，同时保证没编原生库也能跑 |
+| 网络 | 原生 `curl_cffi`（官方 android wheel，解包进 site-packages）；缺失时退回纯 python 垫片 | 保留桌面端的 Cloudflare 绕过能力（TLS 指纹伪装 + HTTP/3 + ECH），同时保证没编原生库也能跑 |
 
 不支持/不需要：Android 14 以下兼容（`minSdk 34`）、系统托盘、无边框窗口、单实例 socket、子进程崩溃探测。
 
@@ -608,6 +608,57 @@ Python 子类还没构造完（属性/重写都还没挂上，`isinstance` 都�
 > 于是"重试成功了，handler 还按上一次的错误状态当失败处理"。现在每次尝试开头都置
 > `Status.Ok`（下载那条路 `ReDownload` 本来就是这么做的）。
 
+### 3.10 用官方 curl_cffi android wheel：目标 Python 必须整机迁到 3.14
+
+**问题**：`android/shims/curl_cffi` 垫片没有 TLS 指纹伪装，遇到 Cloudflare 严格模式可能 403；
+HTTP/3、ECH 两个开关在垫片下也是空操作。想要原生 `curl_cffi`，就得有 Android 的预编译包。
+
+**结论先行**：官方 wheel **不能直接塞进现有构建** —— 目标 Python 是 3.11，而它绑死 3.14：
+
+| 检查项 | 实测值 |
+| --- | --- |
+| 官方 Android wheel 发布范围 | 0.16.3 只有 `cp313` / `cp314` 两个 tag（`android_24_arm64_v8a`），**没有 cp311** |
+| `curl_cffi/_wrapper.abi3.so` 的 NEEDED | `libpython3.14.so`（cp313 那个是 `libpython3.13.so`）—— 名义 abi3，实际绑大版本 libpython |
+| Qt 6.11.2 android wheel（现状） | `cp311`，`.so` NEEDED `libpython3.11.so` |
+| Qt 6.12.0 android wheel（2026-10-08 发布） | `cp310-abi3` 标签，但 `.so` 同样 NEEDED **`libpython3.14.so`** —— 与 curl_cffi cp314 wheel 正好对齐 |
+
+所以"用官方 wheel" = **把整个 app 迁到 CPython 3.14**，正好 Qt 6.12.0 的 abi3 wheel 也是 3.14 构建的，
+两个 wheel 天然匹配。
+
+**迁移动作**（都在构建脚本里，可复现）：
+
+| 位置 | 改动 |
+| --- | --- |
+| `tools/wsl_patch_p4a_versions.sh`（新增） | p4a 的 `python3`/`hostpython3` recipe 3.11.13 → **3.14.8**（recipe 的 patch 列表自带 3.14 分支）；`cffi` 2.0.0 → **2.1.1**（`curl_cffi` 运行时 `import _cffi_backend`，2.0.0 不支持 3.14） |
+| `tools/wsl_fetch_android_wheels.sh`（新增） | 下载并 **sha256 校验** Qt 6.12.0 abi3 + curl_cffi 0.16.3 cp314 三个 wheel。踩过的坑：86MB 下载中断留下的半截文件被当成"已完成"，构建时 unzip 才发现坏了 —— 所以校验不过就删掉重下 |
+| `recipes/curl_cffi/__init__.py`（重写） | 原来是"用 NDK 自编 curl-impersonate 再编 cffi 扩展"（交叉编译链路跑不通）。改成**解包官方 wheel 进 site-packages**，与 Qt deploy 工具生成的 PySide6 recipe 同一思路；并把 NDK 的 `libc++_shared.so` 按 `libc++_shared-d523468d.so` 放一份进 `lib/arm64-v8a/`（wheel 的 `NEEDED` 是这个带 hash 的名字） |
+| `tools/patch_buildozer_spec.py` | `curl_cffi` 加进 requirements（之前是 SkipRequirements，因为只有垫片）。`curl-cffi`（连字符写法）仍跳过 —— 那会被 p4a 当 pip 包拉 manylinux wheel |
+| `tools/wsl_reset_py314_cache.sh`（新增） | **一次性冷启动**：清掉所有 3.11 时代的编译缓存（`$JM_WORK/keep`、两处 `.buildozer`）—— p4a/buildozer 的已编译产物绑死 `libpython3.11`，一个都不能复用。与 Python 版本无关的源码包（openssl/libffi 等）会被 `wsl_seed_from_old_storage.sh` 复制回来，CPython 3.14.8 源码包由 `$JM_WORK/Python-3.14.8.tgz` 兜底（该脚本也已从 3.11.13 改成 3.14.8） |
+| `tools/wsl_setup_venv314.sh`（新增） | 建 `venv314`（系统 python3.14 + PySide6-Essentials 6.12.0 abi3 linux 版），`wsl_run_smoke.sh` 优先用它跑回归 —— 让语法编译/冒烟覆盖**目标 3.14 的真实语义**（venv311 覆盖不到 3.14 的移除项）。buildozer 仍只在 venv311 里跑（它要求宿主 ≤3.11） |
+| `tools/wsl_build_apk.sh` | wheel 选中后加防御断言：必须是 `cp310-abi3`，防止有人把旧 cp311 wheel 放回 `wheels/` 混进 3.14 构建（`wsl_fetch_android_wheels.sh` 会把旧版本 Qt wheel 归档进 `wheels/archive/`，因为构建脚本用 `ls \| head -1` 选 wheel，字符串排序 6.11.2 < 6.12.0 会选错） |
+
+**执行顺序**（迁移当天的完整链路，之后日常构建不再需要前两步）：
+
+```bash
+wsl -u root -e bash -lc 'bash <仓库根>/android/tools/wsl_setup_venv314.sh'   # 宿主 3.14 回归环境
+wsl -u root -e bash -lc 'bash <仓库根>/android/tools/wsl_reset_py314_cache.sh' # 清 3.11 缓存(下次为全量冷构建)
+wsl -u root -e bash -lc 'bash <仓库根>/android/tools/wsl_build_apk.sh --version 0.3'  # 出包
+```
+
+**为什么解包进 site-packages 就能用**：pycryptodome 的 cffi 扩展（`Crypto/Cipher/_raw_*.so`）
+走的就是这条路 —— `.so` 随 private.tar 解包到应用数据目录后 `dlopen`，targetSdk 34 真机上已验证可用。
+
+**自动生效**：真包进 site-packages 后 `import curl_cffi` 优先命中真包（垫片只在真包缺失时才被
+`android/main.py` 加进 `sys.path`）；`IsAdvancedTlsSupported()` 找不到 `HTTP3_ECH_SUPPORTED`
+属性 → 返回 True，3.9 那套 HTTP/3、ECH 失败降级链路自动启用。
+
+**验证**（`wsl_verify_new_apk.sh` / `wsl_check_sync.sh` 已加对应断言）：
+`libpython3.14.so` + `libc++_shared-d523468d.so` 在 `lib/arm64-v8a/`、
+`curl_cffi/_wrapper.abi3.so` 与 `curl_cffi/fingerprints.pyc` 在 private.tar 里。
+
+> 仍是**构建期自洽 + 宿主冒烟**的验证：本机没有真机（`adb devices` 为空），
+> "TLS 指纹伪装真的绕过 CF"要你在真机上确认。
+
 ---
 
 ## 4. Waifu2x on 高通 NPU
@@ -681,9 +732,8 @@ adb shell getprop ro.soc.model          # 确认是高通芯片(8 Gen 1 及以�
 export ANDROID_HOME=$HOME/Android/Sdk
 export ANDROID_NDK_HOME=$HOME/Android/Sdk/ndk/26.1.10909125
 
-# PySide6 / shiboken6 的 android_aarch64 wheel(放到 android/wheels/)
-qtpip download PySide6   --android --arch aarch64 && mv PySide6*.whl   android/wheels/
-qtpip download shiboken6 --android --arch aarch64 && mv shiboken6*.whl android/wheels/
+# Android wheel(Qt 6.12.0 abi3 + curl_cffi 0.16.3 cp314)：下载并 sha256 校验，放 android/wheels/
+bash android/tools/wsl_fetch_android_wheels.sh
 
 # 一键构建(会下载 onnxruntime-android-qnn、用 NDK 编 libsr_qnn.so、调用 pyside6-android-deploy)
 cd android && ./build_android.sh
@@ -766,8 +816,11 @@ adb shell dumpsys package <包名> | grep -E "minSdk|targetSdk"
 
 ## 7. 已知限制
 
-1. `curl_cffi` 垫片没有 TLS 指纹伪装，遇到 Cloudflare 严格模式可能 403 —— 正式分发请编原生 recipe。
-2. QNN 后端只支持 HTTP/1.1 时代的同步取图流程不受影响；网络层的 HTTP/2-HTTP/3、ECH 在垫片下不可用（原生 curl_cffi 可用）。垫片会声明 `HTTP3_ECH_SUPPORTED=False`，业务层据此**跳过"HTTP/3、ECH 失败降级重试"**（见 3.9），所以打开这两个开关在 Android 上既不会生效也不会因此失败。
+1. `curl_cffi` 已用**官方 android wheel**（0.16.3 cp314，见 3.10），TLS 指纹伪装 / HTTP/3 / ECH 都可用；
+   `android/shims/curl_cffi` 垫片仍留在 APK 里，只是"真包缺失时"的兜底。
+2. QNN 后端只支持 HTTP/1.1 时代的同步取图流程不受影响；网络层的 HTTP/2-HTTP/3、ECH 现在**真正生效**
+   （垫片下是空操作）。垫片会声明 `HTTP3_ECH_SUPPORTED=False`，业务层据此**跳过"HTTP/3、ECH 失败降级重试"**
+   （见 3.9），所以真包/垫片两种情况都不会因为这两个开关而失败。
 3. cunet 模型在 NPU 上默认复用 anime 模型（质量接近，速度更好）；要精确一致需要自己导出 cunet onnx。
 4. 看图界面（`read_view`）沿用桌面端的自绘滚动逻辑，未挂 QScroller；竖屏条漫滚动本来就是它的强项。
 5. `Android 14 以下` 未做兼容（用户明确要求）：`minSdk 34`。

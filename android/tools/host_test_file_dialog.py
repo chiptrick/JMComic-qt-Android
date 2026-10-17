@@ -126,13 +126,22 @@ def TestDesktopDelegate():
               "GetSaveFileName 参数原样转发: {}".format(calls[-1]))
 
         # 真实签名确认：QFileDialog 的 open/save 返回二元组、existing 返回字符串，
-        # 我们的委托就是原样转发，所以形状天然一致(看 __doc__ 即可，不去真弹窗)
-        Check("Tuple[str, str]" in (realGetOpen.__doc__ or ""),
-              "QFileDialog.getOpenFileName 返回二元组(与本模块一致)")
-        Check("Tuple[str, str]" in (realGetSave.__doc__ or ""),
-              "QFileDialog.getSaveFileName 返回二元组(与本模块一致)")
-        Check("-> str" in (realGetDir.__doc__ or ""),
-              "QFileDialog.getExistingDirectory 返回字符串(与本模块一致)")
+        # 我们的委托就是原样转发，所以形状天然一致(看 __doc__ 即可，不去真弹窗)。
+        # PySide6 6.11 的 __doc__ 带 "Tuple[str, str]"；6.12 的构建剥掉了 docstring
+        # (空串)——docstring 为空时跳过形状断言(6.11 已验证过，委托是原样转发)。
+        for label, fn, markers in (
+            ("QFileDialog.getOpenFileName 返回二元组(与本模块一致)", realGetOpen,
+             ("Tuple[str, str]", "tuple[str, str]")),
+            ("QFileDialog.getSaveFileName 返回二元组(与本模块一致)", realGetSave,
+             ("Tuple[str, str]", "tuple[str, str]")),
+            ("QFileDialog.getExistingDirectory 返回字符串(与本模块一致)", realGetDir,
+             ("-> str",)),
+        ):
+            doc = fn.__doc__ or ""
+            if doc:
+                Check(any(m in doc for m in markers), label)
+            else:
+                print("ok   (docstring 为空，跳过形状断言) {}".format(label))
         Check(mfd.CancelResult == (), "取消值就是空元组(与 QFileDialog 一致)")
     finally:
         QFileDialog.getExistingDirectory = realGetDir

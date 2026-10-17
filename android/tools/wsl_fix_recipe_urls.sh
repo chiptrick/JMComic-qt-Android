@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 . "$(dirname "${BASH_SOURCE[0]}")/env.sh"
 # 修正 p4a recipe：下载地址(可达性) + Python 版本(必须与 PySide6 android wheel 的
-# cp311 对齐，否则打进 APK 的 CPython 3.14 无法加载 cp311 的 PySide6 扩展)
+# cp310-abi3 / libpython3.14 对齐，否则打进 APK 的 CPython 与 PySide6/curl_cffi 扩展不匹配)
 # 可重复执行(幂等)
 set -uo pipefail
 P4A="${P4A:-"$JM_WORK/p4a"}"
 GH="https://ghproxy.net/https://github.com"
 RECIPES="$P4A/pythonforandroid/recipes"
-PYVER="${PYVER:-3.11.13}"
+PYVER="${PYVER:-3.14.8}"
 
 echo "== 1) 修复被重复加了 ghproxy 前缀的 URL =="
 fixed=0

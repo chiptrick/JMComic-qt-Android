@@ -1,19 +1,21 @@
 #!/usr/bin/env bash
 . "$(dirname "${BASH_SOURCE[0]}")/env.sh"
 # 本地回归：Android 冒烟测试(offscreen，不联网) + 接口一致性 + 解密链 + 图片管线 + 文件选择器
-# 用 venv311(APK 的目标 python3.11)执行，不依赖真机
+# python 选择：优先 venv314(与 APK 目标 CPython 3.14 同大版本，见 tools/wsl_setup_venv314.sh)，
+# 退回 venv311(构建工具链 venv，仍可用但覆盖不到 3.14 语义)
 set -uo pipefail
 WORK="${WORK:-"$JM_WORK"}"
 REPO="${REPO:-"$JM_REPO"}"
-PY="$WORK/venv311/bin/python"
+PY="$WORK/venv314/bin/python"
+[ -x "$PY" ] || PY="$WORK/venv311/bin/python"
 [ -x "$PY" ] || PY="$WORK/venv-host/bin/python"
 [ -x "$PY" ] || PY=$(command -v python3)
 
-echo "python: $($PY --version)"
+echo "python: $($PY --version) ($(command -v "$PY"))"
 cd "$REPO"
 
 echo
-echo "===== 1. 语法编译(python3.11，目标版本) ====="
+echo "===== 1. 语法编译(目标版本语法) ====="
 "$PY" -m py_compile \
     src/tools/platform_mobile.py \
     src/tools/mobile_ui.py \
@@ -49,7 +51,7 @@ echo "===== 1. 语法编译(python3.11，目标版本) ====="
     android/tools/host_test_image_pipeline.py \
     android/tools/host_test_file_dialog.py \
     android/tools/host_test_net_fallback.py \
-    && echo "[ok] py3.11 编译通过" || echo "[FAIL] py3.11 编译失败"
+    && echo "[ok] 语法编译通过" || echo "[FAIL] 语法编译失败"
 
 run() {
     # $1=名字 $2=脚本

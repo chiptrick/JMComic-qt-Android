@@ -13,7 +13,7 @@ pkill -f 'buildozer android' 2>/dev/null || true
 sleep 3
 
 : > "$LOG"
-setsid nohup bash "$JM_REPO/android/tools/wsl_build_apk.sh" \
+setsid nohup bash "$JM_REPO/android/tools/wsl_build_apk.sh" "$@" \
     >> "$LOG" 2>&1 < /dev/null &
 echo "已启动脱离式构建, PID=$!"
 echo "日志: $LOG"

@@ -1,110 +1,87 @@
 # coding:utf-8
-"""python-for-android recipe: curl_cffi(基于 curl-impersonate 的原生 TLS 指纹)
+"""python-for-android recipe: curl_cffi(官方 android wheel 解包)
 
-这是 Android 移植里最难缠的依赖：curl_cffi 需要 **curl-impersonate** 版本的
-libcurl(带 Chrome 的 TLS/HTTP2 指纹)，而官方没有 Android 预编译包，需要在
-构建时用 NDK 自己编一份。
+背景
+----
+curl_cffi 需要 **curl-impersonate** 版本的 libcurl(Chrome 的 TLS/HTTP2 指纹 +
+HTTP/3 + ECH)。最早这里放的是"用 NDK 自编 curl-impersonate 再编 cffi 扩展"的
+recipe，交叉编译链路在 p4a 下跑不通(见 android/README.md §3.10)。
 
-本 recipe 做两件事：
-    1. 用 NDK 编译 curl-impersonate(静态 libcurl.a + 头文件)，产物放在
-       $CURL_IMPERSONATE_ANDROID/<abi>/lib/libcurl.a
-       若该目录已存在(比如你自己编好了/团队缓存了)，直接复用，跳过编译。
-    2. 用上述 libcurl 编译 curl_cffi 的 python 扩展(cffi)。
+2026-09 起上游发布官方 Android wheel(`android_24_arm64_v8a`)，里面已经静态编好
+BoringSSL + ngtcp2/nghttp3(HTTP/3) + ECH，所以这里改成**解包 wheel 进 site-packages**，
+与 Qt deploy 工具生成的 PySide6 recipe 同一思路：
+
+    curl_cffi/_wrapper.abi3.so 的 NEEDED：
+        libpython3.14.so          -> 目标 CPython 必须是 3.14(见 tools/wsl_patch_p4a_versions.sh)
+        libc++_shared-d523468d.so -> 带 hash 的 SONAME，本 recipe 把 NDK 的
+                                     libc++_shared.so 按这个文件名放一份进 lib/arm64-v8a/
+                                     (与 libpyside6.abi3.so 同层，linker 才找得到)
+
+wheel 的下载与 sha256 校验见 android/tools/wsl_fetch_curl_cffi.sh；没下载就报错，
+不在 recipe 里偷偷联网。
 
 用法(buildozer.spec)：
-    requirements = python3,kivy,pyside6,...,curl_cffi
-    p4a.local_recipes = android/recipes
-
-需要的环境变量(可用 buildozer.spec 的 [app] 段或 shell 导出)：
-    CURL_IMPERSONATE_VERSION  默认 v0.6.1(curl-impersonate-chrome 标签)
-    CURL_IMPERSONATE_ANDROID  缓存/产物目录，默认 ~/.cache/curl-impersonate-android
-    ANDROID_NDK_HOME          必填
-
-注意：curl-impersonate 上游的 android 支持随版本变化，若某版本编不过，
-可以退回 android/shims/curl_cffi(纯 python 垫片，功能可用但没有 TLS 指纹伪装)。
+    requirements = python3,...,curl_cffi
+    p4a.local_recipes = android/deployment/recipes
 """
 import os
+import shutil
+import zipfile
 
-from pythonforandroid.recipe import CompiledComponentsPythonRecipe
-from pythonforandroid.toolchain import current_directory, shprint  # noqa: F401
-import sh
+from pythonforandroid.logger import info
+from pythonforandroid.recipe import PythonRecipe
+
+WHEEL_NAME = "curl_cffi-0.16.3-cp314-cp314-android_24_arm64_v8a.whl"
+# wheel 里 _wrapper.abi3.so 的 SONAME 依赖(上游按 NDK 版本取的 hash，固定不变)
+CPP_SHARED_NAME = "libc++_shared-d523468d.so"
 
 
-class CurlCffiRecipe(CompiledComponentsPythonRecipe):
-    version = "0.13.0"
-    url = "https://github.com/lexiforest/curl_cffi/archive/refs/tags/v{version}.tar.gz"
-    # curl_cffi 依赖 cffi / certifi / typing_extensions
-    depends = ["setuptools", "cffi", "openssl", "certifi"]
+def FindWheel():
+    """ 优先环境变量；再按"recipe 被拷到 deployment/recipes 之后"与"源码位置"两套布局找 """
+    env = os.environ.get("JM_CURL_CFFI_WHEEL", "")
+    if env and os.path.isfile(env):
+        return os.path.abspath(env)
+    here = os.path.dirname(os.path.abspath(__file__))
+    for rel in (
+        os.path.join("..", "..", "..", "wheels", WHEEL_NAME),   # <android>/deployment/recipes/curl_cffi
+        os.path.join("..", "..", "wheels", WHEEL_NAME),         # <android>/recipes/curl_cffi
+    ):
+        path = os.path.join(here, rel)
+        if os.path.isfile(path):
+            return os.path.abspath(path)
+    return ""
+
+
+class CurlCffiRecipe(PythonRecipe):
+    name = "curl_cffi"
+    version = "0.16.3"
+    # curl_cffi 的 METADATA 声明运行时依赖：__init__ 首行就是 `import _cffi_backend`
+    depends = ["cffi", "certifi"]
     call_hostpython_via_targetpython = False
+    install_in_hostpython = False
 
-    def get_recipe_env(self, arch):
-        env = super().get_recipe_env(arch)
-        prefix = self.ImpersonatePrefix(arch)
-        env["CURL_IMPERSONATE_PREFIX"] = prefix
-        # 让 cffi/setuptools 找到 curl-impersonate
-        env["CFLAGS"] = "{} -I{}/include -DCURL_STATICLIB=1".format(
-            env.get("CFLAGS", ""), prefix)
-        env["LDFLAGS"] = "{} -L{}/lib -lcurl -lssl -lcrypto -lz -ldl".format(
-            env.get("LDFLAGS", ""), prefix)
-        env["PKG_CONFIG_PATH"] = "{}/lib/pkgconfig".format(prefix)
-        env["CURL_CFFI_USE_STATIC_LIBCURL"] = "1"
-        return env
+    def build_arch(self, arch):
+        wheel = FindWheel()
+        if not wheel:
+            raise Exception(
+                "缺少 {}：先跑 android/tools/wsl_fetch_curl_cffi.sh 下载官方 android wheel"
+                .format(WHEEL_NAME))
 
-    @staticmethod
-    def ImpersonateDir():
-        return os.environ.get(
-            "CURL_IMPERSONATE_ANDROID",
-            os.path.join(os.path.expanduser("~"), ".cache", "curl-impersonate-android"))
+        info("解包 {} 到 site-packages".format(wheel))
+        with zipfile.ZipFile(wheel, "r") as z:
+            names = z.namelist()
+            z.extractall(self.ctx.get_python_install_dir(arch.arch))
+        info("  {} 个文件, 其中 .so: {}".format(
+            len(names), [n for n in names if n.endswith(".so")]))
 
-    def ImpersonatePrefix(self, arch):
-        return os.path.join(self.ImpersonateDir(), arch.arch)
-
-    def BuildImpersonate(self, arch):
-        """ 用 NDK 编译 curl-impersonate(仅当缓存里没有时) """
-        prefix = self.ImpersonatePrefix(arch)
-        if os.path.exists(os.path.join(prefix, "lib", "libcurl.a")):
-            return prefix
-
-        version = os.environ.get("CURL_IMPERSONATE_VERSION", "v0.6.1")
-        workDir = os.path.join(self.ImpersonateDir(), "src")
-        if not os.path.exists(workDir):
-            os.makedirs(os.path.dirname(workDir), exist_ok=True)
-            shprint(sh.git, "clone", "--depth", "1", "--branch", version,
-                    "https://github.com/lwthiker/curl-impersonate.git", workDir)
-
-        ndk = os.environ.get("ANDROID_NDK_HOME") or os.environ.get("ANDROID_NDK_ROOT")
-        if not ndk:
-            raise Exception("请设置 ANDROID_NDK_HOME 才能编译 curl-impersonate")
-
-        api = os.environ.get("CURL_IMPERSONATE_API", "34")
-        target = "aarch64-linux-android" if arch.arch == "arm64-v8a" else "armv7a-linux-androideabi"
-        toolchain = os.path.join(ndk, "toolchains", "llvm", "prebuilt", "linux-x86_64", "bin")
-        env = os.environ.copy()
-        env["CC"] = os.path.join(toolchain, "{}{}-clang".format(target, api))
-        env["CXX"] = os.path.join(toolchain, "{}{}-clang++".format(target, api))
-        env["AR"] = os.path.join(toolchain, "llvm-ar")
-        env["RANLIB"] = os.path.join(toolchain, "llvm-ranlib")
-        env["STRIP"] = os.path.join(toolchain, "llvm-strip")
-        env["CFLAGS"] = "-fPIC -O2"
-        env["CXXFLAGS"] = "-fPIC -O2"
-        env["LDFLAGS"] = "-fPIC"
-
-        # curl-impersonate 提供 makefile-based 构建；--prefix 指向我们的缓存目录
-        with current_directory(workDir):
-            shprint(sh.make, "clean", _env=env, _tail=20, _critical=False)
-            shprint(sh.make, "build", _env=env, _tail=20, _critical=False)
-            shprint(sh.make, "install", "PREFIX={}".format(prefix), _env=env, _tail=20)
-        if not os.path.exists(os.path.join(prefix, "lib", "libcurl.a")):
-            raise Exception("curl-impersonate 编译失败，请检查 NDK/版本；"
-                            "也可以改用 android/shims/curl_cffi 垫片")
-        return prefix
-
-    def prebuild_arch(self, arch):
-        super().prebuild_arch(arch)
-        self.BuildImpersonate(arch)
-
-    def get_recipe_env_with_curl(self, arch):
-        return self.get_recipe_env(arch)
+        # _wrapper.abi3.so NEEDED libc++_shared-d523468d.so：按这个文件名放一份
+        # (PySide6 那边是普通名字的 libc++_shared.so，两份并存，各链各的)
+        src = "{}/{}/libc++_shared.so".format(self.ctx.ndk.sysroot_lib_dir, arch.command_prefix)
+        dst = "{}/{}".format(self.ctx.get_libs_dir(arch.arch), CPP_SHARED_NAME)
+        if not os.path.isfile(src):
+            raise Exception("找不到 NDK 的 libc++_shared.so: {}".format(src))
+        shutil.copyfile(src, dst)
+        info("  {} -> {}".format(src, dst))
 
 
 recipe = CurlCffiRecipe()

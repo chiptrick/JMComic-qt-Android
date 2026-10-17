@@ -14,8 +14,8 @@ modules = Core,Gui,Widgets,Network,Svg,Xml,Sql,OpenGL,OpenGLWidgets
 plugins =
 
 [android]
-wheel_pyside = wheels/pyside6-6.11.2-6.11.2-cp311-cp311-android_aarch64.whl
-wheel_shiboken = wheels/shiboken6-6.11.2-6.11.2-cp311-cp311-android_aarch64.whl
+wheel_pyside = wheels/pyside6-6.12.0-6.12.0-cp310-abi3-android_aarch64.whl
+wheel_shiboken = wheels/shiboken6-6.12.0-6.12.0-cp310-abi3-android_aarch64.whl
 plugins =
 
 [buildozer]

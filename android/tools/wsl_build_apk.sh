@@ -14,6 +14,20 @@
 #
 # buildozer 要求宿主 python <= 3.11(见 wsl_build_py311_src.sh)
 set -uo pipefail
+# --version X.Y / --version=X.Y 透传给 patch_buildozer_spec.py 覆盖默认
+# AppVersion(versionName)；versionCode 由 p4a 按版本号推导，只能往上改
+# (见 patch_buildozer_spec.py 注释)
+APP_VERSION=""
+take_value=""
+for arg in "$@"; do
+    if [ -n "$take_value" ]; then APP_VERSION="$arg"; take_value=""; continue; fi
+    case "$arg" in
+        --version=*) APP_VERSION="${arg#--version=}" ;;
+        --version)   take_value="1" ;;
+        *) echo "未知参数: $arg(用法: wsl_build_apk.sh [--version 0.3])"; exit 1 ;;
+    esac
+done
+[ -n "$APP_VERSION" ] && echo "APK 版本号: $APP_VERSION(覆盖默认)"
 WORK="${WORK:-"$JM_WORK"}"
 SRC="$WORK/src"
 ANDROID="$SRC/android"
@@ -57,6 +71,11 @@ find "$ANDROID/app_src" -name '__pycache__' -type d -prune -exec rm -rf {} + 2>/
 rm -rf "$ANDROID/app_src/logs" 2>/dev/null || true
 du -sh "$ANDROID/app_src"
 
+echo "===== [$(date +%T)] 0.5 下载/校验 android wheel(CPython 3.14 + 原生 curl_cffi) ====="
+# Qt 6.12.0 abi3(NEEDED libpython3.14.so) + curl_cffi 0.16.3 cp314。
+# 幂等：sha256 匹配就跳过；残片会被删掉重下(不要用 -C - 续传留下的半截文件)。
+bash "$JM_REPO/android/tools/wsl_fetch_android_wheels.sh" || { echo "[FATAL] android wheel 缺失"; exit 1; }
+
 [ -x "$VPY" ] || { echo "缺少 venv311(先跑 wsl_build_py311_src.sh)"; exit 1; }
 echo "宿主 python: $($VPY --version)"
 if ! "$VPY" -c "import pythonforandroid" 2>/dev/null; then
@@ -71,6 +90,15 @@ SHIBOKEN_WHL=$(ls "$ANDROID/wheels/"shiboken6-*-android_aarch64.whl 2>/dev/null 
 echo "PySide6  wheel: $PYSIDE_WHL"
 echo "shiboken wheel: $SHIBOKEN_WHL"
 [ -n "$PYSIDE_WHL" ] && [ -n "$SHIBOKEN_WHL" ] || { echo "缺少 android wheel"; exit 1; }
+# 防"旧 cp311 wheel 混进 3.14 构建"：pyside6/shiboken6 必须是 abi3(.so 绑
+# libpython3.14.so)。wheels 目录里不该再有非 abi3 版(见 wsl_fetch_android_wheels.sh
+# 的归档逻辑)—— 有就说明有人手动放了旧 wheel 回来。
+for w in "$PYSIDE_WHL" "$SHIBOKEN_WHL"; do
+    case "$w" in
+        *cp310-abi3*) ;;
+        *) echo "[FATAL] $w 不是 3.14 兼容的 cp310-abi3 wheel(旧 cp311?)，拒绝构建"; exit 1 ;;
+    esac
+done
 
 echo "===== [$(date +%T)] 1. 填 pysidedeploy.spec ====="
 cd "$ANDROID"
@@ -114,7 +142,8 @@ echo "应用图标: $ICON ($(stat -c %s "$ICON") 字节, $(md5sum "$ICON" | cut 
 
 "$VPY" "$ANDROID/tools/patch_buildozer_spec.py" "$ANDROID/buildozer.spec" \
     --p4a-dir "$P4A" --recipes "$ANDROID/recipes" \
-    --libs "libs/arm64-v8a" --icon "$ICON" --models "$ANDROID/sr_qnn/models" 2>&1 | tail -30
+    --libs "libs/arm64-v8a" --icon "$ICON" --models "$ANDROID/sr_qnn/models" \
+    ${APP_VERSION:+--version "$APP_VERSION"} 2>&1 | tail -30
 echo "--- 关键配置 ---"
 grep -E '^(requirements|version|source\.include_exts|android\.api|android\.minapi|android\.add_libs_arm64_v8a|android\.permissions|android\.add_assets|p4a\.source_dir|p4a\.local_recipes|android\.ndk_path|android\.sdk_path|package\.name|package\.domain|android\.archs|icon\.filename)' "$ANDROID/buildozer.spec"
 
@@ -136,6 +165,10 @@ echo "===== [$(date +%T)] 3.6 补 AndroidManifest 存储权限 ====="
 echo "===== [$(date +%T)] 4. 阶段3：buildozer android debug(首次会编译 python3/openssl/libffi 等) ====="
 # 每次构建前修正 p4a recipe 里本机不可用的下载地址(openssl.org 证书问题 / github 被墙)
 bash "$JM_REPO/android/tools/wsl_fix_recipe_urls.sh"
+# 目标 CPython 切 3.14 + cffi 升 2.1.1(curl_cffi 0.16.3 的 _wrapper.abi3.so NEEDED
+# libpython3.14.so；cffi 2.0.0 不支持 3.14)。幂等。
+bash "$JM_REPO/android/tools/wsl_patch_p4a_versions.sh" || {
+    echo "[FATAL] p4a recipe 版本补丁失败，目标 Python 不是 3.14"; exit 1; }
 # 把大体积/慢速的源码包用国内镜像预置进 p4a 缓存(Pillow 45MB、lxml、pycryptodome)
 "$VPY" "$JM_REPO/android/tools/wsl_seed_sources.py" || true
 # ghproxy 下载 27MB 的 CPython 会中途断流(http.client.IncompleteRead)导致 hostpython3/

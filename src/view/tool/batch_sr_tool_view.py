@@ -1,6 +1,5 @@
 import os
 import time
-from distutils.dir_util import create_tree
 from functools import partial
 
 from PySide6 import QtWidgets, QtCore
