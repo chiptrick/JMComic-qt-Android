@@ -38,10 +38,11 @@ android/
 │   ├── __init__.py          # ctypes 封装，sr_vulkan 同构接口 + MODEL_* 常量
 │   ├── cpp/                 # libsr_qnn.so 源码(ONNX Runtime C API + QNN EP)
 │   │   ├── sr_qnn.h / sr_qnn.cpp / CMakeLists.txt
-│   └── models/              # models.txt 清单 + onnx 模型(模型需自行生成)
+│   └── models/              # models.txt 清单 + 31 个 onnx(waifu2x 9 / CUGAN 17 / ESRGAN 5，随 APK 分发)
 ├── recipes/curl_cffi/       # python-for-android recipe(编译 curl-impersonate)
 ├── shims/curl_cffi/         # 纯 python 垫片(原生库缺失时的降级方案)
-└── tools/prepare_models.py  # 把动态 shape 的 waifu2x onnx 转成 NPU 可用的固定 shape
+├── tools/prepare_models.py  # 把动态 shape 的 onnx 转成 NPU 可用的固定 shape
+└── tools/models_stage/      # 31 个模型的导出/静态化/对账工具链(官方 PyTorch 权重 -> onnx)
 ```
 
 ---
@@ -716,17 +717,25 @@ C++ 只处理 RGB 原始像素，所以不依赖任何图像库。
    HTP 子系统重启（SSR）后引擎自动重建会话并重试当前分块。这些项都可用环境变量关闭，
    且任一项不受支持时自动退回“基础项”，不会因此丢掉 NPU。
 
-### 4.3 模型准备（必须做一次）
+### 4.3 模型准备（已随 APK 分发）
+
+`android/sr_qnn/models/` 里现有 **31 个 onnx**（waifu2x cunet 9 + Real-CUGAN 17 +
+Real-ESRGAN 5），全部由官方 PyTorch 权重直接导出（导出/静态化/对账工具链见
+`android/tools/models_stage/README.md`），随 APK 的 `private.tar` 分发，首次启动
+由 `EnsureModels()` 解包到应用私有目录。**不需要**再手动准备模型。
+
+如果确实要自己改模型（换 tile、量化、加新权重）：
 
 ```bash
-python android/tools/prepare_models.py --src <waifu2x onnx 目录> --tile 192 --verify
+python android/tools/prepare_models.py --src <源 onnx 目录> --tile 192 --verify
 #   可选：--fp16 生成半精度；--quantize --calib-dir <图片目录> 生成 HTP 最快的量化模型
 ```
 
 产出放到 `android/sr_qnn/models/`（文件名与 `models.txt` 对应，见该目录的 README）。
-默认映射：`MODEL_WAIFU2X_ANIME_UP2X_DENOISE3X` 等 → `waifu2x_anime_up2x_denoise3.onnx`；
-cunet 在 NPU 上默认复用 anime 模型（分组反卷积对 HTP 不友好）；
-Real-CUGAN / Real-ESRGAN 缺失时自动回退到 waifu2x 并在日志里提示。
+默认映射：`MODEL_WAIFU2X_ANIME_UP2X_DENOISE3X` 等 → `waifu2x_cunet_up2x_denoise3.onnx`
+（真 cunet 权重）；`MODEL_REALCUGAN_*` / `MODEL_REALESRGAN_*` → 对应的 22 个 onnx。
+某个文件缺失时引擎只在**同倍数**内回退到最接近的可用模型，跨倍数不回退（会产出
+"分辨率变大但没细节"的假超分，比失败更糟），任务会以 -11 明确失败并提示缺哪个文件。
 
 **没有模型时**：`sr_qnn` 会明确报告“未找到任何 ONNX 模型”，
 `config.CanWaifu2x=False`，界面自动禁用超分相关选项（不会崩、不会卡）。
@@ -735,7 +744,7 @@ Real-CUGAN / Real-ESRGAN 缺失时自动回退到 waifu2x 并在日志里提示�
 
 ```bash
 adb logcat | grep sr_qnn
-# sr_qnn loaded: /data/app/.../lib/arm64/libsr_qnn.so, models:12/39, htp:1, backend:Qualcomm Hexagon NPU (QNN HTP, fp16)
+# sr_qnn loaded: /data/app/.../lib/arm64/libsr_qnn.so, models:31/41, htp:1, backend:Qualcomm Hexagon NPU (QNN HTP, fp16)
 adb shell getprop ro.soc.model          # 确认是高通芯片(8 Gen 1 及以上 HTP 更稳)
 ```
 
@@ -764,11 +773,12 @@ adb install -r android/*.apk
 ```
 
 `build_android.sh` 会打印 `adb push` 模型的命令；如果希望模型直接打进 APK，
-在生成的 `buildozer.spec` 里加：
-
-```ini
-android.add_assets = sr_qnn/models:models
-```
+用 `tools/patch_buildozer_spec.py --models android/sr_qnn/models` 把 `onnx/txt`
+加进 `source.include_exts` —— 模型随 `assets/private.tar` 分发，运行时由
+`android/main.py` 的 `EnsureModels()` 解包到可写目录（`wsl_build_apk.sh` 已自动
+带上这一步）。刻意不用 `android.add_assets`：那会往 APK 里再塞一份 ~200MB 的副本，
+而且 p4a 的 assets 只能通过 Qt 的 `assets:/` 或 Java AssetManager 读，原生
+`fopen` 打不开。
 
 ### 5.1 minSdk 34 与屏幕方向怎么落地
 
@@ -781,7 +791,7 @@ API=34 MINAPI=34 ORIENTATION=portrait ./tools/pin_min_sdk.sh
 ```
 
 补丁内容：`android.api/minapi=34`、`archs=arm64-v8a`、`local_libs`(NPU 运行库)、
-`add_assets`(模型)、Manifest 的 `screenOrientation` 与 `INTERNET` 权限。
+`source.include_exts`(模型随 private.tar 分发)、Manifest 的 `screenOrientation` 与 `INTERNET` 权限。
 需要强制竖屏就设 `ORIENTATION=portrait`；默认 `fullUser` 允许用户旋转，
 旋转后界面由 `mobile_ui.OnShown` 重新适配。
 
@@ -942,7 +952,8 @@ pyside6-android-deploy             # 用补丁后的 spec 正式打包
 
 注入内容：应用依赖清单、`android.api/minapi=34`、`android.add_libs_arm64_v8a`
 （`libsr_qnn.so` + `libonnxruntime.so` + QNN 运行库进 APK 的 `lib/arm64-v8a/`）、
-超分模型 `add_assets`、网络权限、`p4a.source_dir`（用本地已改镜像的 p4a）。
+`source.include_exts` 加 `onnx/txt`（31 个超分模型随 private.tar 分发）、网络权限、
+`p4a.source_dir`（用本地已改镜像的 p4a）。
 
 **APK 版本号**（`app.version`，即 Android 的 versionName）也在这一步注入：
 工具每次 `--init` 都会把它重置成 `0.1`，所以必须由补丁覆盖，值取
@@ -976,6 +987,13 @@ p4a 用 `"10" + minSdk + 逐段(*100 累加)的版本号` 推导 `versionCode`�
 * 请求缺失模型时自动回退到可用模型
 * `removeWaitProc` 丢弃排队任务、`remove` 取消运行中任务、非法图片/非法模型号被拒绝
 * 这个测试实际抓出了一个真 bug：输入张量曾按 HWC 填充（ONNX 要 NCHW），修复后才与参考实现吻合
+* 本轮（2026-10-18）补齐：`host_test_sr_qnn.py` 的"模型回退"用例原先请求 **4x** 缺失模型，
+  与引擎"跨倍数不回退"的设计矛盾必然失败，已改成请求同倍数（2x）缺失模型；
+  重跑 **31/31 全部通过**
+* 模型集：`models.txt` 的 41 条引用对应 31 个唯一 onnx（9 waifu2x + 17 Real-CUGAN +
+  5 Real-ESRGAN），全部由官方 PyTorch 权重导出（工具链 `tools/models_stage/`），
+  随 APK `private.tar` 分发（APK 内对账零缺失）；引擎宿主测试用的是构造的小模型，
+  不依赖这 31 个真实权重
 
 
 ### 9.4 应用图标（启动器图标）

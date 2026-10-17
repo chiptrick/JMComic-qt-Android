@@ -35,12 +35,26 @@ python android/tools/simplify_models.py android/sr_qnn/models --write --backup /
 
 实测：**257 → 79 节点，只剩 Conv/LeakyRelu/Relu/Sigmoid/GlobalAveragePool/Mul/Add/
 Pad/Expand/ConvTranspose/Clip（全部在 QNN 白名单内），输出与改写前逐位相同
-（max|Δ| = 0）**。仓库里现在这 9 个 cunet 模型已经是静态化后的版本。
+（max|Δ| = 0）**。仓库里现在这 31 个模型（9 waifu2x + 17 Real-CUGAN +
+5 Real-ESRGAN）全部是静态化后的版本：非 QNN 算子为 0，且都与 PyTorch 参考输出
+对账过（CUGAN/ESRGAN 的 max|Δ| ≤ 3.5e-5）。
 
 > 换了模型文件后 context 缓存会自动失效：缓存的 key 现在是
 > `文件名-大小-mtime-头部哈希`，旧缓存会被顺手清掉，不需要用户手动清数据。
 
 ## 生成模型
+
+仓库现有的 31 个模型来自**官方 PyTorch 权重直接导出**（waifu2x upcunet 9 个、
+Real-CUGAN 17 个、Real-ESRGAN 5 个），导出/静态化/对账脚本在
+`android/tools/models_stage/`（在 WSL 里跑，见其中的 README）。要点：
+
+* CUGAN 的 pro/se 只是前后缀变换不同（pro 输入 `x*0.7+0.15`、输出 `(y-0.15)/0.7`），
+  导出时包在 wrapper 里，产出的 onnx 与官方行为逐位对齐（torchΔ ≤ 3.5e-5）；
+* ESRGAN 的 HF safetensors 是 TF 布局（4D 权重 `[out,kh,kw,in]`），加载时要
+  `permute(0,3,1,2)`；
+* 每个模型导出后都过一遍静态化 + torch 参考对账 + 输出边长探针，才允许进 models/。
+
+如果只是想拿现成的动态 shape onnx 做 NPU 适配（不走 PyTorch），用通用工具：
 
 ```bash
 # 1) 准备源 onnx(动态 shape 也行)，例如 HuggingFace 上的 waifu2x_onnx 转换版
@@ -60,7 +74,10 @@ python android/tools/prepare_models.py --src D:/waifu2x_onnx --tile 192 \
 ```
 
 把生成的 `*.onnx` 与 `models.txt` 一起：
-* 打包进 APK：`android.add_assets = sr_qnn/models`（buildozer.spec），或
+* 打包进 APK：由 `android/tools/patch_buildozer_spec.py --models android/sr_qnn/models`
+  把 `onnx/txt` 加进 `source.include_exts`，模型随 `assets/private.tar` 分发
+  （刻意不用 `android.add_assets`：那会往 APK 里再塞一份副本，且原生 `fopen`
+  读不了 assets，只能走 Qt AssetManager）；或
 * 安装后推送：
 
 ```bash
@@ -73,9 +90,16 @@ adb push android/sr_qnn/models/. \
 | 应用里选的模型 | 实际使用的 onnx | 说明 |
 | --- | --- | --- |
 | `MODEL_WAIFU2X_ANIME_UP2X_DENOISE3X`（默认看图/下载） | `waifu2x_cunet_up2x_denoise3.onnx` | 动漫风格 2x + 降噪 3 |
-| `MODEL_WAIFU2X_CUNET_*` | `waifu2x_cunet_*.onnx` | 真实 cunet 权重 |
+| `MODEL_WAIFU2X_CUNET_*` | `waifu2x_cunet_*.onnx` | 真实 cunet 权重（官方 upcunet 导出） |
 | `MODEL_WAIFU2X_PHOTO_*` | 复用 cunet | 该模型源里没有 photo 权重，如需请自行导出 |
-| `MODEL_REALCUGAN_*` / `MODEL_REALESRGAN_*` | 需要自己导出 | 没有对应文件时引擎自动回退到 waifu2x 并在日志里提示 |
+| `MODEL_REALCUGAN_*` | `realcugan_{se,pro}_*.onnx` | 17 个全部随 APK 分发（se 11 + pro 6） |
+| `MODEL_REALESRGAN_*` | `realesrgan_*.onnx` | 5 个全部随 APK 分发 |
+
+models.txt 的 41 条引用对应 **31 个唯一 onnx**（waifu2x 的 PHOTO/CUNET 条目按设计
+复用 ANIME 文件）。全部模型都是**官方 PyTorch 权重直接导出**（不是拿别人的 onnx 改
+shape），导出/静态化/对账工具链见 `android/tools/models_stage/README.md`；
+模型文件体积大（共约 218MB），按 `.gitignore` 规则不入库，由构建流程从工作区
+同步进 APK。
 
 ### 模型来源（实测可用）
 

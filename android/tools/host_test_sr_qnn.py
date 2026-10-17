@@ -268,7 +268,10 @@ def Main():
           "{}".format(None if out is None else "{}x{}".format(out.width(), out.height())))
 
     # ---------- 模型回退(请求缺失的模型) ----------
-    taskId = sr_qnn.add(pngBytes, sr_qnn.MODEL_REALCUGAN_SE_UP4X, 4, 2.0, format="png")
+    # 注意:必须请求"同原生倍数"的缺失模型。引擎设计上禁止跨倍数回退
+    # (4x 缺失时退回 2x 会在末尾按目标尺寸双线性放大，产出毫无细节的假超分)，
+    # 那种场景应当以 -11 明确失败，由上层提示缺文件。
+    taskId = sr_qnn.add(pngBytes, sr_qnn.MODEL_REALCUGAN_SE_UP2X_DENOISE3X, 2, 2.0, format="png")
     result = sr_qnn.load(30000)
     Check("缺失模型自动回退仍可用", bool(result) and result[0], "task={}".format(taskId))
 

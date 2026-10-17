@@ -9,10 +9,10 @@
 #     任务会明确失败并提示缺哪个文件(跨倍数回退会按目标尺寸双线性放大，
 #     产出"分辨率变大但画面没细节"的假超分，比失败更糟)
 #
-# 说明(wafiu2x -> NPU)：
-#   * CUNET 权重里的分组反卷积在 HTP 上编译/精度都不友好，NPU 后端默认复用
-#     ANIME(动漫) 模型。如需真 cunet，把导出的 cunet onnx 放到 models/ 并把
-#     下面的文件名改掉即可。
+# 说明(waifu2x -> NPU)：
+#   * waifu2x 9 个模型是官方 upcunet(PyTorch) 权重导出的真 cunet，不是 anime 权重
+#     改名 —— 2x 五个(noise0-3 + art)+ 1x 四个(noise0-3)，cunet 内部有 crop，
+#     固定输入 192 时 2x 实际输出 312、1x 输出 136(引擎用探针实测，不按倍数推)。
 #   * 想要更高速度可用 prepare_models.py --quantize 生成 uint16/uint8 量化模型
 #     (QNN HTP 只原生支持量化模型；fp32 模型靠 enable_htp_fp16_precision 走 fp16)。
 
@@ -43,7 +43,7 @@ WAIFU2X_CUNET_UP2X_DENOISE2X       waifu2x_cunet_up2x_denoise2.onnx   2  2  192
 WAIFU2X_CUNET_UP2X_DENOISE1X       waifu2x_cunet_up2x_denoise1.onnx   2  1  192
 WAIFU2X_CUNET_UP2X_DENOISE0X       waifu2x_cunet_up2x_denoise0.onnx   2  0  192
 
-# ---- Real-CUGAN(可选，需要自己导出 onnx；缺失时同倍数内有 waifu2x 才回退，否则任务失败) ----
+# ---- Real-CUGAN(官方 PyTorch 权重导出的 onnx，全部 17 个随 APK 分发；缺失时同倍数内有 waifu2x 才回退，否则任务失败) ----
 REALCUGAN_SE_UP2X                 realcugan_se_up2x.onnx             2  0  192
 REALCUGAN_SE_UP2X_CONSERVATIVE    realcugan_se_up2x_conservative.onnx 2 0  192
 REALCUGAN_SE_UP2X_DENOISE3X       realcugan_se_up2x_denoise3.onnx    2  3  192
@@ -62,7 +62,7 @@ REALCUGAN_PRO_UP3X                realcugan_pro_up3x.onnx            3  0  192
 REALCUGAN_PRO_UP3X_CONSERVATIVE   realcugan_pro_up3x_conservative.onnx 3 0 192
 REALCUGAN_PRO_UP3X_DENOISE3X      realcugan_pro_up3x_denoise3.onnx   3  3  192
 
-# ---- Real-ESRGAN(可选，需要自己导出 onnx；缺失时同倍数内有 waifu2x 才回退，否则任务失败) ----
+# ---- Real-ESRGAN(官方权重导出的 onnx，全部 5 个随 APK 分发；缺失时同倍数内有 waifu2x 才回退，否则任务失败) ----
 REALESRGAN_ANIMAVIDEOV3_UP2X      realesrgan_animevideo_v3_up2x.onnx 2  0  192
 REALESRGAN_ANIMAVIDEOV3_UP3X      realesrgan_animevideo_v3_up3x.onnx 3  0  192
 REALESRGAN_ANIMAVIDEOV3_UP4X      realesrgan_animevideo_v3_up4x.onnx 4  0  192

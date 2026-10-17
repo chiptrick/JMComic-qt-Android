@@ -43,8 +43,9 @@ Android 移植用的脚本集合。**所有脚本都不写死本机路径**，�
 
 | 脚本 | 作用 |
 | --- | --- |
-| `prepare_models.py` | 把已有 waifu2x onnx(动态 shape) 转成 **NPU 可用的固定 shape** 模型 |
-| `wsl_verify_models.sh` | 用 onnxruntime(CPU) 独立验证准备好的 9 个模型：能否加载、IO 形状、推理耗时 |
+| `prepare_models.py` | 把已有 onnx(动态 shape) 转成 **NPU 可用的固定 shape** 模型 |
+| `wsl_verify_models.sh` | 用 onnxruntime(CPU) 独立验证准备好的模型：能否加载、IO 形状、推理耗时 |
+| `models_stage/` | **31 个模型（waifu2x 9 + Real-CUGAN 17 + Real-ESRGAN 5）的导出/静态化/对账工具链**：官方 PyTorch 权重 → 固定 shape onnx → QNN 友好化 → torch 参考对账 → 部署。见 [models_stage/README.md](models_stage/README.md) |
 
 ### 3. 构建
 
