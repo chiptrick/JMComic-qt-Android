@@ -38,13 +38,20 @@ class _ElideOnResize(QObject):
         text = getattr(label, "_jmFullText", "")
         try:
             width = label.width()
-            if width <= 8:
-                # 还没跑过布局：宽度不可信，先原样放(策略是 Ignored，撑不宽页面)
-                QLabel.setText(label, text)
+            if width < 24:
+                # 布局还没跑到(或这一行给它分到的宽度是 0)：**保持原样**，别写成空串。
+                # 之前这里按 width<=8 写全文、否则写省略串，结果"路径标签被压成 0 宽"
+                # 时直接显示空白 —— 用户看到的就是"设置页看不到当前下载/缓存目录"。
                 return
             metrics = QFontMetrics(label.font())
-            QLabel.setText(label, metrics.elidedText(
-                text, Qt.TextElideMode.ElideMiddle, max(0, width - 2)))
+            elided = metrics.elidedText(text, Qt.TextElideMode.ElideMiddle, max(0, width - 2))
+            if not elided:
+                # 宽度连省略号都放不下：宁可显示后面那一段，也不要变成空白
+                elided = text[-12:] if len(text) > 12 else text
+            QLabel.setText(label, elided)
+            # 真机上"看不到当前目录"只能靠这行判断是宽度问题还是文本问题
+            Log.Warn("portrait: 省略标签 {} -> {!r} (宽 {}px, 原文 {} 字符)".format(
+                label.objectName() or "?", elided, width, len(text)))
         except Exception:
             try:
                 QLabel.setText(label, text)
@@ -74,10 +81,30 @@ def ElideText(label, text):
         return
     try:
         label._jmFullText = str(text or "")
+        # 先把全文放上去：省略只在"宽度已知"时才做，而这一行往往在页面建好之后才
+        # 填字(SetDownloadLabel)，那时标签已经布局完了、不会再有 Resize 事件 ——
+        # 只依赖 resize 去算省略的结果就是**一直是空的**(真机现象：设置页看不到
+        # 当前下载/缓存目录)。先放全文，随后的 Resize/QTimer 再把它省略成一行。
+        QLabel.setText(label, label._jmFullText)
         policy = label.sizePolicy()
         label.setSizePolicy(QSizePolicy.Policy.Ignored, policy.verticalPolicy())
         label.setMinimumWidth(0)
+        label.setMaximumHeight(label.fontMetrics().height() + 6)
+        # 单行显示：路径一长就折行的话，这一行会被撑成十几行高(真机见过 250px 高)，
+        # 而且折行后按宽度省略算出来是空串 —— 目录就"看不见"了
+        label.setWordWrap(False)
         label.setToolTip(label._jmFullText)
+        # 让这一行的多余宽度都归它：Ignored + 没有 stretch 时，行里只要有按钮就会把它
+        # 压到 0 宽(真机现象：只剩"下载 [打开目录]"，中间是空白)。
+        # 注意必须找**真正装着这个标签的那个横向布局**：parentWidget().layout() 是外层
+        # 竖向布局，indexOf 找不到它(第一版就是这么空转的)。
+        holder = label.parentWidget()
+        if holder is not None:
+            for row in holder.findChildren(QBoxLayout):
+                index = row.indexOf(label)
+                if index >= 0:
+                    row.setStretch(index, 1)
+                    break
     except Exception as es:
         Log.Error(es)
         return
@@ -89,6 +116,8 @@ def ElideText(label, text):
     filter.Apply()
     # 布局跑完后的真实宽度要再算一次(第一次调用时控件还没被布局)
     QTimer.singleShot(0, filter.Apply)
+    QTimer.singleShot(150, filter.Apply)
+    QTimer.singleShot(600, filter.Apply)
     return
 
 
@@ -606,6 +635,10 @@ def EnableLabelWrap(root, available):
         try:
             if label.wordWrap():
                 continue
+            if getattr(label, "_jmFullText", None) is not None:
+                # 已经被 ElideText 接管(单行省略)：绝不能给它开折行，否则长路径会
+                # 折成十几行、把整行撑高，省略显示也跟着算成空串
+                continue
             before = label.minimumSizeHint().width()
             if before <= budget:
                 continue
@@ -796,6 +829,8 @@ def ReflowPortrait(root=None, available=None):
     count += FlattenWideGrids(root, available)
     count += ShrinkToFit(root, available)
     count += ClampPageWidth(root, available)
+    # 设置页的路径行：任何一次重排之后都重新省略一遍(标签文字是运行时才填的)
+    FitSettingRows(root)
     return count
 
 

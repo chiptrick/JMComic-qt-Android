@@ -513,19 +513,26 @@ class SettingView(QtWidgets.QWidget, Ui_SettingNew):
         url = Setting.SavePath.value
         if not url:
             url = "./"
-        # 手机上目录行放不下整条路径("/storage/emulated/0/Android/data/<包名>/files/…"
-        # 有 60 多个字符)，QLabel 的 sizeHint 就是整段文本宽度 -> 整行最小宽度超过屏幕
-        # -> 整页被撑宽(真机现象："设置页宽度超出范围")。
-        # ElideText 在手机上改成按宽度中间省略(完整路径进 tooltip)，桌面端是空操作。
+        localPath = os.path.join(url, config.SavePathDir)
+        # 手机上目录行放不下整条路径("/storage/emulated/0/Android/data/<包名>/files/JMComic")
+        # 有 60 多个字符，QLabel 的 sizeHint 就是整段文本宽度 -> 整行最小宽度超过屏幕。
+        # ElideText 在手机上按宽度中间省略(完整路径进 tooltip)，桌面端是空操作。
         from tools import mobile_ui
-        mobile_ui.ElideText(self.downloadDir, os.path.join(url, config.SavePathDir))
+        treeName = Setting.SavePathTreeName.value
+        if not treeName and Setting.SavePathTree.value:
+            from tools import saf_bridge
+            treeName = saf_bridge.UriDisplayName(Setting.SavePathTree.value)
+        if treeName and platform_mobile.IsAndroid():
+            # 配了 SAF 导出目录：这一行显示用户选的那个目录，否则用户会以为"设置没生效"
+            # (本地落盘其实还在应用专属目录，整本下完才导出过去，tooltip 里两个都写清楚)
+            mobile_ui.ElideText(self.downloadDir, treeName)
+            self.downloadDir.setToolTip("导出到: {}\n本地落地: {}".format(treeName, localPath))
+        else:
+            mobile_ui.ElideText(self.downloadDir, localPath)
+            if platform_mobile.IsAndroid():
+                self.downloadDir.setToolTip(localPath)
         mobile_ui.ElideText(self.cacheDir, Setting.GetCachePath())
         mobile_ui.ElideText(self.waifu2xDir, os.path.join(Setting.GetCachePath(), config.Waifu2xPath))
-        # 配了 SAF 导出目录时，把目录名也放进 tooltip(路径行本身只放得下本地路径)
-        treeName = Setting.SavePathTreeName.value
-        if treeName and platform_mobile.IsAndroid():
-            full = mobile_ui.FullText(self.downloadDir)
-            self.downloadDir.setToolTip("{}\n导出到: {}".format(full, treeName))
 
     def OpenDir(self, label):
         """ 打开目录：手机上要交给系统文件管理器

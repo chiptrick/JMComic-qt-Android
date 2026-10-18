@@ -710,8 +710,24 @@ def SafImportFolder(caption="", parent=None):
         pass
     copied = saf_bridge.CopyTreeIn(picked.get("uri") or "", target)
     if not copied:
+        _ShowMsg("导入失败：无法读取所选目录")
+        return ""
+    count = int(copied.get("count") or 0)
+    if count <= 0:
+        # 一个文件都没读到：别再返回一个空目录让上层"以为成功了"
+        _ShowMsg("导入失败：所选目录里没有可读取的文件")
         return ""
     return copied.get("path") or target
+
+
+def _ShowMsg(text):
+    """ 提示(没有 QtOwner 时静默) """
+    try:
+        from qt_owner import QtOwner
+        QtOwner().ShowMsg(text)
+    except Exception:
+        pass
+    return
 
 
 def _ImportRoot():
@@ -764,7 +780,13 @@ def PickExportTree(caption=""):
         return None
     if not picked:
         return ""
-    return {"uri": picked.get("uri") or "", "name": picked.get("name") or ""}
+    uri = picked.get("uri") or ""
+    name = picked.get("name") or ""
+    if not name:
+        # Java 侧在 tree URI 上可能取不到显示名：用 URI 最后一段兜底，
+        # 不然设置页那一行会退回显示本地路径，用户以为"没生效"
+        name = saf_bridge.UriDisplayName(uri)
+    return {"uri": uri, "name": name}
 
 
 def OpenUri(uri):

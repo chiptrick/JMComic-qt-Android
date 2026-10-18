@@ -215,6 +215,15 @@ public class SafService extends Service {
         String mime;
         if (uriText.startsWith("content://")) {
             uri = Uri.parse(uriText);
+            // tree uri 交给 DocumentsUI 只会停在存储根目录；换成"这棵树的根 document uri"
+            // 才会直接进到用户选的那个文件夹
+            try {
+                if (DocumentsContract.isTreeUri(uri)) {
+                    uri = DocumentsContract.buildDocumentUriUsingTree(
+                            uri, DocumentsContract.getTreeDocumentId(uri));
+                }
+            } catch (Exception ignore) {
+            }
             mime = DocumentsContract.Document.MIME_TYPE_DIR;
         } else if (path.length() > 0 && !SafStore.IsAppPrivate(this, path)) {
             // 不在应用专属目录里：file:// 交给文件管理器。别的应用没有读权限时

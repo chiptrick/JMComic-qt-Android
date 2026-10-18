@@ -23,6 +23,7 @@ src/main/AndroidManifest.xml，所以光补 dists 里的文件不够 —— 得�
     python3 patch_android_manifest.py --java <src> --dist <dist_dir>   # 拷 Java 源
 """
 import os
+import re
 import shutil
 import sys
 
@@ -39,21 +40,36 @@ DropPermissions = (
 #
 # exported=false：只能被同 uid(本应用)启动。Python 用
 # `am start-service --user 0 -n <pkg>/org.jmcomic.SafService` 拉起，调用方就是本应用。
-# Activity 用透明主题 + noHistory + excludeFromRecents + taskAffinity=""：用户完全看不到
-# 这一层，屏幕上只有"主界面 -> 系统文件选择器 -> 主界面"。
+#
+# 两个组件都跑在**独立进程** `:saf` 里 —— 这是真机崩溃的修法：
+# 之前它们和 Qt 同进程，透明 Activity 一建窗口，进程里就多了一套 HWUI(View 渲染)，
+# 从系统选择器返回时 ANativeWindow 被销毁、Qt 那边还在画，直接
+# `FORTIFY: pthread_mutex_lock called on a destroyed mutex` -> SIGABRT(实测两崩)。
+# 分进程之后 Qt 进程里根本没有第二个窗口，它只是被 onPause 而已。
+#
+# **绝不能加 android:noHistory="true"**：noHistory 的 Activity 一旦被别的 Activity
+# 盖住就被销毁，`onActivityResult` 永远不回调 —— 真机上表现就是"选择器弹出来了，
+# 选完什么都没发生"(我们的 onDestroy 把结果写成"取消"了)。
 ComponentsXml = """        <service android:name="org.jmcomic.SafService"
                  android:exported="false"
+                 android:process=":saf"
                  android:stopWithTask="false" />
         <activity android:name="org.jmcomic.SafPickActivity"
                   android:exported="false"
+                  android:process=":saf"
                   android:theme="@android:style/Theme.Translucent.NoTitleBar"
                   android:excludeFromRecents="true"
-                  android:noHistory="true"
-                  android:taskAffinity=""
                   android:configChanges="orientation|screenSize|keyboardHidden|uiMode" />
 """
 
 Marker = "org.jmcomic.SafService"
+
+# 已经注入过的那一段(幂等升级用：属性改了就整段换掉，不然模板里会留着旧写法 ——
+# 真机踩过：模板里还是 noHistory="true" 的旧块，Marker 命中就跳过，改动等于没打)
+BlockRe = re.compile(
+    r"[ \t]*<service android:name=\"org\.jmcomic\.SafService\".*?"
+    r"<activity android:name=\"org\.jmcomic\.SafPickActivity\".*?/>[ \t]*\n",
+    re.S)
 
 
 def _Read(path):
@@ -80,8 +96,18 @@ def DropStoragePermissions(text):
 
 
 def InsertComponents(text, anchor=None):
-    """ 在 anchor 之前(默认 </application> 之前)插入组件声明；已存在则跳过 """
+    """ 插入(或整段替换)组件声明；返回 (新文本, 是否有改动)
+
+    已经存在旧版本时会**替换**成当前写法，保证改属性(例如去掉 noHistory)能生效。
+    """
+    matched = BlockRe.search(text)
+    if matched is not None:
+        current = matched.group(0)
+        if current.strip() == ComponentsXml.strip():
+            return text, False
+        return text[:matched.start()] + ComponentsXml + text[matched.end():], True
     if Marker in text:
+        # 有人手工写过一段格式不同的：不动它，避免改坏
         return text, False
     lines = text.splitlines()
     insertAt = None

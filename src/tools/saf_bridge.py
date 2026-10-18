@@ -85,6 +85,14 @@ def LastError():
     return _lastError
 
 
+def _LogWarn(text):
+    try:
+        from tools.log import Log
+        Log.Warn("saf bridge: {}".format(text))
+    except Exception:
+        pass
+
+
 def _LogError(es):
     global _lastError
     _lastError = "{}: {}".format(type(es).__name__, es)
@@ -293,6 +301,27 @@ def _Fire(op, payload=None):
 # 对外接口
 # ---------------------------------------------------------------------------
 
+def UriDisplayName(uri):
+    """ 从 SAF URI 里推一个能看的名字(Java 侧取不到 DISPLAY_NAME 时兜底)
+
+    tree URI 长这样：
+      content://com.android.externalstorage.documents/tree/primary%3ADownload%2FJMComic
+    取最后一段并解码 -> "JMComic"。
+    """
+    text = str(uri or "")
+    if not text:
+        return ""
+    try:
+        from urllib.parse import unquote
+        tail = unquote(text).rstrip("/")
+        if ":" in tail.split("/")[-1]:
+            tail = tail.split("/")[-1].split(":")[-1]
+        name = tail.split("/")[-1]
+        return name or ""
+    except Exception:
+        return ""
+
+
 def MimeOfFilters(filter):
     """ 把 QFileDialog 风格的过滤器换成 SAF 认的 MIME
 
@@ -330,9 +359,13 @@ def PickFile(caption, filter="", copyTo=""):
     data = _Call("pick", {"kind": "file", "mime": MimeOfFilters(filter),
                           "copyTo": target, "caption": caption or ""}, PickTimeout)
     if not data:
+        _LogWarn("选文件超时/桥不可用")
         return None
     if not data.get("ok"):
-        return False if data.get("cancel") else None
+        if data.get("cancel"):
+            return False
+        _LogWarn("选文件失败: {}".format(data.get("error") or data.get("reason")))
+        return None
     path = data.get("path") or ""
     if not path or not os.path.exists(path):
         return None
@@ -367,9 +400,13 @@ def PickTree(caption, copyTo="", timeout=IoTimeout):
     data = _Call("pick", {"kind": "tree", "mime": "vnd.android.document/directory",
                           "caption": caption or ""}, PickTimeout)
     if not data:
+        _LogWarn("选目录超时/桥不可用")
         return None
     if not data.get("ok"):
-        return False if data.get("cancel") else None
+        if data.get("cancel"):
+            return False
+        _LogWarn("选目录失败: {}".format(data.get("error") or data.get("reason")))
+        return None
     uri = data.get("uri") or ""
     if not uri:
         return None
@@ -393,7 +430,9 @@ def CopyTreeIn(uri, toDir, timeout=IoTimeout):
         return None
     data = _Call("copyIn", {"uri": uri, "to": toDir}, timeout)
     if not data or not data.get("ok"):
+        _LogWarn("拷入失败: {}".format((data or {}).get("error") or "超时"))
         return None
+    _LogWarn("拷入 {} 个文件 -> {}".format(data.get("count"), toDir))
     return data
 
 

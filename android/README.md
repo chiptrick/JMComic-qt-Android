@@ -766,6 +766,35 @@ sandbox 判定 / 取消语义）：
 python android/tools/host_test_saf_bridge.py
 ```
 
+### 3.12 第九轮真机反馈（2026-10-18 下午）：SAF 的四个真机坑 + 双指缩放卡死
+
+第八轮上线后真机(windows 侧 adb 验证 + logcat)暴露的问题，全部是"只在真机上才会犯"
+的错，逐条记下来：
+
+| # | 现象 | 根因 | 修法 |
+| --- | --- | --- | --- |
+| 1 | **选完文件/目录什么都没发生**（选择器弹出来了，选完就回到应用，导入不生效） | `SafPickActivity` 声明了 `android:noHistory="true"` —— 这种 Activity 一旦被别的 Activity 盖住就被销毁，`onActivityResult` **永远不会回调**，我们的 `onDestroy` 反而把结果写成"取消"。日志里能看到 `saf op=pick` 之后再没有 `copyIn`，`files/import/` 一直是空的 | 去掉 `noHistory`（代价只是这一层透明 Activity 留在返回栈里，反正用户看不见） |
+| 2 | **从选择器返回就 SIGABRT 闪退**（`FORTIFY: pthread_mutex_lock called on a destroyed mutex` in `hwuiTask0`） | 透明 Activity 和 Qt 同进程：进程里多出一套 HWUI(View 渲染)，返回时 `ANativeWindow` 被销毁而 Qt 还在画 | 服务与 Activity 都声明 `android:process=":saf"`：Qt 进程里从此没有第二个窗口，它只是被 onPause。实测返回不再崩 |
+| 3 | 设置页**看不到当前下载/缓存目录**（只剩"下载 [打开目录]"和一片空白） | ①路径 `QLabel` 被 `EnableLabelWrap` 打开了 wordWrap，长路径折成十几行、整行 250px 高；②`sizePolicy=Ignored` 又没有 stretch，行里有按钮时被压成 0 宽；③省略只在 Resize 里算，而文字是页面建好之后才 `setText` 的，没有 Resize → 永远空 | ①`ElideText` 里 `setWordWrap(False)`+`EnableLabelWrap` 跳过已接管的标签；②给标签所在的那个**横向布局**（不是父 widget 的顶层布局）设 `setStretch(index,1)`；③`ElideText` 先把全文放上去，再用 Resize/0/150/600ms 四次重算省略 |
+| 4 | 选了目录但**设置看着没变**（以为没生效） | tree URI 上查 `OpenableColumns.DISPLAY_NAME` 恒为 null（那是 document URI 的列），名字空了于是界面退回显示本地路径 | `SafStore.DisplayName` 先 `buildDocumentUriUsingTree` 换成 document URI 再查；Python 侧再用 `UriDisplayName()` 从 URI 最后一段兜底；设置页配了导出目录时**这一行直接显示那个目录名**（tooltip 里写清"导出到 / 本地落地"两条） |
+| 5 | 打开目录跳到了"下载"根目录而不是所选文件夹 | `ACTION_VIEW` 喂 tree URI 时 DocumentsUI 只停在存储根 | `SafService.Open` 把 tree URI 换成"这棵树的根 document URI"再 `ACTION_VIEW`（mime=`vnd.android.document/directory`） |
+| 6 | 双指缩放**卡死/闪退** | 每动 5% 就 `ScalePicture2` 一次 → `changeScale` → 整页图形重排，手指还在屏幕上时做这个；1→2 指时还合成了一次 25px 移动，到边界会触发翻页（翻页弹加载框 = 输入事件里 show 窗口，正是 §3.4 #9 那个崩溃） | 缩放过程中**只记比例**，抬手时算一次百分比并 `QTimer.singleShot(0, ...)` 延后应用；1→2 指改成 `_ReaderDrag.CancelPress()`（把状态置成"已拖动"，那次 release 被吃掉，**不滚动也不翻页**），不再合成移动 |
+
+真机验证方式（不需要点屏幕也能验）：
+
+```bash
+# 1) 桥是否活：日志里应有 saf service ready / saf op=ping
+adb logcat | grep -E "JmSaf|saf bridge"
+# 2) 直接给信箱投一个请求(注意要 .tmp -> mv 原子落地，否则会被读到半截)
+adb shell "run-as org.jmcomic.jmcomic sh -c 'cat /data/local/tmp/req.json > files/saf/inbox/x.json.tmp && mv files/saf/inbox/x.json.tmp files/saf/inbox/x.json'"
+adb shell "am start-service --user 0 -n org.jmcomic.jmcomic/org.jmcomic.SafService"
+adb shell "run-as org.jmcomic.jmcomic cat files/saf/outbox/x.json"      # {"ok":true,...}
+```
+
+第九轮实测结论：`copyOut` 能把文件真的写进用户选的目录（`/storage/emulated/0/.../jmtest/a.txt` 落盘）、
+`copyIn` 能把整棵树拷进 `files/import`、tree URI 的持久授权在重启后仍有效。
+
+
 ---
 
 

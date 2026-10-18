@@ -1,6 +1,6 @@
 # coding:utf-8
 """ 看图界面（工具菜单整宽 + 看图区拖动滚动 + 双指缩放） """
-from PySide6.QtCore import QEvent, QObject, QPointF, Qt
+from PySide6.QtCore import QEvent, QObject, QPointF, Qt, QTimer
 from PySide6.QtGui import QEventPoint, QMouseEvent
 from PySide6.QtWidgets import QApplication
 from tools.log import Log
@@ -74,7 +74,24 @@ class _ReaderDrag(QObject):
         self._carry = 0.0
         self.Drags = 0
         self.Scrolled = 0
+        self.Cancels = 0
         self.LastDelta = 0
+
+    def CancelPress(self):
+        """ 取消当前这次"按下"(双指缩放开始时调用)
+
+        双指开始时手上还按着一根手指：那次 press 已经发给场景了，如果直接松手会被
+        当成"点按"(翻页/弹菜单)，而合成一次移动又会让图片真的滚一下(到边界还会触发
+        翻页 —— 翻页会弹加载框，正好踩上"输入事件里 show 窗口"那个崩溃)。
+        所以这里把状态改成"已拖动"：随后的 release 被吃掉，场景什么都收不到，
+        不滚动、不翻页、不弹任何窗口。
+        """
+        if not self._pressed:
+            return
+        self._pressed = False
+        self._dragging = True
+        self.Cancels += 1
+        return
 
     def eventFilter(self, obj, event):
         try:
@@ -192,10 +209,8 @@ def InstallReaderDrag(readView):
 # 缩放的上下限(百分比，与工具栏滑块范围一致)
 PinchMinPercent = 20
 PinchMaxPercent = 500
-# 每次真正重排图形的最小百分比差(1px 的手指抖动不值得重排一次整页)
+# 抬手时百分比变化小于这个值就当没动(1px 的手指抖动不值得重排整页)
 PinchStepPercent = 5
-# 1 指转 2 指时合成的那次"取消点按"移动量
-PinchCancelPx = 25
 
 
 def _TouchPoints(event):
@@ -236,6 +251,7 @@ class _ReaderPinch(QObject):
         self._pinching = False
         self._startDist = 0.0
         self._basePercent = 100
+        self._ratio = 1.0
         self.Touches = 0
         self.Pinches = 0
         self.LastPercent = 100
@@ -245,6 +261,7 @@ class _ReaderPinch(QObject):
         self._lastPos = None
         self._pinching = False
         self._startDist = 0.0
+        self._ratio = 1.0
 
     # -- 事件 --------------------------------------------------------------
     def eventFilter(self, obj, event):
@@ -295,6 +312,7 @@ class _ReaderPinch(QObject):
 
     def OnEnd(self, event, cancelled):
         points = _TouchPoints(event)
+        pinching = self._pinching
         if self._mouseDown and not cancelled:
             pos = points[0] if points else None
             if pos is None and self._lastPos is not None:
@@ -304,41 +322,61 @@ class _ReaderPinch(QObject):
         if cancelled and self._mouseDown:
             self._Send(QEvent.Type.MouseButtonRelease,
                        (self._lastPos or QPointF(0, 0), self._lastPos or QPointF(0, 0)))
+        if pinching and not cancelled:
+            # 抬手才真正应用缩放(见 ApplyPinch 的注释)
+            self.FinishPinch()
         self.Reset()
         return True
 
     # -- 缩放 --------------------------------------------------------------
     def StartPinch(self, points):
-        """ 进入缩放态：先把手上的鼠标按下"取消"掉(见模块注释) """
+        """ 进入缩放态：把手上那次"按下"作废(不滚动/不翻页，见 _ReaderDrag.CancelPress) """
         if self._mouseDown:
+            drag = mobile_ui._readerDrag
+            if drag is not None and hasattr(drag, "CancelPress"):
+                drag.CancelPress()
             local = self._lastPos or points[0][0]
-            far = QPointF(local.x() + PinchCancelPx, local.y() + PinchCancelPx)
-            glob = points[0][1]
-            farGlob = QPointF(glob.x() + PinchCancelPx, glob.y() + PinchCancelPx)
-            self._Send(QEvent.Type.MouseMove, (far, farGlob))
-            self._Send(QEvent.Type.MouseButtonRelease, (far, farGlob))
+            self._Send(QEvent.Type.MouseButtonRelease, (local, points[0][1]))
             self._mouseDown = False
         self._pinching = True
         self._startDist = _Distance(points)
         self._basePercent = self.CurrentPercent()
+        self._ratio = 1.0
         self.LastPercent = self._basePercent
         self.Pinches += 1
         Log.Warn("reader pinch: 开始双指缩放(base={}%)".format(self._basePercent))
         return
 
     def ApplyPinch(self, points):
+        """ 缩放过程中**只记比例**，不重排图形
+
+        以前这里每动 5% 就调一次 ScalePicture2 —— 那会走 changeScale -> 整页重排
+        (几十张图重新定位)，手指还在屏幕上时做这个，真机直接卡住(C 侧 qnn/图像线程
+        也被拖慢)。改成抬手时算一次、下一轮事件循环再应用：既不卡，也不会在输入
+        事件处理里改布局。
+        """
         if self._startDist <= 1.0:
             self._startDist = _Distance(points)
             return
         dist = _Distance(points)
         if dist <= 1.0:
             return
-        percent = int(round(self._basePercent * (dist / self._startDist)))
+        self._ratio = dist / self._startDist
+        return
+
+    def FinishPinch(self):
+        """ 抬手：算出目标百分比，延后一拍应用(见 ApplyPinch 的注释) """
+        if not self._pinching:
+            return
+        base = self._basePercent
+        ratio = self._ratio if self._ratio > 0 else 1.0
+        percent = int(round(base * ratio))
         percent = max(PinchMinPercent, min(PinchMaxPercent, percent))
-        if abs(percent - self.LastPercent) < PinchStepPercent:
+        if abs(percent - base) < PinchStepPercent:
             return
         self.LastPercent = percent
-        self.ScaleTo(percent)
+        QTimer.singleShot(0, lambda: self.ScaleTo(percent))
+        Log.Warn("reader pinch: 应用缩放 {}% -> {}%".format(base, percent))
         return
 
     def CurrentPercent(self):

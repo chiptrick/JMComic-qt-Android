@@ -92,8 +92,39 @@ public final class SafStore {
         return out;
     }
 
-    /** 显示名(DocumentsUI 给的 OpenableColumns.DISPLAY_NAME) */
+    /** 显示名(DocumentsUI 给的 OpenableColumns.DISPLAY_NAME)
+     *
+     * 注意 tree URI 上**取不到**显示名：OpenableColumns 只对 document URI 有效，
+     * 必须先用 buildDocumentUriUsingTree 换成该树的根 document URI 再查。
+     * 真机踩过：直接查 tree URI 返回 null -> 设置页"下载目录"显示不出用户选的名字，
+     * 看起来就像"设置没生效"。
+     */
     public static String DisplayName(Context context, Uri uri) {
+        Uri target = uri;
+        boolean isTree = false;
+        try {
+            isTree = DocumentsContract.isTreeUri(uri);
+            if (isTree) {
+                target = DocumentsContract.buildDocumentUriUsingTree(
+                        uri, DocumentsContract.getTreeDocumentId(uri));
+            }
+        } catch (Exception ignore) {
+        }
+        String name = QueryName(context, target);
+        if (name == null || name.length() == 0) {
+            try {
+                String docId = isTree ? DocumentsContract.getTreeDocumentId(uri) : "";
+                int colon = docId.lastIndexOf(':');
+                String tail = colon >= 0 ? docId.substring(colon + 1) : docId;
+                int slash = tail.lastIndexOf('/');
+                name = slash >= 0 ? tail.substring(slash + 1) : tail;
+            } catch (Exception ignore) {
+            }
+        }
+        return name == null ? "" : name;
+    }
+
+    private static String QueryName(Context context, Uri uri) {
         String name = "";
         try {
             ContentResolver resolver = context.getContentResolver();
@@ -112,9 +143,6 @@ public final class SafStore {
                 }
             }
         } catch (Exception ignore) {
-        }
-        if (name == null) {
-            name = "";
         }
         return name;
     }
