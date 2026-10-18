@@ -93,6 +93,7 @@ Android 移植用的脚本集合。**所有脚本都不写死本机路径**，�
 | `inspect_pybundle.py` | 检查 p4a 打出的 `stdlib.zip` / `_python_bundle` 的字节码命名方式 |
 | `scan_ui_width.py` | 扫描所有 `.ui`，找出竖屏宽度下**放不下**的横向布局行 |
 | `host_test_saf_bridge.py` | 宿主自检 SAF 信箱协议（假 Service 线程跑 ping/选文件/选目录/导目录/另存/sandbox/取消） |
+| `host_test_pinch.py` | 宿主自检双指缩放状态机（单指鼠标语义、两指同序列/两条独立序列、结算、打断、5% 阈值；用桩替掉 PySide6） |
 
 ### 6. 宿主回归（在自己电脑上跑，不需要手机）
 

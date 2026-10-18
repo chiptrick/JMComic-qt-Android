@@ -322,6 +322,17 @@ class _ReaderPinch(QObject):
         released = self._Merge(event)
         if kind == 0:
             self.Touches += 1
+        elif kind == 2:
+            # TouchEnd 一定意味着这条序列结束了：把这次事件里还没被清掉的点
+            # 一并作废(个别平台最后一个点不带 Released 状态，留着会污染下一次手势)
+            try:
+                for point in event.points():
+                    pid = point.id()
+                    if pid in self._points:
+                        released.append((pid, point.globalPosition()))
+                        del self._points[pid]
+            except Exception:
+                pass
         for pid, glob in released:
             if pid == self._primary:
                 # 主手指松开：给这次"按下"收尾(场景靠它判点按)

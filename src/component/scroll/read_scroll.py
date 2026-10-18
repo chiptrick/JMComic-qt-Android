@@ -178,6 +178,14 @@ class ReadScroll(QScrollBar):
         if value == self.value():
             return
 
+        # 双指缩放预览期间直接定位，不要动画：
+        # 预览每帧都会让 QGraphicsView 重新算滚动条范围/值，200ms 的补间动画
+        # 会被下一帧反复打断，位置乱跳(手感就是"抖")
+        if getattr(self.scrollArea, "_jmPinchPreview", False):
+            self.ani.stop()
+            QScrollBar.setValue(self, value)
+            return
+
         # stop running animation
         if self.ani.state() == self.ani.State.Running:
             self.AniValueByAdd(value - self.value())

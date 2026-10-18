@@ -81,8 +81,10 @@ run "7. HTTP/3、ECH 失败降级回归" android/tools/host_test_net_fallback.py
 netfb=$?
 run "8. SAF 桥信箱协议回归" android/tools/host_test_saf_bridge.py
 saf=$?
+run "9. 双指缩放状态机回归" android/tools/host_test_pinch.py
+pinch=$?
 
 echo
-echo "结果: smoke=$smoke interfaces=$iface crypto=$crypto image=$image picker=$picker netfb=$netfb saf=$saf"
+echo "结果: smoke=$smoke interfaces=$iface crypto=$crypto image=$image picker=$picker netfb=$netfb saf=$saf pinch=$pinch"
 [ "$smoke" -eq 0 ] && [ "$iface" -eq 0 ] && [ "$crypto" -eq 0 ] && [ "$image" -eq 0 ] \
-    && [ "$picker" -eq 0 ] && [ "$netfb" -eq 0 ] && [ "$saf" -eq 0 ]
+    && [ "$picker" -eq 0 ] && [ "$netfb" -eq 0 ] && [ "$saf" -eq 0 ] && [ "$pinch" -eq 0 ]
