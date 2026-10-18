@@ -141,8 +141,21 @@ class _ReaderDrag(QObject):
             from view.read.read_enum import ReadMode
             initMode = view.initReadMode
             upDown = ReadMode.isUpDown(initMode)
+            try:
+                zoomed = int(getattr(view, "scaleCnt", 0) or 0) != 0
+            except Exception:
+                zoomed = False
+
             if ReadMode.isScroll(initMode):
-                # 滚动模式：只滚当前轴(原来就这样)
+                # 滚动模式：**放大后两个方向都要能平移**
+                # 滚动模式的缩放是视图变换，放大后图片横向/纵向都比视口大，
+                # 只滚"当前轴"就永远看不到另一边 —— 真机现象：
+                # "上下滚动模式双指放大后无法左右滑动查看图片其他部分"
+                # (左右/右左滚动模式同理：放大后看不到上下)
+                if zoomed:
+                    self._Pan(dx, dy, flipX=(initMode == ReadMode.RightLeftScroll2))
+                    return
+                # 100%：只滚当前轴
                 delta = -dy if upDown else -dx
                 self._carry += delta
                 step = int(self._carry)
@@ -160,10 +173,6 @@ class _ReaderDrag(QObject):
                 return
 
             # 单页/双页：放大后**先平移**看图的其它部分(见 _Pan 的注释)
-            try:
-                zoomed = int(getattr(view, "scaleCnt", 0) or 0) != 0
-            except Exception:
-                zoomed = False
             if zoomed:
                 self._Pan(dx, dy)
                 return
@@ -188,15 +197,18 @@ class _ReaderDrag(QObject):
             Log.Error(es)
         return
 
-    def _Pan(self, dx, dy):
-        """ 单页/双页**放大后**的双向平移
+    def _Pan(self, dx, dy, flipX=False):
+        """ **放大后**的双向平移
 
         以前这里只吃横向位移(纵向 dy 直接丢掉)，横向又因为放大后
         hScrollBar.maximum 一直是 0(ResetMaxNum 里那几行被注释掉了) 而永远
         被判成"在边界" -> 一滑就翻页。真机现象就是"双指缩放后左右滑动切页，
         没法看放大后的其它部分"。
+
+        flipX：右左滚动的布局是从右往左排的，横向方向要和滚轮一致地取反。
         """
         view = self._view
+        dx = -dx if flipX else dx
         self._carryX += -dx
         stepX = int(self._carryX)
         if stepX:
