@@ -40,8 +40,22 @@ GridScheduleMs = 80
 # QTabWidget 换页(首页的"分区"标签)之后，等 Qt 把新页的几何摆好再重排一次网格(毫秒)
 TabReflowMs = 60
 # 标签条横划的致动自检位移(px)：喂一个像素滚轮事件，看偏移动不动
-# (横划的手势/惯性已由 QScroller 接管，见 mobile_ui_touch._TabSwipe)
 TabSelfCheckPx = 8
+# 标签条横划松手后的惯性(见 mobile_ui_touch._TabSwipe.StartFling)：
+# 帧间隔、速度每秒衰减到的比例、低于这个速度就停下、甩出去的速度上限(防合成事件
+# 的时间抖动灌出荒谬速度)、以及"松手前手指已经停了这么久(毫秒)就当成就地放手指，不甩"
+# ——衰减比取得比 QScroller 的默认值更狠：**整体必须能在 1s 出头停住**，否则真机上
+# 会觉得标签条"甩出去收不住"，宿主回归里也有"惯性要在 1.5s 内自己停下来"这一条。
+TabFlingIntervalMs = 16
+TabFlingDecay = 0.05
+TabFlingMinVelocity = 120.0
+TabFlingMaxVelocity = 2500.0
+TabFlingStopGapMs = 150
+# 速度估计窗口(毫秒)：安卓会把一帧里的多条触摸事件合并到同一次投递里(dt≈0)，
+# 攒够这个窗口再算速度，免得 dx/dt 算出天量速度、一松手就冲到尽头
+TabVelocityWindowMs = 8
+# 估速度时回头看多久以前的那次位移(毫秒)
+TabVelocitySampleMs = 120
 # "后来才建的滚动区域自动接管"(见 mobile_ui_touch._ScrollWatcher)：
 # 攒住待扫控件的上限，防止一次性建几千个控件时把内存/耗时堆起来
 ScrollWatchMaxPending = 512

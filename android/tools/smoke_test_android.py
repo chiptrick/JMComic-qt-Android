@@ -757,7 +757,7 @@ app.processEvents()
 #   ② 标签条溢出时 Qt 只在两端放两个 16x32 的滚动箭头，手指横划完全没有反应
 #      (QTabBar 没有拖动滚动，也没有公开的滚动偏移 API)。走的是它的
 #      wheelEvent 里那条"设备带 PixelScroll 能力就按像素滚"的分支：
-#      手势/惯性由 QScroller 接管，QScrollEvent 增量致动到像素滚轮路径(见 mobile_ui_touch._TabSwipe)。
+#      手势/跟手/惯性由 _TabSwipe 自己在触控序列上算，增量致动到像素滚轮路径。
 from PySide6.QtWidgets import QTabWidget, QVBoxLayout, QWidget  # noqa: E402
 
 mobile_ui.ResetGridCover()
@@ -819,7 +819,7 @@ print("[ok] 分区(隐藏标签页)封面: 隐藏时不参与测量 -> 切过去
       "视口 %dpx -> 一行 2 个" % (tabsLists[1].count(), cell, tabsLists[1].viewport().width()))
 print("     |", mobile_ui.GridStatsLines(tabsLists[1])[0])
 # 横划滚动：内容要跟着手指走(1:1)，松手还要有惯性，而且不能顺带切换分区
-# (手势/惯性由 QScroller 接管，QScrollEvent 增量致动到像素滚轮路径)
+# (手势/跟手/惯性由 _TabSwipe 自己在触控序列上算，增量致动到像素滚轮路径)
 tabScroll = guard.TabScrollStats()
 assert tabBar.count() == 9 and tabBar.tabRect(8).right() > tabBar.width(), \
     "9 个标签应该溢出(最后一个在可视区外): %s" % tabBar.tabRect(8)

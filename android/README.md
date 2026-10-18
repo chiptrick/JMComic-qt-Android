@@ -74,7 +74,7 @@ android/
 | **返回键**：菜单收不起来；看图退不出去；根页面上什么都不做，事件继续下传导致 Activity 被 finish，而 Python 主线程已退出 → 前台留一个**白屏** | 统一在 `HandleBackKey` 里按优先级处理并 accept 事件、吞掉抬起事件（400ms 去抖）：弹出窗口 → 看图菜单 → 顶层对话框 → 抽屉 → 退出看图 → 回退页面 → **根页面退到后台**(最小化，不再白屏) | `HandleBackKey` / `MinimizeToDesktop` / `main_view.keyPressEvent` |
 | **首页一行只放得下 1 本漫画**：封面按桌面写死 250x340 | 竖屏按屏宽反算封面宽，并用 `QListWidget` 的**真实几何**自校正到"一行 2 个"（只按 sizeHint 估算会被 item 自身的边距骗过去；改完 sizeHint 还必须显式 `setGridSize` + 强制重排） | `GridCoverWidth` / `ApplyGridCoverSize` / `RefreshItemSizeHints` / `ComicItemWidget.ResizeCover` |
 | **首页"分区"切过去还是一行 1 个**：分区页是 `QTabWidget` 的**隐藏**标签页，而 Qt 只给当前页排几何 —— 隐藏页里的列表视口宽是"没布局过"的假值(真机 790px)，用它算出来的封面宽/栅格都偏大 | 只拿**可见**列表量视口宽（隐藏列表不再把全局封面宽带偏）；并给 `QTabWidget` 接 `currentChanged`，换页后按新页的真实视口宽重排一次（封面宽没变时也补一次 `setGridSize`） | `MeasureGridAvail` / `_GridOverflow` / `ReflowGridCoverForPage` / `InstallTabReflowHook` |
-| **首页顶部的分区标签条无法滑动**：`QTabBar` **没有**公开的滚动偏移 API(`scrollOffset` 是私有成员)，拖动也不认(没有拖动滚动的实现)；唯一能按像素滚动它的入口是 `QTabBar::wheelEvent` 里"设备带 `PixelScroll` 能力就按像素滚"那条分支，而平台自带的鼠标/触摸设备都没这个能力 | 横划的手势识别/速度/惯性全部交给 **QScroller**(TouchGesture，Qt 原生平滑滚动)；QScroller 发来的 `QScrollEvent` 增量只用来"致动"——喂给 QTabBar 唯一公开的逐像素输入路径(自造带 `PixelScroll` 的 `QPointingDevice` 走滚轮分支，属内部致动、不是把触控映射成鼠标)。press 一律扣住(否则横划会顺带切分区)，点按才走 `setCurrentIndex` 激活；自检不通时退化为只点按 | `_TabSwipe` / `_TouchRouter`("tabbar" 模式) / `TabBarOffset` |
+| **首页顶部的分区标签条无法滑动**：`QTabBar` **没有**公开的滚动偏移 API(`scrollOffset` 是私有成员)，拖动也不认(没有拖动滚动的实现)；唯一能按像素滚动它的入口是 `QTabBar::wheelEvent` 里"设备带 `PixelScroll` 能力就按像素滚"那条分支，而平台自带的鼠标/触摸设备都没这个能力 | 手势/跟手/惯性全在 `_TabSwipe` 自己的触控序列上算(1:1 跟手，松手按最后一段位移估速度并指数衰减)；唯一能按像素滚动它的入口仍是 `QTabBar::wheelEvent` 那条分支 —— 自造带 `PixelScroll` 的 `QPointingDevice` 走滚轮分支，属内部致动、不是把触控映射成鼠标。**这里挂过 QScroller 但被拿掉了**：`QScrollPrepareEvent`/`QScrollEvent` 这套协议只有 `QAbstractScrollArea` 实现了，挂到 QTabBar 上攒出的 scroller 从来不会被引擎认领(Linux CI 与宿主 Windows 都是 `Inactive`)，一点惯性都没有。press 一律扣住(否则横划会顺带切分区)，点按才走 `setCurrentIndex` 激活；自检不通时退化为只点按 | `_TabSwipe` / `_TouchRouter`("tabbar" 模式) / `TabBarOffset` |
 | **首页除"最新上传"以外的分区完全不能滑动**：分区页是网络回来后由 `IndexView.InitBack` 逐个 `AddTab()` 建出来的，而 `EnableTouchScroll` 只在窗口 `Apply`/`OnShown` 跑过一遍 —— 那会儿这些页还不存在 -> 分区列表**从来没被 `QScroller` 接管**(`_jmTouchScroll=False`)，手指在上面划纹丝不动（"滑动防误触"也一起没生效，滑动还会误点中封面） | **建立即接管**：App 级过滤器 `_ScrollWatcher` 听 `QEvent.ChildAdded`/`ChildPolished`，新出现的滚动区域攒起来用 0ms 定时器推到**下一轮事件循环**再扫（`ChildAdded` 是构造函数里发给父控件的，当场判不可靠）；`_TouchGuard.OnPress` 里再加一层兜底 `_AdoptScrollArea`：手指按上去时向上找最近的滚动区域，没接管过就地补装（放在判定模式之前：同一次按下就算进滑动区） | `_ScrollWatcher` / `_AdoptScrollArea` / `InstallScrollWatcher` / `EnableTouchScroll` |
 | **导入本地漫画 / 导入本地图片卡死** | Android 上不再用 `QFileDialog`（它会创建一个回不来的顶层窗口 + 嵌套模态循环），改为**主窗口内的子控件选择器** + 嵌套 `QEventLoop`（不创建任何顶层窗口）；桌面端原样转发 `QFileDialog` | `tools/mobile_file_dialog.py` |
 | **任何未捕获的 python 异常 = 闪退**：`sys.excepthook` 里弹出的 `QErrorMessage` 同样是独立顶层窗口，异常一发生就撞上面同一个 `eglSurface()` 死锁保护器 abort（回调/解析/网络里任何一个漏网异常都会被放大成整进程退出）；异常若来自工作线程，还会变成"在非 GUI 线程里建 QWidget" | Android 下运行期错误框改成主窗口内的**子控件提示条**(`MsgLabel.ShowErrorEx`)，非主线程只记日志（`Log.Error` 已经写过完整回溯，adb 能拉到）；桌面端行为不变，仍弹原来的 `QErrorMessage` | `qt_error.showError2` / `ShowAndroidError` |
@@ -466,7 +466,7 @@ Pillow 11.3.0: jpg=True webp=False zlib=True PIL/_webp.so=缺失     # 设备侧
 | `mobile_ui.MeasureGridAvail` / `_GridOverflow` | 只量**可见**的列表：隐藏页的视口是没布局过的假值，不再把全局封面宽带偏（也不再用假视口判"一行放得下几个"） |
 | `mobile_ui.ReflowGridCoverForPage`（新增） | 按"刚露出来的这一页"的真实视口宽重排一次；封面宽没变(`_jmGridSized` 短路)时也补一次 `RefreshItemSizeHints` —— 隐藏期间根本没按真实视口定过栅格 |
 | `mobile_ui.InstallTabReflowHook`（新增） | 给所有 `QTabWidget` 接 `currentChanged`，延后 60ms 调上面那个（先让 Qt 把新页的几何摆好）。`Apply` / `OnShown` 各装一次（幂等，标记 `_jmTabReflow`） |
-| `mobile_ui_touch._TabSwipe` / `_TouchRouter`（重制） | 标签条横划滚动(第八轮重制为纯触控)：横划的手势识别/速度/惯性全部交给 **QScroller**(TouchGesture，Qt 原生平滑滚动)；QScroller 发来的 `QScrollEvent` 增量只用来"致动"——喂给标签条 `wheelEvent` 里那条**像素滚动**分支（自造带 `PixelScroll` 能力的 `QPointingDevice`，主机实测喂 -60px 就精确移动 -60px）。press 一律**扣住**（`QTabBar` 在 press 时就把手指底下的标签切成当前标签，横划顺带切页会白跑一次网络请求），判定成点按(tap)才走 `setCurrentIndex` 激活。第一次摸到某个标签条时会做一次"自检"（喂 8px 看偏移动不动），推不动就只在日志里记一行、不再假装在滚 |
+| `mobile_ui_touch._TabSwipe` / `_TouchRouter`（重制） | 标签条横划滚动(第八轮重制为纯触控)：手势/跟手/惯性全在 `_TabSwipe` 自己的触控轨迹上算(1:1 跟手，松手按最后一段位移估速度后指数衰减，到尽头/慢下来就地停)；每一帧的增量喂给标签条 `wheelEvent` 里那条**像素滚动**分支（自造带 `PixelScroll` 能力的 `QPointingDevice`，主机实测喂 -60px 就精确移动 -60px）。不再挂 QScroller：`QScrollPrepareEvent`/`QScrollEvent` 只有 `QAbstractScrollArea` 实现了，QTabBar 上攒出的 scroller 从来不被认领(松手后 `state()` 恒 `Inactive`)。press 一律**扣住**（`QTabBar` 在 press 时就把手指底下的标签切成当前标签，横划顺带切页会白跑一次网络请求），判定成点按(tap)才走 `setCurrentIndex` 激活。第一次摸到某个标签条时会做一次"自检"（喂 8px 看偏移动不动），推不动就只在日志里记一行、不再假装在滚 |
 | `mobile_ui.TabBarOffset`（新增） | 给宿主回归/日志用：从 `tabRect(0).x()` 反推标签条当前偏移（`QTabBar` 没有公开的偏移 API） |
 | `mobile_ui_base._EventLocalPos` / `_EventGlobalPos`（新增） | 各处"取事件坐标"统一成这两个函数（滑动防误触、标签条横划、看图拖动共用一套） |
 
@@ -484,12 +484,15 @@ Pillow 11.3.0: jpg=True webp=False zlib=True PIL/_webp.so=缺失     # 设备侧
 ```
 
 > 说明：Qt 里"触摸平滑滚动"的官方做法是 `QScroller`（`EnableTouchScroll` 给所有
-> `QAbstractScrollArea` 用的一直是它；第八轮起标签条横划的手势/惯性也交给它）。
-> `QTabBar` 既不是滚动区域、也没有公开的偏移 API，所以标签条的"致动"只能走它自己
-> `wheelEvent` 里那条**像素滚动**分支（合成一个带 `PixelScroll` 能力的 `QPointingDevice`
-> + `QWheelEvent`，主机实测喂 -60px 就精确移动 -60px）——这是内部致动，不是把用户触控
-> 映射成鼠标/滚轮操作。手感相关常量都在 `mobile_ui_base.py`：`TouchSlopPx`（点按/滑动
-> 阈值）、`TabSelfCheckPx`（自检位移）。
+> `QAbstractScrollArea` 用的一直是它）——**只有它才吃** `QScrollPrepareEvent`/`QScrollEvent`
+> 这套协议（`QAbstractScrollArea::event` 认这两个事件）。`QTabBar` 既不是滚动区域、也
+> 没有公开的偏移 API：挂 QScroller 上去，松手后 `state()` 一直是 `Inactive`，没有任何
+> 惯性，所以标签条的手势/跟手/惯性改成自己算；"致动"仍然只能走它自己 `wheelEvent` 里
+> 那条**像素滚动**分支（合成一个带 `PixelScroll` 能力的 `QPointingDevice` + `QWheelEvent`，
+> 主机实测喂 -60px 就精确移动 -60px）——这是内部致动，不是把用户触控映射成鼠标/滚轮操作。
+> 手感相关常量都在 `mobile_ui_base.py`：`TouchSlopPx`（点按/滑动阈值）、`TabSelfCheckPx`
+> （自检位移）、`TabFlingDecay`/`TabFlingMinVelocity`/`TabFlingMaxVelocity`（惯性）、
+> `TabFlingStopGapMs`/`TabVelocityWindowMs`/`TabVelocitySampleMs`（速度估计）。
 >
 > 第六轮真机反馈补充：第五轮那个"点两端箭头"的实现**在真机上滑动仍然没有反应**
 > （主机上却是通的），所以这一轮把滑动判定并进触控守卫（和防误触同一个状态机、
@@ -1117,6 +1120,7 @@ wsl -u root -e bash -lc 'bash <仓库根>/android/tools/wsl_run_file_dialog_asus
 | 同步 | `wsl_sync.sh` | 把 Windows 仓库同步到 ext4（`/mnt/c` 慢且符号链接行为不一致） |
 | 原生库 | `wsl_build_native.sh` | NDK 编译 arm64 `libsr_qnn.so` + 宿主 x86_64 构建 + 跑 `host_test_sr_qnn.py` |
 | 打包 | `wsl_build_apk.sh` | 两阶段生成并补丁 buildozer.spec（含**应用图标**），再正式打包 |
+| Gradle 内存 | `wsl_patch_gradle_mem.sh` | 把 p4a 的 Gradle 堆 `-Xmx2500m → 4096m`，否则 `:packageDebug` 打包 200MB `private.tar` 时会 OOM（详见 §10.2） |
 | 等构建 | `wsl_wait_build.sh` | **等 `detached_build.log` 出现"结束"** 再收集产物（见下面那条坑） |
 | 校验 | `wsl_check_sync.sh` | 仓库 vs 构建树 + **直接读 APK 里 `assets/private.tar` 的 `.pyc`**，确认打进去的真是当前代码 |
 | 校验图标 | `probe_apk_icon.py` | 解出 APK 里 `res/mipmap/icon.png` 与源图**逐像素比对**，并报告是否残留 PySide 自带图标 |
@@ -1330,6 +1334,8 @@ bash android/tools/wsl_build_apk.sh --abi x86_64                # 打包
 | 冷构建到 PySide6 recipe 时报 `FileNotFoundError: .../android/wheels/pyside6-...whl` | 构建过程中 `android/wheels/*.whl` 被某个步骤删掉了（arm64 构建没触发，x86_64 冷构建必现）。文件和 recipe 里写死的绝对路径一起消失，报错点离真正原因很远 | `wsl_build_apk.sh` 把 wheel **复制到 `$JM_WORK/wheelhouse/<abi>/`**（`source.dir` 之外，与图标同思路）再把该路径写进 recipe，工程目录被清扫也不影响 |
 | 超分进程模式在模拟器上刷 4 条 `sr_qnn_proc` 失败日志 | 进程模式只为让 QNN HTP 拿到 FastRPC；x86_64 没有 QNN，硬走一遍会在裸 `linker64` 子进程里 `dlopen` `libonnxruntime.so` 失败（依赖链里的 `/system/lib64/libgui.so` 在该命名空间找不到符号） | `sr_qnn` 检测到没有 `libQnnHtp.so` 就直接跳过进程模式走 ctypes + CPU EP（`JM_SR_PROC=force` 可强制试） |
 | 下载 86MB 的 Qt wheel 只跑 12KB/s | 海外镜像（jaist）对国内很慢 | `wsl_fetch_android_wheels.sh` 优先清华/中科大/上交镜像，并带 `--speed-limit 200000 --speed-time 20`（低于 200KB/s 就换源） |
+| `:packageDebug` 只报一句 `IncrementalSplitterRunnable` 失败，但 dist 目录里多了一个 400MB 的 `java_pid*.hprof` | p4a 的 `gradle.tmpl.properties` 把堆写死成 `-Xmx2500m`，把 200MB 的 `assets/private.tar` + 约 500MB 原生库压进一个 APK 时 **Java OOM**（hprof 就是 `-XX:+HeapDumpOnOutOfMemoryError` 留的堆转储，看到它即可断定是 OOM 而不是代码问题） | `wsl_patch_gradle_mem.sh` 幂等把模板**和**已存在的 dist 副本改成 `-Xmx4096m`（只改 dist 会被下次构建按模板覆盖回去），顺手删掉历史 hprof；`wsl_build_apk.sh` 步骤 3.7 自动调用 |
+| 构建跑到一半，`wsl_build_apk.sh` 开始报 `line N: -sfn: command not found` / `syntax error near unexpected token 'fi'` | 构建**正在运行**时改了这个脚本：bash 按文件偏移续读，中间插入内容会让后半段读串 | 别在构建过程中编辑正在跑的脚本；要改就等这轮结束（或改完重启一轮） |
 
 ### 10.3 模拟器上验证
 
