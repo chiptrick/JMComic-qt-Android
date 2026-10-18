@@ -30,6 +30,7 @@ def ApplyEnvFile():
     支持的键见 android/sr_qnn/models/README.md 的"参数调试"表，常用的：
         JM_QNN_PERF / JM_QNN_FINALIZE / JM_QNN_VTCM / JM_QNN_RPC_LATENCY
         JM_QNN_HTP_ARCH / JM_QNN_SOC_MODEL / JM_QNN_WORKERS / JM_ORT_LOG
+        JM_SR_PROC（0=禁用进程模式；force=即使没有 QNN 运行库也试一次）
     """
     try:
         from PySide6.QtCore import QStandardPaths
@@ -612,17 +613,32 @@ def DumpDiagnostics(reason=""):
         lines.append("external dir: {}".format(platform_mobile.GetExternalDir()))
         nativeDirs = platform_mobile.GetNativeLibDirs()
         lines.append("native lib dirs: {}".format(nativeDirs))
-        for lib in ("libsr_qnn.so", "libonnxruntime.so", "libQnnHtp.so", "libQnnHtpV79Skel.so",
-                    "libplugins_platforms_qtforandroid_arm64-v8a.so",
-                    "libplugins_imageformats_qsvg_arm64-v8a.so",
-                    "libplugins_imageformats_qjpeg_arm64-v8a.so",
-                    "libplugins_imageformats_qgif_arm64-v8a.so",
-                    "libplugins_imageformats_qwebp_arm64-v8a.so",
-                    "libplugins_iconengines_qsvgicon_arm64-v8a.so",
-                    "libplugins_sqldrivers_qsqlite_arm64-v8a.so"):
+        for lib in ("libsr_qnn.so", "libonnxruntime.so", "libQnnHtp.so", "libQnnHtpV79Skel.so"):
             found = [os.path.join(d, lib) for d in nativeDirs
                      if os.path.exists(os.path.join(d, lib))]
             lines.append("  {}: {}".format(lib, found or "NOT FOUND"))
+        # Qt 插件文件名带 ABI 后缀(libplugins_imageformats_qsvg_arm64-v8a.so /
+        # ..._x86_64.so)，所以这里按前缀找、不写死后缀 —— 否则 x86_64 构建的诊断
+        # 会一律报 NOT FOUND，看起来像"插件没打进包"，其实是名字对不上。
+        for prefix in ("libplugins_platforms_qtforandroid_",
+                       "libplugins_imageformats_qsvg_",
+                       "libplugins_imageformats_qjpeg_",
+                       "libplugins_imageformats_qgif_",
+                       "libplugins_imageformats_qwebp_",
+                       "libplugins_iconengines_qsvgicon_",
+                       "libplugins_sqldrivers_qsqlite_"):
+            hit = ""
+            for d in nativeDirs:
+                try:
+                    for name in sorted(os.listdir(d)):
+                        if name.startswith(prefix) and name.endswith(".so"):
+                            hit = os.path.join(d, name)
+                            break
+                except Exception:
+                    continue
+                if hit:
+                    break
+            lines.append("  {}*: {}".format(prefix, hit or "NOT FOUND"))
         modelDir = platform_mobile.GetAndroidModelDir()
         names = sorted(os.listdir(modelDir)) if os.path.isdir(modelDir) else []
         lines.append("model dir {}: {} entries, {} onnx".format(

@@ -17,9 +17,12 @@ import urllib.request
 WORK = os.environ.get("WORK") or os.environ.get("JM_WORK") or "/root/jmcomic-build"
 P4A = os.environ.get("P4A", os.path.join(WORK, "p4a"))
 MIRROR = "https://pypi.tuna.tsinghua.edu.cn/simple"
+# p4a 的源码包缓存按 arch 分目录(build-<abi>/packages)。x86_64 是另一个目录，
+# 不跟着换的话 x86_64 构建会重新付一遍 45MB Pillow / 27MB CPython 的下载代价。
+ABI = os.environ.get("JM_ABI") or "arm64-v8a"
 STORES = [
-    os.path.join(WORK, "src/android/.buildozer/android/platform/build-arm64-v8a/packages"),
-    os.path.join(WORK, ".buildozer/android/platform/build-arm64-v8a/packages"),
+    os.path.join(WORK, "src/android/.buildozer/android/platform/build-%s/packages" % ABI),
+    os.path.join(WORK, ".buildozer/android/platform/build-%s/packages" % ABI),
 ]
 RECIPES = os.path.join(P4A, "pythonforandroid/recipes")
 

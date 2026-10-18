@@ -13,6 +13,9 @@
     python android/tools/patch_buildozer_spec.py android/buildozer.spec \
         --p4a-dir /path/to/python-for-android \
         --recipes android/recipes --libs android/libs/arm64-v8a --models android/sr_qnn/models
+    # 模拟器(x86_64)：
+    python android/tools/patch_buildozer_spec.py android/buildozer.spec --abi x86_64 \
+        --libs android/libs/x86_64 ...
 """
 import argparse
 import os
@@ -45,13 +48,21 @@ AppRequirements = [
     "typing-extensions",
     "commonx",                               # jmcomic 依赖
     "jmcomic",                               # 走 android/recipes/jmcomic(--no-deps)
-    # 原生 curl_cffi：走 android/recipes/curl_cffi 解包官方 android wheel
-    # (curl_cffi-0.16.3-cp314-android_24_arm64_v8a)，带 TLS 指纹伪装 + HTTP/3 + ECH。
-    # 依赖目标 CPython 3.14(见 tools/wsl_patch_p4a_versions.sh)。
-    # android/shims/curl_cffi 垫片仍在 APK 里，但 site-packages 里的真包 import 优先，
-    # 垫片只是"真包缺失时"的兜底。
-    "curl_cffi",
 ]
+
+# 按目标 ABI 追加的依赖。核心差异只有 curl_cffi：
+#   * 上游只发布了 android_24_arm64_v8a 的官方 wheel(带 TLS 指纹/HTTP3/ECH)，
+#     所以只有 arm64-v8a 能用"解包 wheel"的 recipe；
+#   * x86_64 拿不到任何官方 android wheel，改用 android/shims/curl_cffi 纯 python
+#     垫片(android/main.py 的 SetupPath 会在 import 失败时把 shims 挂进 sys.path)。
+#     代价：没有 Chrome TLS 指纹，遇到 Cloudflare 严格校验可能被拦；模拟器上足够。
+AbiRequirements = {
+    "arm64-v8a": ["curl_cffi"],
+    "x86_64": [],
+}
+
+# x86_64 上没有 QNN(高通 NPU 只有 arm64 设备有)，超分走 ORT CPU EP。
+# 见 android/sr_qnn/cpp/sr_qnn.cpp 的 QNN 懒加载逻辑与 tools/wsl_build_native.sh。
 
 # curl-cffi(PyPI 连字符写法)不是 recipe 名，真会被 p4a 当成 pip 包去装 —— 那样会拉到
 # manylinux wheel，在 bionic 上加载不了。真名 curl_cffi 走上面的 recipe。
@@ -161,6 +172,14 @@ def MergeRequirements(current, wanted):
     return ",".join(items)
 
 
+def RemoveRequirements(current, names):
+    """ 从依赖列表里删掉指定项(切换 ABI 时用：x86_64 不该再带 curl_cffi recipe) """
+    drop = {v.lower().replace("_", "-") for v in names}
+    items = [v.strip() for v in (current or "").split(",") if v.strip()]
+    kept = [v for v in items if v.lower().replace("_", "-") not in drop]
+    return ",".join(kept)
+
+
 def MergeExts(current, wanted):
     items = [v.strip() for v in (current or "").split(",") if v.strip()]
     lower = {v.lower() for v in items}
@@ -193,9 +212,12 @@ def Main():
     parser.add_argument("spec", help="生成的 buildozer.spec 路径")
     parser.add_argument("--p4a-dir", default="", help="python-for-android 源码目录(避免联网克隆)")
     parser.add_argument("--recipes", default="", help="本项目 recipe 目录(会被拷贝进工具的 recipe_dir)")
-    parser.add_argument("--libs", default="", help="自有 .so 目录(相对 project_dir)")
+    parser.add_argument("--libs", default="", help="自有 .so 目录(相对 project_dir，按 ABI 分目录)")
     parser.add_argument("--icon", default="", help="应用图标 PNG(替换 PySide6 自带的 pyside_icon.jpg)")
     parser.add_argument("--models", default="", help="超分模型目录(有 .onnx 时才加入 assets)")
+    parser.add_argument("--abi", default=os.environ.get("JM_ABI", "arm64-v8a"),
+                        choices=("arm64-v8a", "x86_64"),
+                        help="目标 ABI(默认 arm64-v8a，也可用 JM_ABI 环境变量覆盖)")
     parser.add_argument("--api", default="34", help="targetSdk，默认 34")
     parser.add_argument("--minapi", default="34", help="minSdk，默认 34(用户要求不考虑 Android 14 以下)")
     parser.add_argument("--version", default="",
@@ -220,9 +242,15 @@ def Main():
 
     # 注意：buildozer.spec 里 android.*/p4a.* 都是 [app] 段下的"带点键名"，
     # 不能写成独立的 [android]/[p4a] 段，否则会被 buildozer 忽略。
-    current = spec.GetKey("app", "requirements") or ""
-    merged = MergeRequirements(current, AppRequirements)
-    if merged != current:
+    wanted = list(AppRequirements) + list(AbiRequirements.get(args.abi, []))
+    raw = spec.GetKey("app", "requirements") or ""
+    current = raw
+    if args.abi != "arm64-v8a":
+        current = RemoveRequirements(current, ["curl_cffi"])
+    merged = MergeRequirements(current, wanted)
+    # 跟**原始值**比：只跟 RemoveRequirements 之后的值比会漏掉"纯删除"的情况
+    # （合并阶段无新增 -> merged == current -> 不写盘 -> curl_cffi 还留在文件里）。
+    if merged != raw:
         spec.SetKey("app", "requirements", merged)
 
     # 工具生成的 buildozer.spec 把 version 写死成 0.1，不覆盖的话每次打包都还是 0.1，
@@ -231,7 +259,11 @@ def Main():
 
     spec.SetKey("app", "android.api", str(args.api))
     spec.SetKey("app", "android.minapi", str(args.minapi))
-    spec.SetKey("app", "android.archs", "arm64-v8a")
+    spec.SetKey("app", "android.archs", args.abi)
+    # 切换 ABI 时把另一套 add_libs 键整行删掉：留着它会让 buildozer 去读一个
+    # 当前 ABI 不存在的目录(旧值是 libs/arm64-v8a/*.so)，日志里全是 file_matches 空结果。
+    spec.DeleteKey("app", "android.add_libs_" +
+                   ("x86_64" if args.abi == "arm64-v8a" else "arm64_v8a"))
     spec.SetKey("app", "android.accept_sdk_license", "True")
     spec.SetKey("app", "android.private_storage", "True")
     if args.libs:
@@ -240,8 +272,10 @@ def Main():
         if os.path.isdir(libsScan):
             soFiles = sorted(n for n in os.listdir(libsScan) if n.endswith(".so"))
         if soFiles:
-            # spec 里仍写相对路径(buildozer 按 spec 目录解析)，保持与既有构建一致
-            spec.SetKey("app", "android.add_libs_arm64_v8a",
+            # spec 里仍写相对路径(buildozer 按 spec 目录解析)，保持与既有构建一致。
+            # 键名必须跟目标 ABI 对齐：buildozer 只把 add_libs_<同名 ABI> 的条目拷进
+            # dist/libs/<abi>，写错键等于静默丢库(APK 里没有 .so，运行期找不到)。
+            spec.SetKey("app", "android.add_libs_" + args.abi.replace("-", "_"),
                         ",".join(os.path.join(args.libs, n) for n in soFiles))
             print("  原生库 {} 个: {}".format(len(soFiles), ", ".join(soFiles)))
         else:

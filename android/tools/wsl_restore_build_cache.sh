@@ -4,8 +4,13 @@
 # 必须在 pyside6-android-deploy --init 之后、buildozer 之前执行
 set -uo pipefail
 W="${WORK:-"$JM_WORK"}"
-B="$W/src/android/.buildozer/android/platform/build-arm64-v8a"
-K="$W/keep"
+ABI="${JM_ABI:-arm64-v8a}"
+B="$W/src/android/.buildozer/android/platform/build-$ABI"
+K="$W/keep-$ABI"
+if [ ! -e "$K" ] && [ -d "$W/keep" ] && [ "$ABI" = "arm64-v8a" ]; then
+    mv "$W/keep" "$K"
+    echo "  旧缓存目录 keep/ -> $(basename "$K")"
+fi
 if [ ! -d "$K" ]; then
     echo "(没有 $K，跳过恢复)"
     exit 0

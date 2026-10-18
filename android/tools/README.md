@@ -13,6 +13,12 @@ Android 移植用的脚本集合。**所有脚本都不写死本机路径**，�
 覆盖变量（两边同名）：`JM_REPO`、`JM_WORK`、`JM_SDK`、`JM_NDK`、`JM_VENV`、`JM_VPY`、
 `JM_ADB`、`JM_SERIAL`、`JM_USER`。
 
+目标架构另有一组：`JM_ABI`（`arm64-v8a` 默认 / `x86_64` 模拟器）以及由它派生的
+`JM_WHEEL_TAG`（Qt wheel 平台标签）、`JM_ARCH_NAME`（deploy 工具的 arch 叫法）、
+`JM_LIBS_KEY`（buildozer 的 add_libs 键后缀）、`JM_QNN`（是否有 QNN 运行库）。
+所有构建链脚本都读 `JM_ABI`，所以"给模拟器打包"= 前缀 `JM_ABI=x86_64` 或
+`wsl_build_apk.sh --abi x86_64`，不需要改脚本（见 [android/README.md §10](../README.md#10-x86_64-支持android-模拟器--虚拟机)）。
+
 ## 目录分档
 
 * `android/tools/*` —— **入口脚本**（68 个）。判据是机械的：**被 `android/README.md`、
@@ -36,7 +42,7 @@ Android 移植用的脚本集合。**所有脚本都不写死本机路径**，�
 | `wsl_config_mirrors.sh` | 配置可到达镜像 + 安装 buildozer/p4a 依赖 + clone p4a(develop) 并改 GitHub 域名 |
 | `wsl_build_py311_src.sh` | 源码编译安装 CPython 3.11（buildozer 要求宿主 python ≤ 3.11） |
 | `wsl_fetch_deps.sh` | 取 PySide6 / shiboken6 的 `android_aarch64` wheel(cp311) |
-| `wsl_fetch_ort.sh` | 取 ONNX Runtime：`android-qnn` AAR + NuGet 头文件 + linux 库 |
+| `wsl_fetch_ort.sh` | 取 ONNX Runtime：arm64 用 `android-qnn` AAR、x86_64 用普通 `android` AAR（`-qnn` 只有 arm64）+ NuGet 头文件 + linux 库 |
 | `wsl_fetch_qnn.sh` | 取高通 QNN 运行时 `com.qualcomm.qti:qnn-runtime` AAR |
 
 ### 2. 模型准备
@@ -52,8 +58,8 @@ Android 移植用的脚本集合。**所有脚本都不写死本机路径**，�
 | 脚本 | 作用 |
 | --- | --- |
 | `wsl_sync.sh` | 把 Windows 侧仓库同步到 WSL 的 ext4 构建树（避开 `/mnt/c` 慢） |
-| `wsl_build_native.sh` | 编译 `libsr_qnn.so`：A) Android arm64-v8a(NDK) B) 宿主 x86_64 |
-| `wsl_build_apk.sh` | **一键 APK 打包**：填 spec → `--init` → 补丁 → `buildozer android debug` → 收货 |
+| `wsl_build_native.sh` | 编译 `libsr_qnn.so`：A) Android `$JM_ABI`(NDK，arm64-v8a/x86_64) B) 宿主 x86_64 |
+| `wsl_build_apk.sh` | **一键 APK 打包**：填 spec → `--init` → 补丁 → `buildozer android debug` → 收货（`--abi x86_64` 出模拟器包） |
 | `wsl_start_detached_build.sh` | 让 APK 构建在 WSL 内脱离式运行(`setsid+nohup`)，不受宿主会话生命周期影响 |
 | `wsl_wait_build.sh` | 等脱离式构建**真正结束**再收货（踩过的坑：没结束就收货拿到的是上一版 APK） |
 | `wsl_build_alive.sh` | 判断构建是否还在推进（进程 + 目录增长 + 子进程） |
@@ -62,7 +68,8 @@ Android 移植用的脚本集合。**所有脚本都不写死本机路径**，�
 | `wsl_save_build_cache.sh` | 把已编译产物搬出 `.buildozer`（避免被 `--init` 的 `cleanup()` 清掉） |
 | `wsl_restore_build_cache.sh` | 把上面搬出去的产物搬回来 |
 | `wsl_repack_apk.sh` | 原地重新打包 APK（不跑 deploy 工具的 `--init`） |
-| `wsl_install_qt_plugins.sh` | 把 APK 缺的 Qt 插件补进 `libs/arm64-v8a` |
+| `wsl_install_qt_plugins.sh` | 把 APK 缺的 Qt 插件补进 `libs/$JM_ABI`（文件名带 ABI 后缀） |
+| `wsl_patch_buildozer_addlibs.sh` | 给 buildozer 的 add_libs 映射表补上 `x86_64`（1.6.0 只认到 arm64，键会被静默忽略） |
 | `wsl_patch_optimize.sh` | 把 p4a Qt bootstrap 里硬编码的 `PYTHONOPTIMIZE=2` 改成 `1` |
 | `wsl_fix_recipe_urls.sh` | 修正 p4a recipe 的下载地址（可到达性）+ Python 版本（对齐 cp311） |
 | `wsl_fix_java_ca.sh` | JDK `cacerts` 缺 CA 导致 gradle PKIX 失败 → 用系统 CA 生成 truststore |
@@ -73,10 +80,10 @@ Android 移植用的脚本集合。**所有脚本都不写死本机路径**，�
 
 | 脚本 | 作用 |
 | --- | --- |
-| `patch_buildozer_spec.py` | 注入 requirements / minSdk 34 / 自有 `.so` / 模型 assets / 应用图标 |
+| `patch_buildozer_spec.py` | 注入 requirements / minSdk 34 / 自有 `.so` / 模型 assets / 应用图标（`--abi` 决定 `android.archs`、`add_libs_<abi>`，并剔除 x86_64 上没有的 curl_cffi） |
 | `patch_android_manifest.py` | 注入 SAF 桥组件（Service + 透明 Activity）到 p4a **模板**与渲染产物、删掉多余的存储权限、把 `android/java` 拷进 dist（幂等） |
 | `pin_min_sdk.sh` | 把 deploy 生成的工程钉到 Android 14(API 34) 并加入 NPU 模型资产 |
-| `fill_deploy_spec.py` | 把 wheel / NDK / SDK 的绝对路径写进 `pysidedeploy.spec` |
+| `fill_deploy_spec.py` | 把 wheel / NDK / SDK 的绝对路径与目标 arch 写进 `pysidedeploy.spec` |
 | `fix_ps_bom.ps1` | 给 `android/tools` 下的 `.ps1` 补 UTF-8 BOM |
 
 ### 5. 校验与自检（APK / 工程）

@@ -34,10 +34,11 @@ else
 fi
 
 echo
-echo "=== APK 内原生库(lib/arm64-v8a) ==="
-"$PY" - "$APK" <<'EOF'
+echo "=== APK 内原生库(lib/$JM_ABI) ==="
+"$PY" - "$APK" "$JM_ABI" <<'EOF'
 import sys, zipfile
 z = zipfile.ZipFile(sys.argv[1])
+abi = sys.argv[2]
 libs = [i for i in z.infolist() if i.filename.startswith('lib/')]
 print("原生库文件数:", len(libs))
 key = ("libsr_qnn", "libonnxruntime", "libQnn", "libpyside6", "libshiboken", "libc++_shared")
@@ -57,7 +58,7 @@ print("APK 总大小: %.1f MB" % (sum(i.file_size for i in z.infolist()) / 1024 
 # libpybundle.so(site-packages，qt bootstrap 的 tar.gz 伪装 .so)、少量顶层 .pyc
 import tarfile, io
 names = set(z.namelist())
-for asset in ("assets/private.tar", "lib/arm64-v8a/libpybundle.so"):
+for asset in ("assets/private.tar", "lib/%s/libpybundle.so" % abi):
     if asset in z.namelist():
         try:
             with tarfile.open(fileobj=io.BytesIO(z.read(asset))) as t:

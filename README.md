@@ -38,7 +38,7 @@
 
 | 改动 | 说明 |
 | --- | --- |
-| **Android 打包** | PySide6(Qt for Android) + python-for-android/buildozer，只出 `arm64-v8a`，最低 **Android 14 (API 34)** |
+| **Android 打包** | PySide6(Qt for Android) + python-for-android/buildozer，出 `arm64-v8a`（真机）与 `x86_64`（模拟器）两种包，最低 **Android 14 (API 34)** |
 | **竖屏界面适配** | 抽屉式导航、首页双列封面、详情页堆叠、返回键处理、无系统托盘时降级、最小尺寸放宽、应用内文件选择器（替换在 Android 上会卡死的 `QFileDialog`） |
 | **Waifu2x 走高通 NPU** | `libsr_qnn.so`（QNN/HTP）+ `onnxruntime-android-qnn`，9 组共 39 个固定 shape 模型，可选 fp16 / 量化 |
 | **两处 Android 专有的坑** | `bootstrap=qt` 下 AES 解密必须补 `ctypes.util`；`PYTHONOPTIMIZE=2` 会让 ctypes 后端在 Android 上必死 —— 详见 [android/README.md](android/README.md) §3.1/§3.2 |
@@ -47,7 +47,9 @@
 
 ## 下载与安装
 
-* **Android**：构建产物是 `android/JMComic-<版本>-arm64-v8a-debug.apk`。
+* **Android**：构建产物是 `android/JMComic-<版本>-arm64-v8a-debug.apk`（真机）。
+  给模拟器测试另出一版 `-x86_64-` 的包（`wsl_build_apk.sh --abi x86_64`，见
+  [android/README.md](android/README.md) §10）；两种包只能装一个，ABI 不同不能混装。
   这是**调试包（debug 签名）**，直接安装即可自用；要对外分发请自己重新签名。
   debug 包体积较大（约 270MB，含 Qt、Python 运行时和 39 个超分模型）。
 * **桌面端**：请到上游 [Releases](https://github.com/tonquer/JMComic-qt/releases) 下载，
@@ -55,9 +57,9 @@
 
 ### Android 使用前提
 
-* Android 14 (API 34) 及以上，`arm64-v8a`
+* Android 14 (API 34) 及以上，`arm64-v8a`；**x86_64 包只用于模拟器测试**
 * 首次运行需要存储权限（用于下载目录与本地漫画）
-* 超分默认使用高通 NPU；非高通机型会在设置里回退到 CPU 后端
+* 超分默认使用高通 NPU；非高通机型/模拟器会在设置里回退到 CPU 后端
 
 ## 功能
 
@@ -84,6 +86,9 @@
 # 入口脚本（按上游惯例，仓库里的 .sh 不带可执行位，统一用 bash 调用）
 bash android/build_android.sh          # 一键：编译 libsr_qnn.so + 打包 APK
 python android/tools/prepare_models.py # 把 waifu2x onnx 转成 NPU 可用的固定 shape 模型
+
+# 给 x86_64 模拟器出一版（Qt wheel/ORT/原生库都按 ABI 分开，互不干扰）
+bash android/tools/wsl_build_apk.sh --abi x86_64
 ```
 
 `android/tools/` 下的脚本都不写死本机路径，公共路径由 `env.sh` / `env.ps1` 解析

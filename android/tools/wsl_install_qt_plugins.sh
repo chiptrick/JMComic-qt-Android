@@ -16,18 +16,20 @@
 set -uo pipefail
 WORK="${WORK:-"$JM_WORK"}"
 ANDROID="$WORK/src/android"
-LIBDIR="$ANDROID/libs/arm64-v8a"
+ABI="${JM_ABI:-arm64-v8a}"
+LIBDIR="$ANDROID/libs/$ABI"
 VPY="$WORK/venv311/bin/python"
 # p4a 从 wheel 解出来的插件目录(作为 wheel 不可用时的备用来源)
-INSTALLS="$ANDROID/.buildozer/android/platform/build-arm64-v8a/build/python-installs/JMComic/arm64-v8a/PySide6/Qt/plugins"
+INSTALLS="$ANDROID/.buildozer/android/platform/build-${ABI}/build/python-installs/JMComic/${ABI}/PySide6/Qt/plugins"
 
 # 需要的插件。刻意不含：
 #   styles/qandroidstyle —— 会改变既有控件外观，收益不明确，不冒险
 #   tls/*               —— 本项目 HTTPS 走 python 的 ssl，QtNetwork 只用于单实例(Android 已禁用)
 PLUGINS="imageformats/qjpeg imageformats/qgif imageformats/qwebp imageformats/qsvg imageformats/qico iconengines/qsvgicon sqldrivers/qsqlite"
 
-WHEEL=$(ls "$ANDROID/wheels/"pyside6-*-android_aarch64.whl 2>/dev/null | head -1)
+WHEEL=$(ls "$ANDROID/wheels/"pyside6-*-"${JM_WHEEL_TAG:-android_aarch64}".whl 2>/dev/null | head -1)
 mkdir -p "$LIBDIR"
+echo "abi:    $ABI"
 echo "wheel:  ${WHEEL:-<无>}"
 echo "installs: $INSTALLS"
 echo "目标:   $LIBDIR"
@@ -82,6 +84,6 @@ if bad:
     sys.exit(3)
 PY
 rc=$?
-echo "=== libs/arm64-v8a 里的 Qt 插件 ==="
+echo "=== libs/$ABI 里的 Qt 插件 ==="
 ls -l "$LIBDIR" 2>/dev/null | grep libplugins || echo "(无)"
 exit $rc

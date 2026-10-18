@@ -11,8 +11,23 @@ set -uo pipefail
 # .mark-* 是隐藏文件，dotglob 才能被 * 匹配到(p4a 正是靠它判断"已下载完成")
 shopt -s dotglob
 W="${WORK:-"$JM_WORK"}"
-OLD="$W/.buildozer/android/platform/build-arm64-v8a/packages"
-DST="$W/src/android/.buildozer/android/platform/build-arm64-v8a/packages"
+ABI="${JM_ABI:-arm64-v8a}"
+DST="$W/src/android/.buildozer/android/platform/build-$ABI/packages"
+# 源码包(CPython/openssl/libffi/sqlite)与架构无关，可以直接复用 arm64 目录里已经
+# 下好的那份 —— x86_64 第一次构建不用再赌 ghproxy 的 27MB 断流。
+# 候选三处：当前 storage、被 save 移出去的 keep-arm64-v8a、(旧布局的).buildozer
+OLD=""
+if [ "$ABI" != "arm64-v8a" ]; then
+    for cand in \
+        "$W/src/android/.buildozer/android/platform/build-arm64-v8a/packages" \
+        "$W/keep-arm64-v8a/packages" \
+        "$W/.buildozer/android/platform/build-arm64-v8a/packages" ; do
+        if [ -d "$cand" ]; then OLD="$cand"; break; fi
+    done
+else
+    OLD="$W/.buildozer/android/platform/build-arm64-v8a/packages"
+fi
+echo "源码包来源: ${OLD:-<没有>}"
 # CPython 3.14.8(目标 Python 整机迁移 3.14，见 tools/wsl_patch_p4a_versions.sh)
 LOCAL_PY="$W/Python-3.14.8.tgz"
 PY_TAG="v3.14.8.tar.gz"

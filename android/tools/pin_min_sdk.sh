@@ -13,6 +13,7 @@ set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 API="${API:-34}"
 MINAPI="${MINAPI:-34}"
+ABI="${ABI:-arm64-v8a}"                    # arm64-v8a(真机) / x86_64(模拟器)
 ORIENTATION="${ORIENTATION:-fullUser}"   # fullUser=跟随系统旋转锁定(默认)，portrait=强制竖屏
 MODEL_DIR="${HERE}/sr_qnn/models"
 
@@ -37,7 +38,7 @@ else
         log "打补丁: ${spec}"
         SetKey "${spec}" "android.api" "${API}"
         SetKey "${spec}" "android.minapi" "${MINAPI}"
-        SetKey "${spec}" "android.archs" "arm64-v8a"
+        SetKey "${spec}" "android.archs" "${ABI}"
         SetKey "${spec}" "android.accept_sdk_license" "True"
         SetKey "${spec}" "android.private_storage" "True"
         # 应用外部私有目录(下载目录要用，Android 10+ 无需权限)
@@ -48,9 +49,13 @@ else
         else
             warn "  sr_qnn/models 没有 onnx，跳过 add_assets(用 adb push 推送模型)"
         fi
-        # 确保原生库打进 APK
-        SetKey "${spec}" "android.local_libs" \
-            "libsr_qnn.so,libonnxruntime.so,libQnnHtp.so,libQnnSystem.so,libQnnHtpPrepare.so,libQnnHtpV68Stub.so,libQnnHtpV69Stub.so,libQnnHtpV73Stub.so,libQnnHtpV75Stub.so"
+        # 确保原生库打进 APK（QNN 那套只有 arm64 上有，x86_64 模拟器没有 NPU）
+        if [[ "${ABI}" == arm64* ]]; then
+            SetKey "${spec}" "android.local_libs" \
+                "libsr_qnn.so,libonnxruntime.so,libQnnHtp.so,libQnnSystem.so,libQnnHtpPrepare.so,libQnnHtpV68Stub.so,libQnnHtpV69Stub.so,libQnnHtpV73Stub.so,libQnnHtpV75Stub.so"
+        else
+            SetKey "${spec}" "android.local_libs" "libsr_qnn.so,libonnxruntime.so"
+        fi
         SetKey "${spec}" "android.no_compile_pyo" "False"
     done
 fi

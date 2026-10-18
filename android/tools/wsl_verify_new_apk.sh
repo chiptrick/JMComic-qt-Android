@@ -1,15 +1,20 @@
 #!/usr/bin/env bash
 . "$(dirname "${BASH_SOURCE[0]}")/env.sh"
 # 深度校验新 APK：包信息 / 原生库 / Qt 插件 / private.tar 里的模型
+# 按 JM_ABI 校验：arm64-v8a 要求 QNN 那套 + 原生 curl_cffi；x86_64 反过来要求
+# "没有 QNN、没有 curl_cffi 原生扩展"（说明走了 android/shims 垫片），并要求
+# 普通版 libc++_shared.so。
 set -uo pipefail
 WORK="$JM_WORK"
 A="$WORK/src/android"
 SDK="$WORK/android-sdk"
+ABI="$JM_ABI"
 APK=$(ls -t "$A"/bin/*.apk "$A"/*.apk 2>/dev/null | head -1)
 BT=$(ls -d "$SDK"/build-tools/* 2>/dev/null | sort -V | tail -1)
 AAPT="$BT/aapt2"; [ -x "$AAPT" ] || AAPT="$BT/aapt"
 
 echo "=== APK: $APK ==="
+echo "=== 目标 ABI: $ABI (QNN=$JM_QNN) ==="
 ls -sh "$APK"
 echo "修改时间: $(date -r "$APK" '+%F %T')"
 
@@ -23,23 +28,30 @@ fi
 
 echo
 echo "=== 关键原生库与插件 ==="
-python3 - "$APK" <<'PY'
+python3 - "$APK" "$ABI" "$JM_QNN" <<'PY'
 import sys, zipfile
 z = zipfile.ZipFile(sys.argv[1])
+abi, qnn = sys.argv[2], sys.argv[3] == "1"
+suffix = "_" + abi
 libs = {i.filename: i.file_size for i in z.infolist() if i.filename.startswith('lib/')}
 print("  原生库总数:", len(libs))
 need = ["libsr_qnn.so", "libonnxruntime.so",
-        "libplugins_platforms_qtforandroid_arm64-v8a.so",
-        "libplugins_imageformats_qsvg_arm64-v8a.so",
-        "libplugins_imageformats_qjpeg_arm64-v8a.so",
-        "libplugins_imageformats_qgif_arm64-v8a.so",
-        "libplugins_imageformats_qwebp_arm64-v8a.so",
-        "libplugins_sqldrivers_qsqlite_arm64-v8a.so",
-        "libplugins_iconengines_qsvgicon_arm64-v8a.so",
-        "libQnnHtp.so", "libQnnHtpV79Skel.so",
-        # CPython 3.14 迁移：curl_cffi/PySide6 的 .so 都 NEEDED libpython3.14.so；
-        # curl_cffi 另要带 hash 的 libc++_shared(见 android/recipes/curl_cffi)
-        "libpython3.14.so", "libc++_shared-d523468d.so"]
+        "libplugins_platforms_qtforandroid" + suffix + ".so",
+        "libplugins_imageformats_qsvg" + suffix + ".so",
+        "libplugins_imageformats_qjpeg" + suffix + ".so",
+        "libplugins_imageformats_qgif" + suffix + ".so",
+        "libplugins_imageformats_qwebp" + suffix + ".so",
+        "libplugins_sqldrivers_qsqlite" + suffix + ".so",
+        "libplugins_iconengines_qsvgicon" + suffix + ".so",
+        # CPython 3.14 迁移：curl_cffi/PySide6 的 .so 都 NEEDED libpython3.14.so
+        "libpython3.14.so"]
+if qnn:
+    need += ["libQnnHtp.so", "libQnnHtpV79Skel.so",
+             # curl_cffi 官方 wheel 的 _wrapper.abi3.so 要带 hash 的 libc++_shared
+             "libc++_shared-d523468d.so"]
+else:
+    # x86_64 没有 curl_cffi wheel，只有 PySide6 recipe 给的普通 libc++_shared.so
+    need += ["libc++_shared.so"]
 bad = 0
 for n in need:
     hit = [k for k in libs if k.endswith("/" + n)]
@@ -47,14 +59,19 @@ for n in need:
         print("  [ok]   %-52s %8.2f MB" % (n, libs[hit[0]] / 1024 / 1024))
     else:
         print("  [缺失] %s" % n); bad += 1
+if not qnn:
+    # 反向检查：x86_64 不该出现 arm64 的 QNN 运行库（出现说明按错 ABI 打包了）
+    arm = [k for k in libs if "/libQnn" in k]
+    print("  [ok]   没有 QNN 库" if not arm else "  [异常] 混进了 QNN 库: %s" % arm[:3])
 print("  缺失项:", bad)
 PY
 
 echo
 echo "=== assets 内容 ==="
-python3 - "$APK" <<'PY'
+python3 - "$APK" "$ABI" "$JM_QNN" <<'PY'
 import sys, zipfile, tarfile, io
 z = zipfile.ZipFile(sys.argv[1])
+abi, qnn = sys.argv[2], sys.argv[3] == "1"
 assets = [(i.filename, i.file_size) for i in z.infolist() if i.filename.startswith('assets/')]
 for n, s in assets:
     print("  %-34s %10.1f KB" % (n, s / 1024))
@@ -70,29 +87,35 @@ if any(n == name for n, _ in assets):
     print("  app_src 条目:", len([n for n in names if n.startswith('app_src/')]))
     print("  shims 条目:", len([n for n in names if n.startswith('shims/')]))
 
-# site-packages 不在 private.tar 里！p4a 的 qt bootstrap 把它打成 lib/arm64-v8a/libpybundle.so
+# site-packages 不在 private.tar 里！p4a 的 qt bootstrap 把它打成 lib/<abi>/libpybundle.so
 # (tar.gz 伪装成 .so，运行时由 PythonUtil 解包到 files/_python_bundle)。
 # 原生 curl_cffi、PySide6/shiboken6 的 abi3 .so、pycryptodome 的 cffi .so 都在这里面。
-pb = "lib/arm64-v8a/libpybundle.so"
+pb = "lib/%s/libpybundle.so" % abi
 if pb in z.namelist():
     print("  %-34s %10.1f KB" % (pb, z.getinfo(pb).file_size / 1024))
     tb = tarfile.open(fileobj=io.BytesIO(z.read(pb)))
     bn = tb.getnames()
     print("  pybundle 条目:", len(bn))
-    ok = 0
-    for want in ("_python_bundle/site-packages/curl_cffi/_wrapper.abi3.so",
+    if qnn:
+        wants = ["_python_bundle/site-packages/curl_cffi/_wrapper.abi3.so",
                  "_python_bundle/site-packages/curl_cffi/fingerprints.pyc",
                  "_python_bundle/site-packages/curl_cffi/requests/session.pyc",
                  "_python_bundle/site-packages/curl_cffi.libs/libc++_shared-d523468d.so",
-                 "_python_bundle/site-packages/_cffi_backend.so"):
+                 "_python_bundle/site-packages/_cffi_backend.so"]
+    else:
+        # x86_64：真包不该在（没有 android wheel），垫片顶替
+        wants = ["_python_bundle/site-packages/_cffi_backend.so"]
+    ok = 0
+    for want in wants:
         hit = want in bn
         ok += hit
         print("  %-62s %s" % (want.split("site-packages/")[-1], "在" if hit else "!! 缺失"))
-    print("  curl_cffi 包文件数:", len([n for n in bn if n.startswith(
-        "_python_bundle/site-packages/curl_cffi/")]))
+    has_real = any(n.startswith("_python_bundle/site-packages/curl_cffi/") for n in bn)
+    if not qnn:
+        print("  curl_cffi 原生包: %s (x86_64 期望不装)" % ("在(异常)" if has_real else "不在(正常)"))
     print("  abi3 .so 数量:", len([n for n in bn if n.endswith(".abi3.so")]))
-    if ok != 5:
-        print("  !! pybundle 关键项缺失", 5 - ok, "个")
+    if ok != len(wants):
+        print("  !! pybundle 关键项缺失", len(wants) - ok, "个")
 else:
     print("  !! 没有", pb, "(qt bootstrap 应有)")
 PY

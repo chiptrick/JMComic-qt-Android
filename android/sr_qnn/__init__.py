@@ -553,6 +553,21 @@ def GetProcError():
     return _procError
 
 
+def _HasQnnRuntime():
+    """ 本 ABI 里有没有 QNN 运行库(libQnnHtp.so)
+
+    进程模式的唯一目的，是让 QNN HTP 通过独立进程拿到 /vendor/lib64 的
+    libcdsprpc.so(FastRPC)：App 进程的链接器命名空间加载不了它。
+    没有 QNN 运行库的 ABI(例如 x86_64 模拟器)根本用不上这条路 —— 硬走一遍
+    只会在"裸 linker64 子进程"里 dlopen libonnxruntime.so 失败
+    (依赖链里的 /system/lib64/libgui.so 在该命名空间找不到符号)，
+    白等两轮 spawn 再退回 ctypes。这里提前判掉：
+        · arm64 真机：libQnnHtp.so 在包内 -> 行为完全不变
+        · x86_64：直接走 ctypes + CPU EP
+    """
+    return bool(_SearchFile(QnnBackendLib))
+
+
 def _StartProcEngine(modelDir):
     """ 尝试启动进程模式引擎(优先路径)；失败返回 None，调用方再走 ctypes 兜底
 
@@ -565,6 +580,11 @@ def _StartProcEngine(modelDir):
     """
     global _procFailed, _procError
     if os.environ.get("JM_SR_PROC", "1") == "0":
+        return None
+    if os.environ.get("JM_SR_PROC", "1") != "force" and not _HasQnnRuntime():
+        _procError = "没有 QNN 运行库({})，跳过进程模式，直接用 ctypes + CPU EP".format(
+            QnnBackendLib)
+        Log.Warn(_procError)
         return None
     exe = _SearchFile(ProcName)
     if not exe or not os.path.exists(exe):

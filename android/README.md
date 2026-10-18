@@ -958,6 +958,9 @@ cd android && ./build_android.sh
 # 只改 python 代码时
 SKIP_NATIVE=1 ./build_android.sh
 
+# 给 x86_64 模拟器出一版（详见 §10）
+bash android/tools/wsl_build_apk.sh --abi x86_64
+
 adb install -r android/*.apk
 ```
 
@@ -998,7 +1001,7 @@ adb shell dumpsys package <包名> | grep -E "minSdk|targetSdk"
 | pillow, bs4, lxml, natsort, tqdm | ✅ p4a 官方/纯 python recipe | 图像与解析 |
 | pycryptodomex, PySocks | ✅ p4a recipe | 加解密、socks 代理（垫片也用它） |
 | webdavclient3, pysmb, smbprotocol, jmcomic | ✅ 纯 python | p4a 直接 pip 安装 |
-| **curl_cffi** | ⚠️ 需要 `android/recipes/curl_cffi` 编译 curl-impersonate | 编不出来时自动使用 `android/shims/curl_cffi`（功能可用，但**没有 Chrome TLS 指纹**，遇到 Cloudflare 严格校验可能被拦） |
+| **curl_cffi** | ✅ arm64 走官方 wheel / ⚠️ x86_64 走垫片 | arm64-v8a 用 `android/recipes/curl_cffi` 解包官方 android wheel（TLS 指纹 + HTTP/3 + ECH）；上游没有 x86_64 的 android wheel，模拟器上自动使用 `android/shims/curl_cffi`（功能可用，但**没有 Chrome TLS 指纹**，遇到 Cloudflare 严格校验可能被拦）。见 §10.1 |
 | sr-vulkan / sr-vulkan-model-* | ❌ 不安装 | 由 `sr_qnn` 顶替（`sys.modules["sr_vulkan"]`） |
 
 ### 5.3 与桌面端共存的注意点
@@ -1244,6 +1247,10 @@ python android/tools/patch_buildozer_spec.py ... --icon "$ICON"   # -> icon.file
 | `JM_ADB` / `$JmAdb` | adb 可执行文件 | 先查 `PATH`，再查 `$ANDROID_HOME`、`~/Android/Sdk` |
 | `JM_SERIAL` / `$JmSerial` | 目标设备串号 | `adb devices` 里第一个已授权设备 |
 | `JM_USER` | WSL 非 root 用户（跑"降权回归"用） | `id -un 1000` |
+| `JM_ABI` | 目标 ABI：`arm64-v8a` / `x86_64`（见 §10） | `arm64-v8a` |
+| `JM_WHEEL_TAG` | 由 `JM_ABI` 派生：Qt wheel 的平台标签 | `android_aarch64` / `android_x86_64` |
+| `JM_LIBS_KEY` | 由 `JM_ABI` 派生：buildozer 的 add_libs 键后缀 | `arm64_v8a` / `x86_64` |
+| `JM_QNN` | 由 `JM_ABI` 派生：是否有 QNN 运行库 | `1` / `0` |
 
 所以"换一台机器"只需要：
 
@@ -1260,6 +1267,154 @@ export JM_WORK=/path/to/build-tree JM_SDK=/path/to/android-sdk JM_SERIAL=<序列
 
 `android/build_logs/` 是真机证据目录（抓回的日志/截图/配置），**已 gitignore、不入库**；
 其中还含真机配置（账号、代理 IP）与下载样本，不要提交。
+
+## 10. x86_64 支持（Android 模拟器 / 虚拟机）
+
+真机是 arm64-v8a，而 Android Studio 的 AVD 基本都是 **x86_64**。用 arm64 包去跑模拟器
+只能靠镜像的 native bridge（`libnb.so`）翻译指令，既慢又容易在原生库上出问题
+（`libsr_qnn.so`/`libonnxruntime.so` 都得翻译一遍）。所以这里单独出 x86_64 包。
+
+**一个 APK 只含一种 ABI**：p4a 按 arch 分别建 dist，原生库也按 `libs/<abi>/` 分目录。
+切换是"换一个架构再打一次"，不是往同一个包里塞两份。
+
+```bash
+# 目标 ABI 由 JM_ABI 决定（默认 arm64-v8a，保持原行为不变）
+JM_ABI=x86_64 bash android/tools/wsl_fetch_android_wheels.sh   # Qt 的 android_x86_64 wheel
+JM_ABI=x86_64 bash android/tools/wsl_fetch_ort.sh               # ONNX Runtime x86_64
+JM_ABI=x86_64 bash android/tools/wsl_build_native.sh            # libsr_qnn.so / libsr_qnn_proc.so
+bash android/tools/wsl_build_apk.sh --abi x86_64                # 打包
+# 产物：android/JMComic-<版本>-x86_64-debug.apk
+```
+
+`wsl_build_apk.sh` 会自己跑 wheel 下载与 ORT 补齐，也能用 `--abi` 显式指定；两者等价：
+`--abi x86_64` 就是 `JM_ABI=x86_64`。
+
+### 10.1 两种 ABI 的差异
+
+| 项 | arm64-v8a（真机） | x86_64（模拟器） |
+| --- | --- | --- |
+| Qt wheel | `pyside6-6.12.0-...-android_aarch64.whl` | `...-android_x86_64.whl`（同一版本，Qt 官方两个都发） |
+| ONNX Runtime | `onnxruntime-android-qnn` AAR（只有 arm64） | `onnxruntime-android` AAR（普通版，有 x86_64） |
+| QNN 运行库 | `libQnnHtp*` / `libQnnSystem` 等 20 个 | **没有**（高通 NPU 只存在于 arm64 设备） |
+| 超分后端 | QNN HTP（NPU）+ CPU 兜底 | ONNX Runtime CPU EP |
+| curl_cffi | 官方 android wheel（TLS 指纹 + HTTP/3 + ECH） | **用 `android/shims/curl_cffi` 纯 python 垫片** |
+| 原生库目录 | `android/libs/arm64-v8a/` | `android/libs/x86_64/` |
+| 构建缓存 | `$JM_WORK/keep-arm64-v8a/` | `$JM_WORK/keep-x86_64/` |
+
+#### 为什么 x86_64 没有 curl_cffi
+
+上游只发布 `curl_cffi-*-android_24_arm64_v8a.whl`（PyPI 上 cp313/cp314 都是 arm64），
+没有任何 x86_64 的 Android wheel。我们的 `android/recipes/curl_cffi` 是"解包官方 wheel"，
+没有 wheel 就无包可解，所以 x86_64 的 `requirements` 里**不含 curl_cffi**
+（`patch_buildozer_spec.py --abi` 负责剔除），运行时由 `android/main.py` 的 `SetupPath()`
+在 `import curl_cffi` 失败时把 `android/shims` 挂进 `sys.path`，上层代码无需改动。
+
+代价：垫片没有 Chrome TLS 指纹、不支持 HTTP/3/ECH（`HTTP3_ECH_SUPPORTED=False`
+会让 `src/server/req.py` 跳过降级重试）。对"在模拟器上跑通界面/登录/下载"够用，
+但**不能用模拟器验证 TLS 指纹相关的线上问题** —— 那类问题必须真机。
+
+#### 超分在模拟器上是 CPU 推理
+
+`sr_qnn.cpp` 的 QNN 是运行期 `dlopen("libQnnHtp.so")` 的（没有链接期依赖），
+所以同一份源码两种 ABI 都能编。x86_64 上找不到 QNN 库就回落 CPU EP：
+`sr_qnn.getGpuInfo()` 只列 `CPU (ONNX Runtime)`，`HasHtp()` 为 `False`。
+速度比真机的 NPU 慢一个数量级，用途是**验证功能链路**（分块、拼接、编码、任务队列），
+不是评估性能。宿主侧 `host_test_sr_qnn.py` 已经用同一份引擎在 x86_64 上跑过
+（分块边界无接缝、缩放/回退/取消全部通过）。
+
+### 10.2 x86_64 特有的坑
+
+| 现象 | 原因 | 处理 |
+| --- | --- | --- |
+| `android.add_libs_x86_64` 写了但 APK 里没有 `.so` | buildozer 1.6.0 的 add_libs 映射表里**没有 x86_64**（只有 armeabi/v7a/arm64/x86/mips），键被静默忽略 | `wsl_patch_buildozer_addlibs.sh` 幂等补一行（`wsl_build_apk.sh` 会自动调用） |
+| 切 ABI 后 Qt 库还是上一种架构的 | `android/deployment/recipes` 缓存了上一次生成的 PySide6 recipe，里面**写死了解包哪个 wheel** | `wsl_build_apk.sh` 检测到 recipe 里的 wheel 不是当前 ABI 就删掉 `deployment/` 让工具重新生成 |
+| 冷构建时又下一遍 CPython/Pillow | p4a 的源码包缓存目录按 arch 分（`build-<abi>/packages`） | `wsl_seed_from_old_storage.sh` / `wsl_seed_sources.py` 都按 `JM_ABI` 找目录，x86_64 直接从 arm64 的缓存复制（源码包与架构无关） |
+| 切回 arm64 后 30 分钟又编一遍 | `pyside6-android-deploy` 每次启动都 `rmtree(.buildozer)` | `wsl_save_build_cache.sh` / `wsl_restore_build_cache.sh` 按 `keep-<abi>/` 分目录保存已编译产物（save 会保存**所有**存在的 ABI 目录，打任一 ABI 都不会毁掉另一套） |
+| 冷构建到 PySide6 recipe 时报 `FileNotFoundError: .../android/wheels/pyside6-...whl` | 构建过程中 `android/wheels/*.whl` 被某个步骤删掉了（arm64 构建没触发，x86_64 冷构建必现）。文件和 recipe 里写死的绝对路径一起消失，报错点离真正原因很远 | `wsl_build_apk.sh` 把 wheel **复制到 `$JM_WORK/wheelhouse/<abi>/`**（`source.dir` 之外，与图标同思路）再把该路径写进 recipe，工程目录被清扫也不影响 |
+| 超分进程模式在模拟器上刷 4 条 `sr_qnn_proc` 失败日志 | 进程模式只为让 QNN HTP 拿到 FastRPC；x86_64 没有 QNN，硬走一遍会在裸 `linker64` 子进程里 `dlopen` `libonnxruntime.so` 失败（依赖链里的 `/system/lib64/libgui.so` 在该命名空间找不到符号） | `sr_qnn` 检测到没有 `libQnnHtp.so` 就直接跳过进程模式走 ctypes + CPU EP（`JM_SR_PROC=force` 可强制试） |
+| 下载 86MB 的 Qt wheel 只跑 12KB/s | 海外镜像（jaist）对国内很慢 | `wsl_fetch_android_wheels.sh` 优先清华/中科大/上交镜像，并带 `--speed-limit 200000 --speed-time 20`（低于 200KB/s 就换源） |
+
+### 10.3 模拟器上验证
+
+```bash
+# 1) 装（同 versionCode 覆盖安装，签名不变；不同 ABI 允许）
+adb install -r android/JMComic-<版本>-x86_64-debug.apk
+
+# 2) 确认真的是原生 x86_64，不是被 native bridge 翻译
+adb shell dumpsys package org.jmcomic.jmcomic | grep primaryCpuAbi
+#    期望：primaryCpuAbi=x86_64
+
+# 3) 启动并看应用自己的日志
+adb logcat -c && adb shell am start -n org.jmcomic.jmcomic/org.kivy.android.PythonActivity
+adb logcat -d | grep -iE "python|sr_qnn|Qt" | tail -40
+```
+
+应用内的启动自检写在 `<AppDataDir>/logs/<日期>.log` 与 `android_startup.log` 里；
+`main.py` 的 `DumpDiagnostics()` 会列出这几种关键信息，正好用来看 ABI 是否一致：
+
+```
+  libsr_qnn.so / libonnxruntime.so: <路径>      # 必须落在 .../lib/x86_64/
+  libplugins_imageformats_qwebp_*: ...          # 前缀匹配，后缀是实际 ABI
+  sr backend: CPU (ONNX Runtime)                # 模拟器上没有 HTP 是正常的
+```
+
+> 模拟器镜像建议用 x86_64 的 Google APIs 镜像（Android 14/15/16 都行，minSdk 是 34）。
+> 16KB page size 的镜像也能装：我们的原生库都由 NDK r26d 编出，按 4KB 对齐，
+> 系统在 16KB 页镜像上会兼容加载。
+
+### 10.4 不想动构建脚本时的手工路径
+
+三个开关就是全部：
+
+1. `pysidedeploy.spec` 的 `[buildozer] arch = x86_64`（`fill_deploy_spec.py --arch x86_64`）
+2. `buildozer.spec` 的 `android.archs = x86_64` 与 `android.add_libs_x86_64 = ...`
+   （`patch_buildozer_spec.py --abi x86_64 --libs libs/x86_64`）
+3. `libs/x86_64/` 里的原生库（Qt 插件从 x86_64 wheel 解、ORT 从普通 AAR 解、
+   `libsr_qnn*.so` 用 NDK 编）
+
+其余（源码、模型、清单、权限、图标）两种 ABI 完全共用。
+
+### 10.5 实测结果（Android 15 / x86_64 AVD，2026-10-18）
+
+APK：`JMComic-0.36-x86_64-debug.apk`（388MB，debug 签名，versionCode 103436 —— 与 arm64 同版本号，
+可以 `adb install -r` 直接覆盖安装，但两种 ABI 只能装一个）。设备侧：
+
+```
+$ adb shell dumpsys package org.jmcomic.jmcomic | grep primaryCpuAbi
+    primaryCpuAbi=x86_64                    # 原生 x86_64，不是 native bridge 翻译的
+$ aapt2 dump badging ... | grep native-code
+    native-code: 'x86_64'
+```
+
+启动自检（`files/android_startup.log`，由 `main.py` 的 `DumpDiagnostics()` 写出）：
+
+| 检查项 | 结果 |
+| --- | --- |
+| python / optimize | `3.14.8` / `sys.flags.optimize: 1` |
+| native 库目录 | `.../lib/x86_64`（不是 `lib/arm64`） |
+| `libsr_qnn.so` / `libonnxruntime.so` | 都在 `lib/x86_64/` 里找到 |
+| `libQnnHtp.so` | `NOT FOUND`（x86_64 预期） |
+| 7 个 Qt 插件 | 全部命中，后缀 `_x86_64` |
+| 图像格式 | jpeg / gif / webp / svg 全 OK |
+| pycryptodome | `backend=cffi`，`jmcomic decode_resp_data: True` |
+| 超分 | `loaded=True`、`models available: 31`、`backend: CPU (ONNX Runtime)`、`htp capable: False` |
+| jnius | 与 arm64 相同地失败（`cannot locate symbol "WebView_AndroidGetJNIEnv"`，已知且不影响功能） |
+
+网络与解密链（无需真实账号即可验证）——在模拟器上输入任意假账号点"登录"，服务端返回的密文被正确解开：
+
+```
+user_handler.py[line:243] - WARNING: 登陆失败！！！, code:401, text:
+{"code":401,"data":[],"errorMsg":"无效的用户名和\/或密码!"}
+```
+
+说明 x86_64 包里的 HTTPS 请求 → AES 解密 → JSON 解析 → UI 提示整条链路是通的
+（`android/shims/curl_cffi` 垫片在没有原生 curl_cffi 的情况下能正常发请求）。
+
+未验证的部分（诚实说明）：**没有用真实账号登录、没有跑超分推理、没有测下载/看图**。
+超分在模拟器上只能走 CPU EP，速度远低于真机 NPU，用它评估性能没有意义；
+TLS 指纹相关的线上问题也只能在真机上验证（见 §10.1）。
+
+
 
 
 

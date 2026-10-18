@@ -1,10 +1,17 @@
 #!/usr/bin/env bash
-. "$(dirname "${BASH_SOURCE[0]}")/env.sh"
 # 在 WSL Ubuntu 里完成 APK 打包
+#
+# 用法：
+#   bash android/tools/wsl_build_apk.sh                       # arm64-v8a(真机)
+#   bash android/tools/wsl_build_apk.sh --abi x86_64          # x86_64(模拟器)
+#   bash android/tools/wsl_build_apk.sh --version 0.37 --abi x86_64
+#
+# 一个 APK 只含一种 ABI：p4a 按 arch 分别构建 dist（build-arm64-v8a / build-x86_64），
+# 原生库也分目录（android/libs/<abi>）。切换 ABI 不会污染另一套已编译产物。
 #
 # 流程(实测)：
 #   0) 同步仓库 + 准备 app_src
-#   1) fill_deploy_spec.py 填入 wheel/ndk/sdk 绝对路径
+#   1) fill_deploy_spec.py 填入 wheel/ndk/sdk 绝对路径 + 目标 arch
 #   2) pyside6-android-deploy --init : 生成 buildozer.spec / Qt recipe / jars 后退出
 #      (注意：工具每次启动都会先 cleanup()，它会删掉 buildozer.spec，
 #       所以不能"再跑一次工具"，必须自己调 buildozer)
@@ -13,21 +20,24 @@
 #   5) 收集 APK
 #
 # buildozer 要求宿主 python <= 3.11(见 wsl_build_py311_src.sh)
-set -uo pipefail
-# --version X.Y / --version=X.Y 透传给 patch_buildozer_spec.py 覆盖默认
-# AppVersion(versionName)；versionCode 由 p4a 按版本号推导，只能往上改
-# (见 patch_buildozer_spec.py 注释)
 APP_VERSION=""
-take_value=""
-for arg in "$@"; do
-    if [ -n "$take_value" ]; then APP_VERSION="$arg"; take_value=""; continue; fi
-    case "$arg" in
-        --version=*) APP_VERSION="${arg#--version=}" ;;
-        --version)   take_value="1" ;;
-        *) echo "未知参数: $arg(用法: wsl_build_apk.sh [--version 0.3])"; exit 1 ;;
+ABI_ARG=""
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --version=*) APP_VERSION="${1#--version=}" ;;
+        --version)   APP_VERSION="${2:-}"; shift ;;
+        --abi=*)     ABI_ARG="${1#--abi=}" ;;
+        --abi)       ABI_ARG="${2:-}"; shift ;;
+        *) echo "未知参数: $1(用法: wsl_build_apk.sh [--version 0.3] [--abi arm64-v8a|x86_64])"
+           exit 1 ;;
     esac
+    shift
 done
+[ -n "$ABI_ARG" ] && export JM_ABI="$ABI_ARG"
+. "$(dirname "${BASH_SOURCE[0]}")/env.sh"
+set -uo pipefail
 [ -n "$APP_VERSION" ] && echo "APK 版本号: $APP_VERSION(覆盖默认)"
+echo "目标 ABI: $JM_ABI  (wheel=$JM_WHEEL_TAG, 原生库=libs/$JM_ABI, QNN=$JM_QNN)"
 WORK="${WORK:-"$JM_WORK"}"
 SRC="$WORK/src"
 ANDROID="$SRC/android"
@@ -76,6 +86,17 @@ echo "===== [$(date +%T)] 0.5 下载/校验 android wheel(CPython 3.14 + 原生 
 # 幂等：sha256 匹配就跳过；残片会被删掉重下(不要用 -C - 续传留下的半截文件)。
 bash "$JM_REPO/android/tools/wsl_fetch_android_wheels.sh" || { echo "[FATAL] android wheel 缺失"; exit 1; }
 
+# libs/<abi> 里的原生库：缺失时自动补 ORT（Qt wheel 里有平台标签，这里没有）。
+# libsr_qnn.so 要编译，只提示不自动跑（它要 1 分钟且会再同步一次仓库）。
+if [ ! -f "$ANDROID/libs/$JM_ABI/libonnxruntime.so" ]; then
+    echo "libs/$JM_ABI/libonnxruntime.so 缺失，自动获取："
+    bash "$JM_REPO/android/tools/wsl_fetch_ort.sh" || { echo "[FATAL] 获取 ONNX Runtime 失败"; exit 1; }
+fi
+if [ ! -f "$ANDROID/libs/$JM_ABI/libsr_qnn.so" ]; then
+    echo "[warn] libs/$JM_ABI/libsr_qnn.so 缺失 -> 超分后端不可用。先跑："
+    echo "       JM_ABI=$JM_ABI bash android/tools/wsl_build_native.sh"
+fi
+
 [ -x "$VPY" ] || { echo "缺少 venv311(先跑 wsl_build_py311_src.sh)"; exit 1; }
 echo "宿主 python: $($VPY --version)"
 if ! "$VPY" -c "import pythonforandroid" 2>/dev/null; then
@@ -85,11 +106,25 @@ fi
 # buildozer 会自己跑 "pip install --user ..."，在 venv 里会失败；这里把它的依赖预装齐
 "$VPY" -m pip install -q appdirs "colorama>=0.3.3" jinja2 "sh>=2,<3" meson ninja build toml packaging setuptools "wheel~=0.43.0" 2>&1 | tail -2
 
-PYSIDE_WHL=$(ls "$ANDROID/wheels/"pyside6-*-android_aarch64.whl 2>/dev/null | head -1)
-SHIBOKEN_WHL=$(ls "$ANDROID/wheels/"shiboken6-*-android_aarch64.whl 2>/dev/null | head -1)
+PYSIDE_WHL=$(ls "$ANDROID/wheels/"pyside6-*-"$JM_WHEEL_TAG".whl 2>/dev/null | head -1)
+SHIBOKEN_WHL=$(ls "$ANDROID/wheels/"shiboken6-*-"$JM_WHEEL_TAG".whl 2>/dev/null | head -1)
 echo "PySide6  wheel: $PYSIDE_WHL"
 echo "shiboken wheel: $SHIBOKEN_WHL"
-[ -n "$PYSIDE_WHL" ] && [ -n "$SHIBOKEN_WHL" ] || { echo "缺少 android wheel"; exit 1; }
+[ -n "$PYSIDE_WHL" ] && [ -n "$SHIBOKEN_WHL" ] || {
+    echo "缺少 $JM_ABI 的 android wheel（跑 android/tools/wsl_fetch_android_wheels.sh）"; exit 1; }
+
+# 把 wheel 复制到构建树里、**source.dir(android/) 之外**再用它。
+# 原因(踩过)：x86_64 冷构建进行到 PySide6 recipe 时，报
+#     FileNotFoundError: .../android/wheels/pyside6-...-android_x86_64.whl
+# 也就是构建过程中这个 90MB 文件被某个步骤删掉了(arm64 构建没触发)。
+# recipe 里记的是绝对路径，文件一没就整轮构建白跑。放到 $WORK/wheelhouse/<abi>/
+# 之后与 source.dir 无关，任何"清扫工程目录"的行为都碰不到它（与图标同思路）。
+WHEELHOUSE="$WORK/wheelhouse/$JM_ABI"
+mkdir -p "$WHEELHOUSE"
+cp -f "$PYSIDE_WHL" "$SHIBOKEN_WHL" "$WHEELHOUSE/" || { echo "复制 wheel 失败"; exit 1; }
+PYSIDE_WHL="$WHEELHOUSE/$(basename "$PYSIDE_WHL")"
+SHIBOKEN_WHL="$WHEELHOUSE/$(basename "$SHIBOKEN_WHL")"
+echo "wheelhouse: $WHEELHOUSE"
 # 防"旧 cp311 wheel 混进 3.14 构建"：pyside6/shiboken6 必须是 abi3(.so 绑
 # libpython3.14.so)。wheels 目录里不该再有非 abi3 版(见 wsl_fetch_android_wheels.sh
 # 的归档逻辑)—— 有就说明有人手动放了旧 wheel 回来。
@@ -104,7 +139,18 @@ echo "===== [$(date +%T)] 1. 填 pysidedeploy.spec ====="
 cd "$ANDROID"
 "$VPY" "$ANDROID/tools/fill_deploy_spec.py" "$ANDROID/pysidedeploy.spec" \
     --wheel-pyside "$PYSIDE_WHL" --wheel-shiboken "$SHIBOKEN_WHL" \
+    --arch "$JM_ARCH_NAME" \
     --ndk-path "$NDK" --sdk-path "$SDK" || { echo "spec 写入失败"; exit 1; }
+
+# deployment/ 里缓存着上一次生成的 PySide6 / shiboken6 recipe，recipe 内部**写死了
+# 解包哪个 wheel**。切换 ABI 后如果继续复用，p4a 会把 arm64 的 Qt 库当 x86_64 的装进
+# APK（链接期才炸）。所以目标 wheel 不在 recipe 里时就强制重新生成。
+DEPLOY_RECIPE="$ANDROID/deployment/recipes/PySide6/__init__.py"
+if [ -f "$DEPLOY_RECIPE" ] && ! grep -q "$(basename "$PYSIDE_WHL")" "$DEPLOY_RECIPE"; then
+    echo "deployment/recipes 指向的不是 $JM_ABI 的 wheel，重新生成:"
+    grep -m2 -o '[a-z0-9_]*-android_[a-z0-9_]*\.whl' "$DEPLOY_RECIPE" || true
+    rm -rf "$ANDROID/deployment"
+fi
 
 echo "===== [$(date +%T)] 2. 阶段1：生成 buildozer.spec / recipe / jars(--init) ====="
 # --init 会 rmtree(.buildozer)，先把已编译产物移出去(下一步 2.5 再搬回)
@@ -127,7 +173,7 @@ bash "$JM_REPO/android/tools/wsl_restore_build_cache.sh" || true
 
 echo "===== [$(date +%T)] 3. 阶段2：补丁 buildozer.spec ====="
 # 先补 Qt 插件(缺 qsvg -> 主题 svg 图标/设置交互框全空白；缺 qsqlite -> QtSql 全废)
-# 插件放进 libs/arm64-v8a 后由 patch_buildozer_spec.py 自动并入 android.add_libs_arm64_v8a
+# 插件放进 libs/$JM_ABI 后由 patch_buildozer_spec.py 并入 android.add_libs_<abi>
 bash "$JM_REPO/android/tools/wsl_install_qt_plugins.sh"
 
 # 可选的厂商原生库(android/vendor_libs/*.so)。
@@ -135,8 +181,9 @@ bash "$JM_REPO/android/tools/wsl_install_qt_plugins.sh"
 # public.libraries.txt，应用命名空间里就找不到它，HTP 设备建不起来 —— 表现是
 # "QNN 会话能建但一个节点都不接"。把 `adb pull /vendor/lib64/libcdsprpc.so` 放进
 # android/vendor_libs/ 重新打包，它就会随 app 的 lib 目录一起加载。
-if compgen -G "$ANDROID/vendor_libs/*.so" >/dev/null; then
-    cp -f "$ANDROID/vendor_libs/"*.so "$SRC/android/libs/arm64-v8a/" 2>/dev/null || true
+# x86_64 模拟器没有 QNN，这些 arm64 厂商库一律不并（并进去只会白占体积）。
+if [ "$JM_QNN" = "1" ] && compgen -G "$ANDROID/vendor_libs/*.so" >/dev/null; then
+    cp -f "$ANDROID/vendor_libs/"*.so "$SRC/android/libs/$JM_ABI/" 2>/dev/null || true
     echo "已并入厂商库: $(ls "$ANDROID/vendor_libs" | tr '\n' ' ')"
 fi
 
@@ -151,11 +198,11 @@ cp -f "$SRC/res/icon/logo_round.png" "$ICON"
 echo "应用图标: $ICON ($(stat -c %s "$ICON") 字节, $(md5sum "$ICON" | cut -d' ' -f1))"
 
 "$VPY" "$ANDROID/tools/patch_buildozer_spec.py" "$ANDROID/buildozer.spec" \
-    --p4a-dir "$P4A" --recipes "$ANDROID/recipes" \
-    --libs "libs/arm64-v8a" --icon "$ICON" --models "$ANDROID/sr_qnn/models" \
+    --p4a-dir "$P4A" --recipes "$ANDROID/recipes" --abi "$JM_ABI" \
+    --libs "libs/$JM_ABI" --icon "$ICON" --models "$ANDROID/sr_qnn/models" \
     ${APP_VERSION:+--version "$APP_VERSION"} 2>&1 | tail -30
 echo "--- 关键配置 ---"
-grep -E '^(requirements|version|source\.include_exts|android\.api|android\.minapi|android\.add_libs_arm64_v8a|android\.permissions|android\.add_assets|p4a\.source_dir|p4a\.local_recipes|android\.ndk_path|android\.sdk_path|package\.name|package\.domain|android\.archs|icon\.filename)' "$ANDROID/buildozer.spec"
+grep -E '^(requirements|version|source\.include_exts|android\.api|android\.minapi|android\.add_libs_|android\.permissions|android\.add_assets|p4a\.source_dir|p4a\.local_recipes|android\.ndk_path|android\.sdk_path|package\.name|package\.domain|android\.archs|icon\.filename)' "$ANDROID/buildozer.spec"
 
 echo "===== [$(date +%T)] 3.5 修正 p4a bootstrap 的 PYTHONOPTIMIZE ==="
 # Qt bootstrap 硬编码 PYTHONOPTIMIZE=2 -> pycryptodome 放弃 cffi 后端、回落到在 Android 上
@@ -170,7 +217,7 @@ echo "===== [$(date +%T)] 3.6 SAF 桥：Java 源 + manifest 组件 ====="
 #   1) 把 android/java/org/jmcomic/*.java 拷进 dist 的 src/main/java(编译前就位)
 #   2) 组件写进 p4a 的 manifest **模板**(p4a 每次构建都按模板重新渲染，
 #      只补 dists 里渲染出来的文件下次就被覆盖了)
-DIST="$ANDROID/.buildozer/android/platform/build-arm64-v8a/dists/JMComic"
+DIST="$ANDROID/.buildozer/android/platform/build-$JM_ABI/dists/JMComic"
 "$VPY" "$JM_REPO/android/tools/patch_android_manifest.py" \
     --template "$P4A/pythonforandroid/bootstraps/qt/build/templates/AndroidManifest.tmpl.xml" \
     --java "$ANDROID/java" \
@@ -181,6 +228,10 @@ DIST="$ANDROID/.buildozer/android/platform/build-arm64-v8a/dists/JMComic"
     echo "[warn] SAF 组件/Java 源补丁有缺失项(首次构建还没有 dists 目录时属正常)"
 
 echo "===== [$(date +%T)] 4. 阶段3：buildozer android debug(首次会编译 python3/openssl/libffi 等) ====="
+# buildozer 1.6.0 的 add_libs 映射表里没有 x86_64（只有 arm64-v8a），不补的话
+# android.add_libs_x86_64 会被完全忽略 -> APK 里没有我们自己的 .so，且无任何报错。
+bash "$JM_REPO/android/tools/wsl_patch_buildozer_addlibs.sh" || {
+    echo "[FATAL] buildozer add_libs 补丁失败，x86_64 的原生库进不了 APK"; exit 1; }
 # 每次构建前修正 p4a recipe 里本机不可用的下载地址(openssl.org 证书问题 / github 被墙)
 bash "$JM_REPO/android/tools/wsl_fix_recipe_urls.sh"
 # 目标 CPython 切 3.14 + cffi 升 2.1.1(curl_cffi 0.16.3 的 _wrapper.abi3.so NEEDED

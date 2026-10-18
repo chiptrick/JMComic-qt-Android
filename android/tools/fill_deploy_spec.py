@@ -32,6 +32,9 @@ def Main():
     parser.add_argument("--wheel-shiboken", required=True)
     parser.add_argument("--ndk-path", default="")
     parser.add_argument("--sdk-path", default="")
+    parser.add_argument("--arch", default="", choices=("", "aarch64", "armv7a", "i686", "x86_64"),
+                        help="目标架构(pysidedeploy 自己的叫法：aarch64/x86_64/...)。"
+                             "不填则保留 spec 里已有的值")
     args = parser.parse_args()
 
     path = pathlib.Path(args.spec)
@@ -50,6 +53,12 @@ def Main():
         changed.append("ndk_path")
     if args.sdk_path and SetKey(lines, "buildozer", "sdk_path", args.sdk_path):
         changed.append("sdk_path")
+    # [buildozer] arch 是 pyside6-android-deploy 选架构的唯一入口：
+    # 它会被平台映射成 android.archs(aarch64 -> arm64-v8a)，并决定从 wheel 里取
+    # 哪一套 Qt 库(libQt6Core_<arch>.so)。填错 = 拿 arm64 的 Qt 库去配 x86_64 的
+    # python，链接期才会炸。
+    if args.arch and SetKey(lines, "buildozer", "arch", args.arch):
+        changed.append("arch")
 
     text = "\n".join(lines) + "\n"
     sections = [line.strip()[1:-1].lower() for line in lines
