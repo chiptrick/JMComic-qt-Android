@@ -158,8 +158,6 @@ android/.buildozer/
 android/bin/
 android/*.apk
 android/*.aab
-# 超分模型(onnx 体积大，共 218MB；导出工具链见 android/tools/models_stage/)
-android/sr_qnn/models/*.onnx
 # ---- 仓库卫生(发布用) ----
 # WorkBuddy 项目数据(记忆/日志/临时文件)，与业务代码无关
 .workbuddy/
