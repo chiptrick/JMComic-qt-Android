@@ -59,17 +59,20 @@ jobs:
           done
           if [ "$fail" -ne 0 ]; then exit 1; fi
 
+      # 一律 `python -u`：stdout 走管道时是块缓冲的，卡住/崩溃时日志里会什么都看不到
+      # （吃过大亏：一次挂死只留下两行 Qt 的 stderr，谁也看不出停在哪一步）
       - name: C++ ↔ ctypes 接口一致性
-        run: python android/tools/check_interfaces.py
+        run: python -u android/tools/check_interfaces.py
 
       - name: Android 竖屏冒烟（不联网）
-        run: python android/tools/smoke_test_android.py
+        run: python -u android/tools/smoke_test_android.py
 
       - name: 接口解密链回归（AES / ctypes 后端）
-        run: python android/tools/host_test_crypto_android.py
+        run: python -u android/tools/host_test_crypto_android.py
 
       - name: 图片解码链路回归（分割还原 / QImage / 线程）
-        run: python android/tools/host_test_image_pipeline.py
+        run: python -u android/tools/host_test_image_pipeline.py
 
+      # timeout 是保险：真卡住时宁可这一步红掉，也不要把整条 job 拖到 6 小时超时
       - name: 应用内文件选择器回归
-        run: python android/tools/host_test_file_dialog.py
+        run: timeout 600 python -u android/tools/host_test_file_dialog.py
