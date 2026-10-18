@@ -1,6 +1,6 @@
 import time
 
-from PySide6.QtCore import Qt, QEvent, QPoint, Signal, QRect, QFile
+from PySide6.QtCore import Qt, QEvent, QPoint, QRect, QRectF, Signal, QFile
 from PySide6.QtGui import QPainter, QFont, QPixmap, QFontMetrics, QWheelEvent, QSurfaceFormat
 from PySide6.QtOpenGLWidgets import QOpenGLWidget
 from PySide6.QtWidgets import QGraphicsView, QFrame, QGraphicsItem, QGraphicsScene, \
@@ -402,12 +402,16 @@ class ReadGraphicsView(QGraphicsView, SmoothScroll):
                     subPos = (endPos - self.startPos)
                     if abs(subPos.x()) <= 20:
                         curPos = endPos - QtOwner().owner.pos()
+                        # 放大状态下**不翻页**：手指想平移时常常只滑了十几像素
+                        # (还在 20px 的"点按"判定里)，一松手就翻页会把当前视角丢掉。
+                        # 菜单(上半屏)和半页滚动照旧。
+                        zoomed = self.frame.scaleCnt != 0
 
                         # print(curPos, endPos, QtOwner().owner.pos(), self.width(), self.height())
                         if curPos.x() <= self.width() // 3:
                             if curPos.y() <= self.height() // 2:
                                 self.readImg.ShowAndCloseTool()
-                            else:
+                            elif not zoomed:
                                 self.ScrollLastPage()
                         elif curPos.x() <= self.width() // 3 * 2:
                             if curPos.y() <= self.height() // 2:
@@ -417,7 +421,7 @@ class ReadGraphicsView(QGraphicsView, SmoothScroll):
                         else:
                             if curPos.y() <= self.height() // 2:
                                 self.readImg.ShowAndCloseTool()
-                            else:
+                            elif not zoomed:
                                 self.ScrollNextPage()
         return False
 
@@ -538,15 +542,23 @@ class ReadGraphicsView(QGraphicsView, SmoothScroll):
             self.graphicsScene.setSceneRect(0, 0, self.width(), maxSize)
             self.GetScrollBar().setMaximum(maxSize)
         else:
-            self.graphicsScene.setSceneRect(0, 0, self.width(), max(self.height(),
-                                                                    self.graphicsItem1.pixmap().height() // self.graphicsItem1.pixmap().devicePixelRatio()))
-            pictureHeight = self.graphicsItem1.pixmap().height() // self.graphicsItem1.pixmap().devicePixelRatio()
-            pictureWight= self.graphicsItem1.pixmap().width() // self.graphicsItem1.pixmap().devicePixelRatio()
-            self.verticalScrollBar().setMaximum(max(0, pictureHeight - self.height()))
-            # if self.scaleCnt > 0:
-            #     self.horizontalScrollBar().setMaximum(max(0, self.width()*0.1*self.scaleCnt))
-            # else:
-            #     self.horizontalScrollBar().setMaximum(0)
+            # 单页/双页/等宽：场景矩形按**图元实际范围**算，横向滚动范围也要给。
+            #
+            # 放大后图片比视口大，而且是**居中摆放**的(GetReadToPos 返回
+            # maxWidth//2 - toWidth//2，比视口宽时 x 是负数)，所以场景矩形要
+            # 从负 x 起算、宽度取整张图，否则横向滚动范围算出来是 0 ——
+            # 放大后根本没法左右查看(真机现象："双指缩放后左右滑动只会翻页")。
+            # 这一段以前只设了垂直方向(横向那几行是被注释掉的)，一直没生效。
+            rect = self.graphicsScene.itemsBoundingRect()
+            if rect.isNull() or rect.isEmpty():
+                rect = QRectF(0, 0, max(1, self.width()), max(1, self.height()))
+            left = min(0.0, rect.left())
+            top = min(0.0, rect.top())
+            width = max(float(self.width()), float(rect.width()))
+            height = max(float(self.height()), float(rect.height()))
+            self.graphicsScene.setSceneRect(left, top, width, height)
+            self.verticalScrollBar().setMaximum(max(0, int(round(height)) - self.height()))
+            self.horizontalScrollBar().setMaximum(max(0, int(round(width)) - self.width()))
         self.ScaleResetVer()
 
     def ResetLabelSize(self, size):
@@ -955,21 +967,31 @@ class ReadGraphicsView(QGraphicsView, SmoothScroll):
     # 缩放
     def ChangeScale(self, scale=1):
         print("change scale, mode={}, scale={}, change:={}".format(self.initReadMode, self.frame.scaleCnt, scale))
-        self.readImg.ShowImgAll()
-        return
         if not ReadMode.isScroll(self.initReadMode):
-            # 非滚动模式，通过QPixmap进行缩放
+            # 单页/双页/等宽：通过 QPixmap 缩放(整页重排)
             self.readImg.ShowImgAll()
             return
 
+        # 滚动模式：缩放走**视图变换**(Scale)。
+        # 不能走 ShowImgAll：SetPixIem 里的 GetReadScale 在滚动模式下会把图片
+        # 宽/高夹在视口尺寸上(UpDown 夹宽 min(maxWidth,...)、左右滚动夹高
+        # min(maxHeight,...))，scaleCnt 再大图片也一点都不变大 —— 真机现象就是
+        # 滚动模式(上下/左右/右左)下"双指缩放/缩放滑块"整体没反应。
+        # (ca41d1d 之前这里本来就是走 Scale 的，被那次更新改成 ShowImgAll 后失效)
         if self.scaleCnt == 0:
             return
-
-        for i in range(abs(scale)):
-            if scale > 0:
-                self.Scale(1.1)
-            else:
-                self.Scale(0.9)
+        try:
+            current = self.transform().m11()
+        except Exception:
+            current = 1.0
+        if current <= 0.01:
+            return
+        # 直接算目标比例(而不是原来那样 1.1 连乘 abs(scale) 次)：
+        # scaleCnt=5 就是 150%，滑到多少倍就缩放多少倍
+        ratio = (1 + self.scaleCnt * 0.1) / current
+        if abs(ratio - 1.0) < 0.01:
+            return
+        self.Scale(ratio)
         # self.setSceneRect(-self.width()//2, -self.height()//2, self.width(), self.height())
         # self.resetImg = True
         # self.ReloadImg()

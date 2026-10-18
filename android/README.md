@@ -797,6 +797,78 @@ adb shell "run-as org.jmcomic.jmcomic cat files/saf/outbox/x.json"      # {"ok":
 
 ---
 
+### 3.13 第十轮：滚动模式缩放整体失效 + 单页放大后无法平移
+
+两个都是"缩放"这条链路上的老问题，都是真机 + 读代码定位的。
+
+**① 上下/左右/右左滚动模式下双指缩放（和缩放滑块）完全没反应**
+
+`read_graphics.ChangeScale()` 里有一段 `self.readImg.ShowImgAll(); return`（`ca41d1d`
+那次更新加的），把**所有模式**都改成走 `ShowImgAll` 了。而滚动模式里重排走的是
+`SetPixIem -> GetReadScale`，那个函数对滚动模式**把尺寸夹在视口上**：
+
+```python
+ReadMode.UpDown:          toScaleW = min(maxWidth, maxWidth * scale)   # 夹宽
+ReadMode.LeftRightScroll: toScaleH = min(maxHeight, maxHeight * scale) # 夹高
+```
+
+宽度/高度一封顶，`scaleCnt` 再大图片都一点不变 → 缩放看起来"完全不生效"。
+单页/双页不夹（`toScaleW = maxWidth * scale`），所以那边一直是好的 ——
+正好对应"只有滚动模式不能双指缩放"。
+
+修法：滚动模式恢复走**视图变换**（`Scale(ratio)`，`ca41d1d` 之前就是这么做的），
+比例直接算 `target / 当前 m11`（原来是 1.1 连乘 `abs(scale)` 次，150% 会变成 161%）：
+
+```python
+ratio = (1 + self.scaleCnt * 0.1) / self.transform().m11()
+self.Scale(ratio)
+```
+
+**② 双指缩放"不启动"：两根手指落在两条触摸序列里**
+
+Qt 的多点触摸是**每个触点一个目标控件**的。滚动模式下相邻页是
+`InitAllQLabel` 建的 `QGraphicsProxyWidget` 里嵌的**真实子窗口**（和视口一样大），
+手指常常一根落在图元上、一根落在相邻页的窗口上 —— 两条**独立序列**，每条只有
+一个点。只判断"这次事件里有几个点"的过滤器永远等不到两个点。
+单页模式整页就是一个大窗口、两根手指都在它身上，所以那边一直好使。
+
+修法：`_ReaderPinch` 把各条序列的触点按 `QEventPoint.id()` 累积到一张表里，
+够两个就进缩放；距离用**全局坐标**（不同控件的本地坐标不可比），合成鼠标事件时
+再从全局坐标 `mapFromGlobal` 换到视口坐标。诊断日志会打印每个触点下面的控件：
+
+```
+reader pinch: 开始双指缩放(base=100%, 模式=ReadMode.LeftRightScroll, 距离=612, 触点数=2)
+reader pinch: 触点 3 在(420,1500) 下面 = ReadOpenGL
+reader pinch: 触点 4 在(980,1500) 下面 = QLabel        <- 落在相邻页的嵌入窗口上
+```
+
+**③ 单页/双页：放大后左右滑动只会翻页，看不到图片其它部分**
+
+两个原因叠加：
+
+* `ResetMaxNum()` 的页面模式分支**只设了垂直滚动范围**，横向那几行是被注释掉的
+  → 放大后 `hScrollBar.maximum` 一直是 0；
+* `_ReaderDrag._Scroll()` 在非滚动模式里"到边界就翻页"，`value == maximum == 0`
+  永远成立 → 任何一次横滑都是翻页。而且它**只吃横向位移**，纵向 dy 直接丢掉，
+  所以放大后既不能左右看、也不能上下看。
+
+修法：`ResetMaxNum` 用 `itemsBoundingRect()` 算场景矩形（放大后图片是**居中**摆放
+的，左边会伸出负 x，所以 `setSceneRect` 要从负 x 起算），纵向/横向范围一起给；
+拖动在"已放大"时改走 `_Pan`（两轴都滚），**只有 100% 时**才保留"滑到边界翻页"；
+另外放大状态下点按不再翻页（想平移时常常只滑十几像素，还在 20px 的"点按"判定里，
+一松手就翻页会把当前视角丢掉）。
+
+**④ 预览期间不许"滚动换页"**
+
+双指缩放的过程是 `QGraphicsView.scale()` 预览（只改绘制变换，不重排）。但滚动模式里
+`view.scale()` 会让 `QGraphicsView::updateScrollBars` 去改滚动条的值，`ReadScroll`
+的动画结束后 `OnValueChange` 会**按滚动位置换页**（`ReloadImg` 整页重排）——
+手指还在屏幕上，手感直接崩。所以预览期间给视图挂 `_jmPinchPreview`，
+`ReadScroll.OnValueChange` 看到就跳过换页逻辑。
+
+
+---
+
 
 ## 4. Waifu2x on 高通 NPU
 

@@ -1,6 +1,6 @@
 # coding:utf-8
 """ 看图界面（工具菜单整宽 + 看图区拖动滚动 + 双指缩放） """
-from PySide6.QtCore import QEvent, QObject, QPointF, Qt, QTimer
+from PySide6.QtCore import QEvent, QObject, QPoint, QPointF, Qt, QTimer
 from PySide6.QtGui import QEventPoint, QMouseEvent
 from PySide6.QtWidgets import QApplication
 from tools.log import Log
@@ -72,6 +72,8 @@ class _ReaderDrag(QObject):
         self._pressPos = None
         self._lastPos = None
         self._carry = 0.0
+        self._carryX = 0.0
+        self._carryY = 0.0
         self.Drags = 0
         self.Scrolled = 0
         self.Cancels = 0
@@ -102,6 +104,8 @@ class _ReaderDrag(QObject):
                 self._pressPos = _EventLocalPos(event)
                 self._lastPos = self._pressPos
                 self._carry = 0.0
+                self._carryX = 0.0
+                self._carryY = 0.0
                 return False
             if eventType == QEvent.Type.MouseButtonRelease:
                 dragging = self._dragging
@@ -135,33 +139,78 @@ class _ReaderDrag(QObject):
         view = self._view
         try:
             from view.read.read_enum import ReadMode
-            stripModel = view.qtTool.stripModel
-            upDown = ReadMode.isUpDown(view.initReadMode)
+            initMode = view.initReadMode
+            upDown = ReadMode.isUpDown(initMode)
+            if ReadMode.isScroll(initMode):
+                # 滚动模式：只滚当前轴(原来就这样)
+                delta = -dy if upDown else -dx
+                self._carry += delta
+                step = int(self._carry)
+                if step == 0:
+                    return
+                self._carry -= step
+                if upDown:
+                    view.vScrollBar.scrollValue(step)
+                elif initMode == ReadMode.RightLeftScroll2:
+                    view.hScrollBar.scrollValue(-step)
+                else:
+                    view.hScrollBar.scrollValue(step)
+                self.Scrolled += 1
+                self.LastDelta = step
+                return
+
+            # 单页/双页：放大后**先平移**看图的其它部分(见 _Pan 的注释)
+            try:
+                zoomed = int(getattr(view, "scaleCnt", 0) or 0) != 0
+            except Exception:
+                zoomed = False
+            if zoomed:
+                self._Pan(dx, dy)
+                return
+
+            # 没放大：滑到边界翻页(和滚轮一致)
+            bar = view.vScrollBar if upDown else view.hScrollBar
             delta = -dy if upDown else -dx
             self._carry += delta
             step = int(self._carry)
             if step == 0:
                 return
             self._carry -= step
-            if not ReadMode.isScroll(stripModel):
-                # 非滚动模式：到边界就翻页(和滚轮一致)
-                bar = view.vScrollBar if upDown else view.hScrollBar
-                if step > 0 and abs(bar.value() - bar.maximum()) <= 5:
-                    view.qtTool.NextPage()
-                    return
-                if step < 0 and bar.value() <= 5:
-                    view.qtTool.LastPage()
-                    return
-            if upDown:
-                view.vScrollBar.scrollValue(step)
-            elif view.initReadMode == ReadMode.RightLeftScroll2:
-                view.hScrollBar.scrollValue(-step)
-            else:
-                view.hScrollBar.scrollValue(step)
+            if step > 0 and abs(bar.value() - bar.maximum()) <= 5:
+                view.qtTool.NextPage()
+                return
+            if step < 0 and bar.value() <= 5:
+                view.qtTool.LastPage()
+                return
             self.Scrolled += 1
             self.LastDelta = step
         except Exception as es:
             Log.Error(es)
+        return
+
+    def _Pan(self, dx, dy):
+        """ 单页/双页**放大后**的双向平移
+
+        以前这里只吃横向位移(纵向 dy 直接丢掉)，横向又因为放大后
+        hScrollBar.maximum 一直是 0(ResetMaxNum 里那几行被注释掉了) 而永远
+        被判成"在边界" -> 一滑就翻页。真机现象就是"双指缩放后左右滑动切页，
+        没法看放大后的其它部分"。
+        """
+        view = self._view
+        self._carryX += -dx
+        stepX = int(self._carryX)
+        if stepX:
+            self._carryX -= stepX
+            view.hScrollBar.scrollValue(stepX)
+            self.Scrolled += 1
+            self.LastDelta = stepX
+        self._carryY += -dy
+        stepY = int(self._carryY)
+        if stepY:
+            self._carryY -= stepY
+            view.vScrollBar.scrollValue(stepY)
+            self.Scrolled += 1
+            self.LastDelta = stepY
         return
 
 
@@ -188,54 +237,32 @@ def InstallReaderDrag(readView):
 # 双指缩放
 # ---------------------------------------------------------------------------
 #
-# 真机现象："看图页面无法通过双指放大缩小"。
-#
-# 根因：整条看图链路都建立在**鼠标事件**上 ——
-#   * 拖动滚动：`_ReaderDrag`(`_ReaderDrag` 的 MouseButtonPress/MouseMove/Release)
-#   * 点按三分区翻页/弹菜单：`read_graphics.eventFilter` 里的 GraphicsSceneMousePress/Release
+# 整条看图链路都建立在**鼠标事件**上 ——
+#   * 拖动滚动：_ReaderDrag(MouseButtonPress/Move/Release)
+#   * 点按三分区翻页/弹菜单：read_graphics.eventFilter 里的 GraphicsSceneMousePress/Release
 # 而 Qt 只有在控件**不**接受触摸事件时才把触摸合成为鼠标事件，所以这里一旦
-# `setAttribute(WA_AcceptTouchEvents)`，Qt 就不再合成鼠标事件，上面两套逻辑会一起失效。
+# setAttribute(WA_AcceptTouchEvents)，上面两套逻辑会一起失效。
 #
-# 因此本过滤器把"一根手指"的触摸序列**原样合成为鼠标事件**再发给视口(拖动/点按语义
-# 一点都不变)，只把"两根手指"拦下来做缩放。这样：
-#   * 1 指：与改造前完全一样(拖动滚动、点按翻页)
-#   * 2 指：按两指距离比例缩放，落到和菜单"缩放"同一个入口(ScalePicture2)
+# 因此本过滤器把"一根手指"的触摸序列**原样合成为鼠标事件**再发给视口(拖动/点按
+# 语义一点都不变)，只把"两根手指"拦下来做缩放。
 #
-# 1 指 -> 2 指(用户先落一根手指、再落第二根)时，按下事件已经发出去了，
-# 如果直接松手就会被场景当成"点按"(误翻页/误弹菜单)。所以先合成一次
-# PinchCancelPx 像素的移动再松手：拖动阈值(TouchSlopPx)与场景点按的 20px 判定
-# 都会把它当拖动，那一下就不会被当成点按(屏幕上只偏移 25px，松手后可忽略)。
+# **为什么要按 QEventPoint.id() 合并**：Qt 的多点触摸是"每个触点一个目标控件"的，
+# 手指落在哪个窗口上，那个点就走哪条序列。看图区里滚动模式下**相邻页**是
+# QGraphicsProxyWidget 里嵌的**真实子窗口**(InitAllQLabel 把它们建成和视口一样大)，
+# 两根手指常常一根落在图元上、一根落在相邻页的窗口上 —— 那是**两条独立的触摸
+# 序列**，每条只有一个点。只看"这次事件里有几个点"永远等不到两个点，双指缩放
+# 就完全不启动(真机现象：上下/左右/右左滚动模式下无法双指缩放；单页模式整页
+# 就是一个大窗口、两根手指都落在它身上，所以那边好使)。
+# 所以这里把各条序列的触点按 id 累积起来，够两个就进缩放。
+#
+# 1 指 -> 2 指 时按下事件已经发出去了：直接松手会被场景当成"点按"(翻页/弹菜单)，
+# 所以走 _ReaderDrag.CancelPress() 作废那次按下(release 被吃掉，不滚动也不翻页)。
 
 # 缩放的上下限(百分比，与工具栏滑块范围一致)
 PinchMinPercent = 20
 PinchMaxPercent = 500
 # 抬手时百分比变化小于这个值就当没动(1px 的手指抖动不值得重排整页)
 PinchStepPercent = 5
-
-
-def _TouchPoints(event):
-    """ 取出这次触摸事件里**还按着**的点 [(本地坐标, 全局坐标), ...] """
-    points = []
-    try:
-        for point in event.points():
-            try:
-                if point.state() == QEventPoint.State.Released:
-                    continue
-            except Exception:
-                pass
-            points.append((point.position(), point.globalPosition()))
-    except Exception:
-        pass
-    return points
-
-
-def _Distance(points):
-    """ 两指距离(多于两点时取前两点) """
-    if len(points) < 2:
-        return 0.0
-    dx = points[1][0].x() - points[0][0].x()
-    dy = points[1][0].y() - points[0][0].y()
-    return (dx * dx + dy * dy) ** 0.5
 
 
 class _ReaderPinch(QObject):
@@ -246,8 +273,10 @@ class _ReaderPinch(QObject):
         self._view = view
         self._readView = readView
         self._target = None
-        self._mouseDown = False
-        self._lastPos = None
+        # {触点id: (本地坐标, 全局坐标)} —— 各条触摸序列按 id 合并(见模块注释)
+        self._points = {}
+        self._primary = None        # 正在驱动鼠标语义的那个触点
+        self._swallow = False       # 缩放之后剩下的手指直接吞掉(否则松手变点按)
         self._pinching = False
         self._startDist = 0.0
         self._basePercent = 100
@@ -258,115 +287,148 @@ class _ReaderPinch(QObject):
         self.LastPercent = 100
 
     def Reset(self):
-        self._mouseDown = False
-        self._lastPos = None
+        # 先撤掉预览用的视图变换(被打断时可能停在半缩放状态)
+        self.ResetPreview()
+        self._points.clear()
+        self._primary = None
+        self._swallow = False
         self._pinching = False
         self._startDist = 0.0
         self._ratio = 1.0
-        self._liveRatio = 1.0
 
     # -- 事件 --------------------------------------------------------------
     def eventFilter(self, obj, event):
         try:
             eventType = event.type()
             if eventType == QEvent.Type.TouchBegin:
-                return self.OnBegin(event)
+                return self.OnTouch(event, 0)
             if eventType == QEvent.Type.TouchUpdate:
-                return self.OnUpdate(event)
-            if eventType in (QEvent.Type.TouchEnd, QEvent.Type.TouchCancel):
-                return self.OnEnd(event, eventType == QEvent.Type.TouchCancel)
+                return self.OnTouch(event, 1)
+            if eventType == QEvent.Type.TouchEnd:
+                return self.OnTouch(event, 2)
+            if eventType == QEvent.Type.TouchCancel:
+                return self.OnTouch(event, 3)
         except Exception as es:
             Log.Error(es)
             self.Reset()
         return False
 
-    def OnBegin(self, event):
-        points = _TouchPoints(event)
-        self.Touches += 1
-        if len(points) >= 2:
-            self.StartPinch(points)
+    def OnTouch(self, event, kind):
+        if kind == 3:
+            # 被打断(来电/系统手势)：这次按下作废，预览撤掉
+            self.CancelMouse()
+            self.Reset()
             return True
-        if self._pinching and points:
-            # 缩放中途又落了一根手指：继续缩放，别退回鼠标语义
-            return True
-        if len(points) == 1:
-            self._mouseDown = True
-            self._lastPos = points[0][0]
-            self._Send(QEvent.Type.MouseButtonPress, points[0])
-            return True
-        return False
-
-    def OnUpdate(self, event):
-        points = _TouchPoints(event)
-        if len(points) >= 2:
-            if not self._pinching:
-                self.StartPinch(points)
-            else:
-                self.ApplyPinch(points)
-            return True
-        if self._pinching:
-            return True
-        if self._mouseDown and points:
-            self._lastPos = points[0][0]
-            self._Send(QEvent.Type.MouseMove, points[0])
-            return True
-        return False
-
-    def OnEnd(self, event, cancelled):
-        points = _TouchPoints(event)
-        pinching = self._pinching
-        if self._mouseDown and not cancelled:
-            pos = points[0] if points else None
-            if pos is None and self._lastPos is not None:
-                pos = (self._lastPos, self._lastPos)
-            if pos is not None:
-                self._Send(QEvent.Type.MouseButtonRelease, pos)
-        if cancelled and self._mouseDown:
-            self._Send(QEvent.Type.MouseButtonRelease,
-                       (self._lastPos or QPointF(0, 0), self._lastPos or QPointF(0, 0)))
-        if pinching and not cancelled:
-            # 抬手才真正应用缩放(见 ApplyPinch 的注释)
-            self.FinishPinch()
-        elif pinching:
-            # 被打断(来电/系统手势)：把预览缩放撤掉，别留在半缩放状态
-            self.ResetPreview()
-        self.Reset()
+        released = self._Merge(event)
+        if kind == 0:
+            self.Touches += 1
+        for pid, glob in released:
+            if pid == self._primary:
+                # 主手指松开：给这次"按下"收尾(场景靠它判点按)
+                self._Send(QEvent.Type.MouseButtonRelease, glob)
+                self._primary = None
+        self._Sync()
         return True
 
+    def _Merge(self, event):
+        """ 把这次事件里的触点合并进活动表，返回刚松开的 [(id, 全局坐标)] """
+        released = []
+        try:
+            points = event.points()
+        except Exception:
+            return released
+        for point in points:
+            try:
+                pid = point.id()
+                state = point.state()
+                glob = point.globalPosition()
+                local = point.position()
+            except Exception:
+                continue
+            if state == QEventPoint.State.Released:
+                if pid in self._points:
+                    released.append((pid, glob))
+                    del self._points[pid]
+            else:
+                self._points[pid] = (local, glob)
+        return released
+
+    def _Sync(self):
+        """ 按当前活动触点数同步"鼠标/缩放"状态 """
+        count = len(self._points)
+        if count >= 2:
+            if not self._pinching:
+                self.StartPinch()
+            else:
+                self.ApplyPinch()
+            return
+        if self._pinching:
+            # 2 指 -> 1 指(或直接 0 指)：结算缩放。
+            # 剩下的手指要吞掉 —— 否则它会被当成新的按下，松手就变"点按"翻页
+            self.FinishPinch()
+            self._swallow = count > 0
+            if count == 0:
+                self._primary = None
+            return
+        if count == 1:
+            if self._swallow:
+                return
+            pid = next(iter(self._points))
+            if self._primary is None:
+                self._primary = pid
+                self._Send(QEvent.Type.MouseButtonPress, self._points[pid][1])
+            elif pid == self._primary:
+                self._Send(QEvent.Type.MouseMove, self._points[pid][1])
+            return
+        # count == 0：这次触摸彻底结束
+        self._primary = None
+        self._swallow = False
+        return
+
     # -- 缩放 --------------------------------------------------------------
-    def StartPinch(self, points):
-        """ 进入缩放态：把手上那次"按下"作废(不滚动/不翻页，见 _ReaderDrag.CancelPress) """
-        if self._mouseDown:
-            drag = mobile_ui._readerDrag
-            if drag is not None and hasattr(drag, "CancelPress"):
-                drag.CancelPress()
-            local = self._lastPos or points[0][0]
-            self._Send(QEvent.Type.MouseButtonRelease, (local, points[0][1]))
-            self._mouseDown = False
+    def StartPinch(self):
+        """ 进入缩放态：把手上的那次"按下"作废(不滚动/不翻页) """
+        self.CancelMouse()
         self._pinching = True
-        self._startDist = _Distance(points)
+        self._startDist = self._PinchDist()
         self._basePercent = self.CurrentPercent()
         self._ratio = 1.0
         self.LastPercent = self._basePercent
         self.Pinches += 1
-        Log.Warn("reader pinch: 开始双指缩放(base={}%)".format(self._basePercent))
+        try:
+            mode = self._readView.qtTool.stripModel
+        except Exception:
+            mode = None
+        Log.Warn("reader pinch: 开始双指缩放(base={}%, 模式={}, 距离={:.0f}, 触点数={})".format(
+            self._basePercent, mode, self._startDist, len(self._points)))
+        # 诊断：每个触点下面是什么控件(见模块注释里"两条序列"那段)
+        self._LogFingers()
         return
 
-    def ApplyPinch(self, points):
+    def _PinchDist(self):
+        """ 两指距离(多于两点时取前两点) —— 必须用**全局坐标**：
+        两根手指可能落在不同控件上，各自的本地坐标不可比 """
+        points = list(self._points.values())
+        if len(points) < 2:
+            return 0.0
+        dx = points[1][1].x() - points[0][1].x()
+        dy = points[1][1].y() - points[0][1].y()
+        return (dx * dx + dy * dy) ** 0.5
+
+    def ApplyPinch(self):
         """ 缩放过程中只做**视图缩放预览**(QGraphicsView.scale)，抬手才真正重排
 
         为什么不能用 ScalePicture2 做实时缩放：它走 changeScale -> ShowImgAll，
-        也就是**每一帧把所有可见图重新定位/重新缩放**，手指还在屏幕上时干这个，
-        真机上就是卡住不动(而且还可能顺带触发重解码)。改成：
-          * 手势中：`QGraphicsView.scale(step, step)` —— 只是改绘制变换，不动图元，
+        手指还在屏幕上时干这个，真机上就是卡住不动(还可能顺带触发重解码)。改成：
+          * 手势中：`QGraphicsView.scale(step, step)` —— 只改绘制变换，不动图元，
             每帧几乎零成本，跟手
           * 抬手时：先 resetTransform() 复位，再按目标百分比走一次 ScalePicture2
             (整页重排只发生一次，且延后到事件循环外)
         """
+        dist = self._PinchDist()
         if self._startDist <= 1.0:
-            self._startDist = _Distance(points)
+            self._startDist = dist
             return
-        dist = _Distance(points)
         if dist <= 1.0:
             return
         self._ratio = dist / self._startDist
@@ -384,6 +446,8 @@ class _ReaderPinch(QObject):
             step = target / max(0.05, self._liveRatio)
             if abs(step - 1.0) < 0.01:
                 return
+            # 预览期间禁止"滚动值变化 -> 换页"(见 read_scroll.OnValueChange)
+            view._jmPinchPreview = True
             view.scale(step, step)
             self._liveRatio = target
         except Exception as es:
@@ -392,10 +456,16 @@ class _ReaderPinch(QObject):
 
     def ResetPreview(self):
         """ 撤掉预览用的视图缩放(不碰 scaleCnt) """
+        view = self._view
+        if view is not None:
+            try:
+                view._jmPinchPreview = False
+            except Exception:
+                pass
         if abs(self._liveRatio - 1.0) < 0.001:
             return
         try:
-            self._view.resetTransform()
+            view.resetTransform()
         except Exception as es:
             Log.Error(es)
         self._liveRatio = 1.0
@@ -405,6 +475,7 @@ class _ReaderPinch(QObject):
         """ 抬手：撤掉预览，按目标百分比走一次真正的重排 """
         if not self._pinching:
             return
+        self._pinching = False
         base = self._basePercent
         ratio = self._ratio if self._ratio > 0 else 1.0
         self.ResetPreview()
@@ -438,20 +509,51 @@ class _ReaderPinch(QObject):
         return
 
     # -- 合成鼠标 ----------------------------------------------------------
-    def _Send(self, eventType, pos):
-        target = self._target
-        if target is None:
+    def CancelMouse(self):
+        """ 作废手上这次"按下"
+
+        改成"已拖动"状态后，随后的 release 会被 _ReaderDrag 吃掉 —— 不滚动、
+        不翻页、不弹窗口(否则 1 指转 2 指那一下会被场景当成点按)。
+        """
+        if self._primary is None:
             return
-        local, glob = pos
-        if eventType == QEvent.Type.MouseButtonRelease:
-            buttons = Qt.MouseButton.NoButton
-        else:
-            buttons = Qt.MouseButton.LeftButton
+        drag = mobile_ui._readerDrag
+        if drag is not None and hasattr(drag, "CancelPress"):
+            drag.CancelPress()
+        point = self._points.get(self._primary)
+        if point is not None:
+            self._Send(QEvent.Type.MouseButtonRelease, point[1])
+        self._primary = None
+        return
+
+    def _Send(self, eventType, glob):
+        """ 合成鼠标事件发给视口(坐标从**全局**换算 —— 触点可能来自别的控件) """
+        target = self._target
+        if target is None or glob is None:
+            return
         try:
+            local = target.mapFromGlobal(QPoint(int(glob.x()), int(glob.y())))
+            if eventType == QEvent.Type.MouseButtonRelease:
+                buttons = Qt.MouseButton.NoButton
+            else:
+                buttons = Qt.MouseButton.LeftButton
             event = QMouseEvent(eventType, local, local, glob,
                                 Qt.MouseButton.LeftButton, buttons,
                                 Qt.KeyboardModifier.NoModifier)
             QApplication.sendEvent(target, event)
+        except Exception as es:
+            Log.Error(es)
+        return
+
+    def _LogFingers(self):
+        """ 诊断：记录每个触点下面的控件 """
+        try:
+            for pid in list(self._points.keys()):
+                local, glob = self._points[pid]
+                widget = QApplication.widgetAt(QPoint(int(glob.x()), int(glob.y())))
+                Log.Warn("reader pinch: 触点 {} 在({:.0f},{:.0f}) 下面 = {}".format(
+                    pid, glob.x(), glob.y(),
+                    type(widget).__name__ if widget is not None else "None"))
         except Exception as es:
             Log.Error(es)
         return

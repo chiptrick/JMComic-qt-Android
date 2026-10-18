@@ -274,6 +274,12 @@ class ReadScroll(QScrollBar):
         # self.UpdateScrollBar(value)
         self.__value = value
 
+        # 双指缩放预览期间不做"滚动换页"：预览只是视图变换，滚动值的变化是
+        # QGraphicsView 自己按场景矩形算出来的；这时候换页会触发 ReloadImg
+        # (整页重排 + 重新解码)，手指还在屏幕上，滚动模式下手感直接崩掉。
+        if getattr(self.scrollArea, "_jmPinchPreview", False):
+            return
+
         if not self.isCurReadModel:
             return
         if not ReadMode.isScroll(self.scrollArea.initReadMode):
