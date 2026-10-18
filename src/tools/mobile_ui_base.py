@@ -14,8 +14,8 @@ DrawerMaxWidth = 300
 # 抽屉滑入/滑出动画时长，以及兜底隐藏时间
 DrawerAniMs = 120
 DrawerAniFallbackMs = 260
-# 手指滑动的判定阈值(逻辑像素)。小于它的位移仍然按"点击"处理，
-# 大于它的位移一律视为滚动，把 release 吃掉，不再传给子控件。
+# 手指滑动的判定阈值(逻辑像素)。小于它的位移仍然按"点按"处理(走控件公开入口
+# 激活)，大于它的位移一律视为滚动，不触发任何控件。
 TouchSlopPx = 16
 # 触摸自检的观察窗口(秒)
 TouchSelfTestSeconds = 120
@@ -39,19 +39,8 @@ GridItemOverhead = 36
 GridScheduleMs = 80
 # QTabWidget 换页(首页的"分区"标签)之后，等 Qt 把新页的几何摆好再重排一次网格(毫秒)
 TabReflowMs = 60
-# 分区标签条横划松手后的惯性滚动(见 mobile_ui_touch._TabBarScroll)：
-# 帧间隔、速度每秒衰减到的比例(和 QScroller 默认的 DecelerationFactor 一个量级)、
-# 低于这个速度就不甩了、甩出去的速度上限(防合成事件的时间抖动灌出荒谬速度)、
-# 以及"松手前手指已经停了这么久(毫秒)就当成就地放手指，不甩"
-TabFlingIntervalMs = 16
-TabFlingDecay = 0.125
-TabFlingMinVelocity = 60.0
-TabFlingMaxVelocity = 5000.0
-TabFlingStopGapMs = 150
-# 速度估计窗口(毫秒)：安卓会把一帧里的多条触摸事件合并到同一次投递里(dt≈0)，
-# 攒够这个窗口再算速度，免得 dx/dt 算出天量速度、一松手就冲到尽头
-TabVelocityWindowMs = 8
-# 第一次摸到标签条时的自检位移(px)：喂一个像素滚轮事件，看偏移动不动
+# 标签条横划的致动自检位移(px)：喂一个像素滚轮事件，看偏移动不动
+# (横划的手势/惯性已由 QScroller 接管，见 mobile_ui_touch._TabSwipe)
 TabSelfCheckPx = 8
 # "后来才建的滚动区域自动接管"(见 mobile_ui_touch._ScrollWatcher)：
 # 攒住待扫控件的上限，防止一次性建几千个控件时把内存/耗时堆起来
@@ -206,35 +195,6 @@ def _TabBarAncestor(widget):
             return node
         node = node.parentWidget()
     return None
-
-
-def _GuardMode(widget):
-    """ 手指下这个控件该怎么防误触
-
-    返回 "tap"    -> 扣住 press，判定为点按后重放(下拉框/数值框/勾选框/按钮)
-         "slide"  -> 只扣住 release(滑块/滚动条/列表视口等需要按下拖动的东西)
-         "tabbar" -> 同 "tap"(扣住 press + 点按重放)，但位移超过阈值时改成
-                     "横划滚动标签条"(见 mobile_ui_touch._TabBarScroll)
-    """
-    node = widget
-    while node is not None:
-        if isinstance(node, QTabBar):
-            # 分区标签条：横划滚动，点按还是切分区(原来的语义一点不变)
-            return "tabbar" if node.count() > 1 else "tap"
-        if isinstance(node, (QComboBox, QAbstractSpinBox)):
-            return "tap"
-        if isinstance(node, QAbstractButton):
-            # 标签条两端那两个滚动箭头(QToolButton)也归"横划"：
-            # 否则手指落在箭头上就滑不动了(它们只有 16x32)
-            if isinstance(node.parentWidget(), QTabBar):
-                return "tabbar"
-            return "tap"
-        if isinstance(node, (QSlider, QScrollBar, QAbstractScrollArea)):
-            return "slide"
-        if getattr(node, "_jmTouchScroll", False):
-            return "slide"
-        node = node.parentWidget()
-    return "slide"
 
 
 def _WidgetAlive(widget):

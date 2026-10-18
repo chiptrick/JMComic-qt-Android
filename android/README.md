@@ -67,14 +67,14 @@ android/
 | 帮助页那种一整段说明文字的 QLabel，单行最小宽度 500+px | 对"本身放不下"的标签打开 `wordWrap` 折行；对长路径/长 URL 这种没有换行机会的文本检测到降不下来就还原 | `EnableLabelWrap` |
 | 帮助页版本信息是 3 列 QGridLayout，列宽相加 524px | 压成单列(每个控件一行)；压完还放不下就**原样还原**，绝不帮倒忙 | `FlattenWideGrids` |
 | 手指不能拖动滚动 | 给所有 `QAbstractScrollArea` 挂 `QScroller` 触摸手势 + 逐像素滚动（看图控件本身除外，它有自己的一套拖动逻辑，见下） | `EnableTouchScroll` |
-| **滑动页面时会误改设置**：Qt 把触摸合成为鼠标事件后直接投给手指下的子控件，抬起时子控件把"滑动"当成了点击。下拉框/数值框更严重——它们在 **press** 时就弹列表/加减数值，数值框按住还会自动重复（而它只认 release 来停） | 对勾选框/单选/按钮/下拉框/数值框：**连 press 一起扣住**，位移超过阈值就丢弃（控件完全不知情），小于阈值才把 press+release **重放**给控件（语义与真实点击完全一致）。滑块/滚动条/列表视口仍只扣 release（它们需要按下拖动）。弹窗(Qt::Popup)里的操作不拦 | `_TouchGuard` / `InstallTouchGuard` |
+| **滑动页面时会误改设置**：Qt 把没人认领的触控当场合成鼠标事件投给手指下的子控件，抬起时子控件把"滑动"当成了点击。下拉框/数值框更严重——它们在 **press** 时就弹列表/加减数值 | 触控路由`_TouchRouter`**认领整个触控序列**(接受 TouchBegin，Qt 不再合成任何鼠标)：位移超过阈值/多指判定为滚动(什么都不激活，滚动交给 QScroller)；小于阈值判定点按，走控件**自己的公开入口**激活(`click()`/`showPopup()`/`stepBy()`/`setCurrentIndex()`/`clicked` 信号)。滑块/滚动条/输入框完全不插手(Qt 原生合成照常)。弹窗(Qt::Popup)里的操作不拦 | `_TouchRouter` / `InstallTouchGuard` |
 | 顶部分页按钮溢出 | 窄屏降低按钮字号、允许压缩 | `CompactTabBar` |
 | **改设置/输入就崩溃(SIGABRT)**：设置页每改一项都会弹一次"保存成功"提示条(`MsgLabel` 是独立顶层窗口)、切页签弹加载框，这些 `show()` 都是在**输入事件处理过程中**同步执行的，Qt 会在 `QWindowPrivate::setVisible` 里同步 flush 窗口系统事件 → 立刻 Expose → 立刻 paint → `QAndroidPlatformOpenGLWindow::eglSurface()` 重入 → `'Failed to acquire deadlock protector for ...'` → abort | 把顶层窗口的 `show/hide/close` 统一改成"延后到当前事件处理结束"(0ms 定时器)再执行：`QWidget.show/hide/close` 在 Python 侧套一层，只对顶层窗口生效（主窗口除外）。注意 `QEvent.Show` 是 `show_sys()` **之后**才发的，在事件过滤器里拦它来不及，必须拦在"调用 show()"这一层 | `InstallShowDeferral` / `DeferCall` |
-| **看图界面无法滚动 + 菜单超出屏幕**：`ReadFrame.ScaleFrame` 写死 `qtTool.setGeometry(w-400, 0, 400, h)`，384px 屏上是 `x=-16`；看图区只有滚轮逻辑，触摸上既没滚轮也没有拖动实现 | 菜单改为占满看图区整宽；把拖动位移直接喂给和滚轮同一条路径(`ReadScroll.scrollValue`)，并在页尾复用滚轮的自动翻页；点按(|dx|、|dy| 都小于阈值)完全不碰，原来的"三分区点按"逻辑不变 | `SetupReadTool` / `ApplyReadToolGeometry` / `_ReaderDrag` |
+| **看图界面无法滚动 + 菜单超出屏幕**：`ReadFrame.ScaleFrame` 写死 `qtTool.setGeometry(w-400, 0, 400, h)`，384px 屏上是 `x=-16`；看图区只有滚轮逻辑，触摸上既没滚轮也没有拖动实现 | 菜单改为占满看图区整宽；整套看图触控都在 `QTouchEvent` 上实现(零合成鼠标)：1 指拖动喂给和滚轮同一条路径(`ReadScroll.scrollValue`)并复用页尾自动翻页，1 指点按直接走三分区动作，2 指缩放"预览视图变换+抬手重排" | `SetupReadTool` / `ApplyReadToolGeometry` / `_ReaderTouch` |
 | **返回键**：菜单收不起来；看图退不出去；根页面上什么都不做，事件继续下传导致 Activity 被 finish，而 Python 主线程已退出 → 前台留一个**白屏** | 统一在 `HandleBackKey` 里按优先级处理并 accept 事件、吞掉抬起事件（400ms 去抖）：弹出窗口 → 看图菜单 → 顶层对话框 → 抽屉 → 退出看图 → 回退页面 → **根页面退到后台**(最小化，不再白屏) | `HandleBackKey` / `MinimizeToDesktop` / `main_view.keyPressEvent` |
 | **首页一行只放得下 1 本漫画**：封面按桌面写死 250x340 | 竖屏按屏宽反算封面宽，并用 `QListWidget` 的**真实几何**自校正到"一行 2 个"（只按 sizeHint 估算会被 item 自身的边距骗过去；改完 sizeHint 还必须显式 `setGridSize` + 强制重排） | `GridCoverWidth` / `ApplyGridCoverSize` / `RefreshItemSizeHints` / `ComicItemWidget.ResizeCover` |
 | **首页"分区"切过去还是一行 1 个**：分区页是 `QTabWidget` 的**隐藏**标签页，而 Qt 只给当前页排几何 —— 隐藏页里的列表视口宽是"没布局过"的假值(真机 790px)，用它算出来的封面宽/栅格都偏大 | 只拿**可见**列表量视口宽（隐藏列表不再把全局封面宽带偏）；并给 `QTabWidget` 接 `currentChanged`，换页后按新页的真实视口宽重排一次（封面宽没变时也补一次 `setGridSize`） | `MeasureGridAvail` / `_GridOverflow` / `ReflowGridCoverForPage` / `InstallTabReflowHook` |
-| **首页顶部的分区标签条无法滑动**：`QTabBar` **没有**公开的滚动偏移 API(`scrollOffset` 是私有成员)，拖动也不认(没有拖动滚动的实现)；唯一能按像素滚动它的入口是 `QTabBar::wheelEvent` 里"设备带 `PixelScroll` 能力就按像素滚"那条分支，而平台自带的鼠标/触摸设备都没这个能力 | 滑动判定统一进 `_TouchGuard`(App 级过滤器)：标签条横划时自造一个带 `PixelScroll` 的 `QPointingDevice`，把手指数十像素位移合成成 `QWheelEvent` 喂进去 → 逐像素 1:1 跟手(实测划 210px 滚 210px)；松手按手指速度做指数衰减的惯性(与 `QScroller` 同一条模型，实测再滚 37px)；press 一律扣住(否则横划会顺带切分区)，点按才把 press+release 原样重放 | `_GuardMode`("tabbar" 模式) / `_TouchGuard` / `_TabBarScroll` / `TabBarOffset` |
+| **首页顶部的分区标签条无法滑动**：`QTabBar` **没有**公开的滚动偏移 API(`scrollOffset` 是私有成员)，拖动也不认(没有拖动滚动的实现)；唯一能按像素滚动它的入口是 `QTabBar::wheelEvent` 里"设备带 `PixelScroll` 能力就按像素滚"那条分支，而平台自带的鼠标/触摸设备都没这个能力 | 横划的手势识别/速度/惯性全部交给 **QScroller**(TouchGesture，Qt 原生平滑滚动)；QScroller 发来的 `QScrollEvent` 增量只用来"致动"——喂给 QTabBar 唯一公开的逐像素输入路径(自造带 `PixelScroll` 的 `QPointingDevice` 走滚轮分支，属内部致动、不是把触控映射成鼠标)。press 一律扣住(否则横划会顺带切分区)，点按才走 `setCurrentIndex` 激活；自检不通时退化为只点按 | `_TabSwipe` / `_TouchRouter`("tabbar" 模式) / `TabBarOffset` |
 | **首页除"最新上传"以外的分区完全不能滑动**：分区页是网络回来后由 `IndexView.InitBack` 逐个 `AddTab()` 建出来的，而 `EnableTouchScroll` 只在窗口 `Apply`/`OnShown` 跑过一遍 —— 那会儿这些页还不存在 -> 分区列表**从来没被 `QScroller` 接管**(`_jmTouchScroll=False`)，手指在上面划纹丝不动（"滑动防误触"也一起没生效，滑动还会误点中封面） | **建立即接管**：App 级过滤器 `_ScrollWatcher` 听 `QEvent.ChildAdded`/`ChildPolished`，新出现的滚动区域攒起来用 0ms 定时器推到**下一轮事件循环**再扫（`ChildAdded` 是构造函数里发给父控件的，当场判不可靠）；`_TouchGuard.OnPress` 里再加一层兜底 `_AdoptScrollArea`：手指按上去时向上找最近的滚动区域，没接管过就地补装（放在判定模式之前：同一次按下就算进滑动区） | `_ScrollWatcher` / `_AdoptScrollArea` / `InstallScrollWatcher` / `EnableTouchScroll` |
 | **导入本地漫画 / 导入本地图片卡死** | Android 上不再用 `QFileDialog`（它会创建一个回不来的顶层窗口 + 嵌套模态循环），改为**主窗口内的子控件选择器** + 嵌套 `QEventLoop`（不创建任何顶层窗口）；桌面端原样转发 `QFileDialog` | `tools/mobile_file_dialog.py` |
 | **任何未捕获的 python 异常 = 闪退**：`sys.excepthook` 里弹出的 `QErrorMessage` 同样是独立顶层窗口，异常一发生就撞上面同一个 `eglSurface()` 死锁保护器 abort（回调/解析/网络里任何一个漏网异常都会被放大成整进程退出）；异常若来自工作线程，还会变成"在非 GUI 线程里建 QWidget" | Android 下运行期错误框改成主窗口内的**子控件提示条**(`MsgLabel.ShowErrorEx`)，非主线程只记日志（`Log.Error` 已经写过完整回溯，adb 能拉到）；桌面端行为不变，仍弹原来的 `QErrorMessage` | `qt_error.showError2` / `ShowAndroidError` |
@@ -466,7 +466,7 @@ Pillow 11.3.0: jpg=True webp=False zlib=True PIL/_webp.so=缺失     # 设备侧
 | `mobile_ui.MeasureGridAvail` / `_GridOverflow` | 只量**可见**的列表：隐藏页的视口是没布局过的假值，不再把全局封面宽带偏（也不再用假视口判"一行放得下几个"） |
 | `mobile_ui.ReflowGridCoverForPage`（新增） | 按"刚露出来的这一页"的真实视口宽重排一次；封面宽没变(`_jmGridSized` 短路)时也补一次 `RefreshItemSizeHints` —— 隐藏期间根本没按真实视口定过栅格 |
 | `mobile_ui.InstallTabReflowHook`（新增） | 给所有 `QTabWidget` 接 `currentChanged`，延后 60ms 调上面那个（先让 Qt 把新页的几何摆好）。`Apply` / `OnShown` 各装一次（幂等，标记 `_jmTabReflow`） |
-| `mobile_ui._GuardMode` / `_TouchGuard` / `_TabBarScroll`（改造/新增） | 标签条横划滚动：滑动判定统一进 `_TouchGuard` 这个 App 级过滤器（新增 `"tabbar"` 模式），横划时自造一个带 `PixelScroll` 能力的 `QPointingDevice`，把手指位移合成成 `QWheelEvent` 喂给标签条 —— 走它 `wheelEvent` 里那条**像素滚动**分支，逐像素 1:1 跟手（实测划 210px 滚 210px）；松手后按手指速度做**指数衰减的惯性**（与 `QScroller` 同一套模型，实测再滚 37px），到头/慢下来自动停。press 一律**扣住**（`QTabBar` 在 press 时就把手指底下的标签切成当前标签，横划顺带切页会白跑一次网络请求），判定成点按(tap)才把 press+release 原样重放 —— 点按行为与原来完全一致。第一次摸到某个标签条时会做一次"自检"（喂 8px 看偏移动不动），推不动就只在日志里记一行、不再假装在滚 |
+| `mobile_ui_touch._TabSwipe` / `_TouchRouter`（重制） | 标签条横划滚动(第八轮重制为纯触控)：横划的手势识别/速度/惯性全部交给 **QScroller**(TouchGesture，Qt 原生平滑滚动)；QScroller 发来的 `QScrollEvent` 增量只用来"致动"——喂给标签条 `wheelEvent` 里那条**像素滚动**分支（自造带 `PixelScroll` 能力的 `QPointingDevice`，主机实测喂 -60px 就精确移动 -60px）。press 一律**扣住**（`QTabBar` 在 press 时就把手指底下的标签切成当前标签，横划顺带切页会白跑一次网络请求），判定成点按(tap)才走 `setCurrentIndex` 激活。第一次摸到某个标签条时会做一次"自检"（喂 8px 看偏移动不动），推不动就只在日志里记一行、不再假装在滚 |
 | `mobile_ui.TabBarOffset`（新增） | 给宿主回归/日志用：从 `tabRect(0).x()` 反推标签条当前偏移（`QTabBar` 没有公开的偏移 API） |
 | `mobile_ui_base._EventLocalPos` / `_EventGlobalPos`（新增） | 各处"取事件坐标"统一成这两个函数（滑动防误触、标签条横划、看图拖动共用一套） |
 
@@ -484,22 +484,19 @@ Pillow 11.3.0: jpg=True webp=False zlib=True PIL/_webp.so=缺失     # 设备侧
 ```
 
 > 说明：Qt 里"触摸平滑滚动"的官方做法是 `QScroller`（`EnableTouchScroll` 给所有
-> `QAbstractScrollArea` 用的一直是它）；`QTabBar` 既不是滚动区域、也没有公开的偏移 API，
-> 所以标签条走的是它自己 `wheelEvent` 里那条**像素滚动**分支（合成一个带 `PixelScroll`
-> 能力的 `QPointingDevice` + `QWheelEvent`，主机实测喂 -60px 就精确移动 -60px）。手感
-> 相关常量都在 `mobile_ui_base.py`：`TabFlingDecay`（速度每秒衰减到的比例）、
-> `TabFlingMinVelocity`（低于它就不甩）、`TabFlingMaxVelocity`（甩出去的速度上限）、
-> `TabFlingStopGapMs`（松手前停了这么久就当"就地放手指"）、`TabVelocityWindowMs`（速度估计窗口：
-> 安卓会把一帧里的多条触摸事件合并投递、间隔≈0，攒够这个窗口再算速度，免得算出天量速度、
-> 一松手就冲到尽头 —— 主机回归里"每帧 3 条合并投递的慢速拖动"就是盯这个的）、
-> `TouchSlopPx`（点按/滑动阈值）、`TabSelfCheckPx`（自检位移）。
+> `QAbstractScrollArea` 用的一直是它；第八轮起标签条横划的手势/惯性也交给它）。
+> `QTabBar` 既不是滚动区域、也没有公开的偏移 API，所以标签条的"致动"只能走它自己
+> `wheelEvent` 里那条**像素滚动**分支（合成一个带 `PixelScroll` 能力的 `QPointingDevice`
+> + `QWheelEvent`，主机实测喂 -60px 就精确移动 -60px）——这是内部致动，不是把用户触控
+> 映射成鼠标/滚轮操作。手感相关常量都在 `mobile_ui_base.py`：`TouchSlopPx`（点按/滑动
+> 阈值）、`TabSelfCheckPx`（自检位移）。
 >
 > 第六轮真机反馈补充：第五轮那个"点两端箭头"的实现**在真机上滑动仍然没有反应**
-> （主机上却是通的），所以这一轮把滑动判定并进 `_TouchGuard`（和防误触同一个状态机、
-> 同一条真实投递路径），并改成上面这条"合成像素滚轮事件"的通道 —— 它不依赖箭头是否
+> （主机上却是通的），所以这一轮把滑动判定并进触控守卫（和防误触同一个状态机、
+> 同一条真实投递路径），并改成上面这条"像素滚轮致动"的通道 —— 它不依赖箭头是否
 > 可见/可用，也不依赖 `usesScrollButtons()`，只要 `SH_TabBar_AllowWheelScrolling`
 > 为真（Qt 的 `QCommonStyle` 默认给真，Android 用的就是它）就能滚。真机上如果还滑不动，
-> 日志里会有一行"标签条横划自检失败(合成滚轮推不动标签条)"，那行直接说明是这条通道没通。
+> 日志里会有一行"标签条横划致动自检失败(像素滚轮推不动标签条)"，那行直接说明是这条通道没通。
 
 ### 3.8 第七轮真机反馈：首页除"最新上传"以外的分区**完全不能滑动**（所有滚动区域都要能手指滑动）
 
@@ -527,7 +524,7 @@ AddTab 新建 1 个滚动区域, 接管=[False]
 | 位置 | 改动 |
 | --- | --- |
 | `mobile_ui_touch._ScrollWatcher`（新增） | App 级事件过滤器，听 `QEvent.ChildAdded`/`ChildPolished`；新出现的滚动区域攒起来，用 0ms 定时器推到**下一轮事件循环**再统一扫。建立即接管，覆盖分区页、详情页/设置页里的滚动区、看图工具菜单等一切"晚建"的滚动区 |
-| `mobile_ui_touch._AdoptScrollArea`（新增） | `_TouchGuard.OnPress` 里的**兜底**：手指按到控件上时向上找最近的 `QAbstractScrollArea`，没接管过就地补装。放在判定模式之前 —— 同一次按下就算进"已接管滚动区域"，连带滑动防误触一起生效 |
+| `mobile_ui_touch._AdoptScrollArea`（新增） | `_TouchRouter.OnTouch` 里的**兜底**：手指按到控件上时向上找最近的 `QAbstractScrollArea`，没接管过就地补装。放在判定模式之前 —— 同一次按下就算进"已接管滚动区域"，连带滑动防误触一起生效 |
 | `mobile_ui_touch.InstallScrollWatcher`（新增） | `Apply`/`OnShown` 各调一次（单例；顺手再全量扫一遍，幂等） |
 | `mobile_ui_touch.EnableTouchScroll`（改造） | 也覆盖 `root` **自己**（改用 `_SelfAndChildren`：`findChildren` 不含自己，而调用方经常直接把"那个列表"传进来），并返回本次新接管的个数（给 watcher 统计与回归断言用；现有调用点都忽略返回值） |
 

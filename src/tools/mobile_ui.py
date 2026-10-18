@@ -29,7 +29,7 @@ reader/grid/touch/diag)；本模块只持有会话级可变状态，并对外保
 对 `mobile_ui.<name>` 的读取/写入语义不变，`from tools import mobile_ui` /
 `mobile_ui.X` 的调用方式也不变。 """
 from tools.mobile_ui_base import *  # noqa: F401,F403
-from tools.mobile_ui_base import (_DescribeWidget, _GuardMode, _InPopup, _InTouchArea, _IsDescendant, _SelfAndChildren, _WidgetAlive, _WindowType)
+from tools.mobile_ui_base import (_DescribeWidget, _InPopup, _InTouchArea, _IsDescendant, _SelfAndChildren, _WidgetAlive, _WindowType)
 
 # self-correct 之后定下来的封面宽：后加的 item(翻页)直接用它，避免又变回一行 1 个
 _gridCoverFinal = 0
@@ -69,56 +69,59 @@ def UpdateLimit(mainView):
 
 
 # ---------------------------------------------------------------------------
-# 看图区拖动滚动
+# 看图区触控
 # ---------------------------------------------------------------------------
 #
 # 真机现象："看图界面无法滚动"。看图区是 QGraphicsView，桌面端只支持滚轮
 # (wheelEvent)，触摸设备既没有滚轮也没有拖动实现：
 #   * QGraphicsView 设的是 NoDrag(不做 ScrollHandDrag)
 #   * 场景的鼠标事件只用来识别"点按三分区"(而且要求 |dx| <= 20 才算点按)
-# 所以手指在图片上拖动毫无反应(菜单面板是另一个滚动区，那是另一回事)。
 #
-# 这里直接把拖动位移喂给和滚轮**同一条**路径(ReadScroll.scrollValue)，
-# 顺带复用滚轮那套"到页尾自动翻页"的逻辑；点按(|dx|、|dy| 都小于阈值)完全不碰，
-# 原来的三分区点按逻辑一点不变。
+# 现在整套看图触控都在 QTouchEvent 上实现(见 mobile_ui_reader._ReaderTouch)：
+# 1 指拖动直接喂给和滚轮**同一条**路径(ReadScroll.scrollValue)，顺带复用滚轮那套
+# "到页尾自动翻页"的逻辑；1 指点按直接走三分区动作(弹菜单/半页滚动/翻页)；
+# 2 指缩放沿用"预览视图变换 + 抬手整页重排"。不再有任何合成鼠标事件。
+# (菜单面板是另一个滚动区，走 QScroller，那是另一回事)
 
 _readerDrag = None
-# 看图区双指缩放(见 mobile_ui_reader._ReaderPinch)
+# 看图区触控(拖动/点按/双指缩放，同一个处理器，见 mobile_ui_reader._ReaderTouch)
 _readerPinch = None
 
 
 # ---------------------------------------------------------------------------
-# 滑动只有一处：`_TouchGuard` 这个 App 级过滤器把每一次手指滑动只判定一次
-# (点按 / 滚动 / 标签条横划)，点按再原样重放给控件；滚动区域的手势交给 Qt 自己的
-# QScroller(见 mobile_ui_touch.EnableTouchScroll)，只有 QTabBar 没有公开的偏移
-# API，才用合成的"逐像素滚轮事件"驱动(见 mobile_ui_touch._TabBarScroll)。
+# 触控路由：`_TouchRouter` 这个 App 级过滤器把每一次手指操作只判定一次
+# (点按 / 滚动 / 标签条横划)，全部在 QTouchEvent 上完成，不再拦截/重放鼠标：
+#   * 点按 -> 走控件自己的公开入口(click()/showPopup()/stepBy()/setCurrentIndex()/
+#     clicked 信号)；滚动 -> QScroller(EnableTouchScroll)；标签条横划 -> QScroller
+#     + 增量致动到像素滚轮路径(mobile_ui_touch._TabSwipe)
 #
-# 触摸防误触(tap guard)
+# 触摸防误触(tap guard)的动机不变，实现换了：
 # ---------------------------------------------------------------------------
 #
 # 真机现象：
 #   * 在设置页手指上滑，滑的过程中设置被改掉(勾选框被切换)
 #   * 在"下拉菜单的选项框"和"数值选项框"**附近**滑动也会误触它们
 #
-# 原因是 Qt 把触摸合成为鼠标事件后**直接投给手指下的那个子控件**，而这些控件
+# 原因是 Qt 把没人认领的触控**当场**合成为鼠标事件投给手指下的子控件，而这些控件
 #   * QComboBox 在 **press** 时就弹出下拉列表，
 #   * QAbstractSpinBox 在 **press** 时就开始加减数值，并且按住不放会**自动重复**，
 #     它的自动重复只认 mouseReleaseEvent —— 把 release 吃掉反而会让数值一直加下去，
 #   * QAbstractButton(勾选框/单选/按钮)在 release 时切换，
 # 于是"滚动的起手动作"被当成了点击。
 #
-# 做法(只在移动端、只作用于"已接管手指滚动"的滚动区域里的控件)：
-#   1. 按下时先**扣住 press**，不发给控件，只记下位置
-#   2. 位移超过 TouchSlopPx 判定为滚动：丢弃这次 press，什么都不做(控件完全不知情)
-#   3. 位移没超阈值判定为点按：把记下的 press+release 原样**重放**给控件
-#      (控件看到的和自己收到一次真实点击完全一样，语义零变化)
-# 这样滑动永远不会触发控件，点按和以前一模一样。
+# 新做法(只在移动端、只作用于"已接管手指滚动"的滚动区域里的控件 + 标签条)：
+#   1. 手指落下就**认领整个触控序列**(接受 TouchBegin，Qt 不再合成任何鼠标)
+#   2. 位移超过 TouchSlopPx / 多指判定为滚动：什么都不激活，滚动交给 QScroller
+#   3. 位移没超阈值判定为点按：走控件**自己的公开入口**激活(按钮 click()、下拉框
+#      showPopup()、数值框 stepBy()、标签条 setCurrentIndex()、列表项 clicked/itemClicked
+#      信号)，点按不再重放鼠标
+#   这样滑动永远不会触发控件，点按走的是控件自己的激活链。
 #
-# 例外(走旧的"扣住 release"策略，不能扣 press)：
+# 例外(完全不插手，Qt 原生"未消费触控->鼠标"合成照常工作)：
 #   * QSlider / QScrollBar 需要真正的 press-drag(拖把手/滑块)
-#   * QAbstractScrollArea 的视口 / QAbstractItemView 自己要处理按下拖动
-#     (列表项的按下拖动、QScroller 的鼠标手势都在 press 上)
-#   * Qt::Popup 弹窗(下拉列表、右键菜单)里的点击/滚动不拦，否则列表没法点
+#   * QLineEdit / QTextEdit 需要光标/选择/输入法的鼠标语义
+#   * Qt::Popup 弹窗(下拉列表、右键菜单)里的点击/滚动不拦
+#   * 已接管滚动区之外的控件(顶栏按钮等)
 
 _touchGuard = None
 

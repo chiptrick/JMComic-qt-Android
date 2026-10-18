@@ -24,7 +24,10 @@ class SwitchButton(QWidget):
     def mousePressEvent(self, event):
         """鼠标点击事件：用于切换按钮状态"""
         super(SwitchButton, self).mousePressEvent(event)
+        self.Toggle()
 
+    def Toggle(self):
+        """ 切换开关状态(公开激活入口：移动端触控点按也走它，见 mobile_ui_touch) """
         state = False if self.state else True
         self.SetState(state)
         self.Switch.emit(self.state)

@@ -555,7 +555,7 @@ def _ReaderLines(mainView):
             except Exception as es:
                 lines.append("reader 看图区 global: 取不到 ({})".format(es))
         # 滚动接管：菜单面板是普通 QScrollArea(走 QScroller)，看图区是 QGraphicsView
-        # (走 _ReaderDrag 的拖动滚动，故意不挂 QScroller)
+        # (走 _ReaderTouch 的触控拖动，故意不挂 QScroller)
         try:
             menuArea = getattr(tool, "scrollArea22", None) if tool is not None else None
             graphics = getattr(frame, "scrollArea", None)

@@ -14,6 +14,16 @@ class SmoothScrollBar(QScrollBar):
         self.__animation.setDuration(500)
         self.__value = self.value()
         self.__animation.finished.connect(self._Finished)
+        # 移动端(QScroller 接管时)关掉自定义缓动：QScroller 自己就是平滑滚动
+        # (1:1 跟手 + 松手惯性)，setValue 再叠一层 500ms 动画只会让"滚动条实际值"
+        # 滞后于手指，惯性手感也被搅乱(见 mobile_ui_touch.MakeScrollable)
+        self.__smooth = True
+
+    def SetSmooth(self, on):
+        """ 关掉后 setValue 立即生效(仍会发 MoveEvent，翻页/加载更多不受影响) """
+        self.__smooth = bool(on)
+        if not on:
+            self.__animation.stop()
 
     def _Finished(self):
         self.MoveEvent.emit()
@@ -27,6 +37,10 @@ class SmoothScrollBar(QScrollBar):
             return
         self.__animation.stop()
         self.MoveEvent.emit()
+        if not self.__smooth:
+            QScrollBar.setValue(self, value)
+            self.__value = self.value()
+            return
         self.__animation.setStartValue(self.value())
         self.__animation.setEndValue(value)
         self.__animation.start()

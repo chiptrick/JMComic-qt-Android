@@ -1,73 +1,90 @@
 # coding:utf-8
-""" 触摸控件（滑动只有一处：QScroller 接管滚动 + 滑动防误触 + 分区标签条横划）
+""" 触摸控件（触控只认 QTouchEvent：QScroller 平滑滚动 + 原生点按激活 + 分区标签条横划）
 
-手指滑动在本文件里**只有一处实现** —— `_TouchGuard` 这个 App 级事件过滤器，
-三种去向都由它派生：
+**触控到此为止，不再把触控映射成鼠标操作**。旧实现是"Qt 先把触摸合成成鼠标、
+我们再拦截/重放鼠标"(点按时重放 press+release，看图拖动靠吃鼠标 move)，
+现在整条链路都搬到了触控事件上：
 
-    1. 滚动区域(QAbstractScrollArea) —— QScroller 接管手势(惯性/摩擦用 Qt 平台参数)
-    2. 分区标签条(QTabBar)          —— 合成"逐像素滚轮事件"驱动(见 _TabBarScroll)
-    3. 误触防护                     —— 同一个状态机：滑动过的 release 不交给控件
+    1. 滚动区域(QAbstractScrollArea) —— QScroller 接管(TouchGesture)，Qt 原生
+       平滑滚动：1:1 跟手、松手惯性/摩擦都是 Qt 自己的手感参数。滚动条在移动端
+       直接置值(SmoothScrollBar 的 500ms 自定义缓动关掉)，不和 QScroller 抢手感。
+    2. 点按激活 —— 扣住整个触控序列(接受 TouchBegin，Qt 就不再合成鼠标)，松手
+       时位移不超过 TouchSlopPx 就走控件**自己的公开入口**激活：按钮 click()、
+       下拉框 showPopup()、数值框 stepBy()、标签条 setCurrentIndex()、列表项走
+       clicked/itemClicked 信号(应用自己接的那条链)。全程不构造 QMouseEvent。
+    3. 分区标签条(QTabBar) —— 横划也交给 QScroller(TouchGesture)：识别、速度、
+       惯性全是 Qt 原生平滑滚动；QScroller 发来的 QScrollEvent 增量只用来
+       "致动" —— 喂给 QTabBar 唯一公开的逐像素输入路径(带 PixelScroll 能力的
+       滚轮分支)。QTabBar 没有公开的滚动偏移 API，这是必需的最小翻译层。
+    4. 滑块/滚动条/输入框(需要真鼠标按下语义的控件) —— 完全不插手：触控没人
+       认领时由 Qt 自己合成鼠标(Qt::AA_SynthesizeMouseForUnhandledTouchEvents
+       的原生兼容路径)，那是 Qt 的行为、不是我们的映射，拖把手/选文本照旧可用。
+    5. 看图控件(QGraphicsView) —— 见 mobile_ui_reader，同样纯触控
+       (拖动滚动/双指缩放/点按三分区都在 QTouchEvent 上实现)。
 
-即"一次滑动只判定一次"：`TouchSlopPx` 之内算点按(原样重放给控件)，超过就是滑动。
+为什么点按也要扣住整个序列(而不是放它走 Qt 的合成)：Qt 对"没人认领的触控"会
+**当场**合成鼠标按下(qguiapplication.cpp processTouchEvent，按事件逐个合成)，
+而 QComboBox/QAbstractSpinBox 在 press 时就生效(弹列表/开始加减数值) ——
+滚动起手那一下会被当成点击。旧实现靠"扣住合成出来的鼠标 press、点按时再重放"
+解决；新实现直接在触控上判定(一次滑动只判定一次)：
 
-为什么分区标签条要单独一条通道：`QTabBar` 只有两个 16x32 的滚动箭头，**没有**公开的
-滚动偏移 API（scrollOffset 是私有成员），拖动也不认（QTabBar 没有拖动滚动的实现）。
-唯一能按像素滚动它的入口是 `QTabBar::wheelEvent` 里的"像素滚动"分支：
+    * 单指、位移 <= TouchSlopPx   -> 点按：走控件公开入口激活
+    * 位移超阈值 / 多指            -> 滑动：什么都不激活，滚动交给 QScroller
 
-    if (styleHint(SH_TabBar_AllowWheelScrolling))                 // 默认 true
-        if (event->device()->capabilities() & Capability::PixelScroll)
-            scrollOffset = qBound(0, scrollOffset - pixelDelta.x(), max);
+和旧实现的差别：点按不再"重放鼠标 press+release"，而是调用控件自己的激活入口；
+列表项点按走 clicked/itemClicked 信号(和 Qt 合成鼠标点击触发的是同一条应用逻辑)。
+滑块/滚动条从"扣 release"改成完全不碰 —— 它们的按下语义只能由 Qt 原生合成提供，
+而且 QScroller 拦下的滑动本就不会产生按下。
 
-平台自带的鼠标/触摸设备**没有** PixelScroll 能力（喂它只会走进 else 分支去"切标签"），
-所以这里自造一个带 PixelScroll 的设备，把手指的位移换算成 pixelDelta 喂进去 ——
-标签条就精确地按像素跟手滚动，样式/绘制/命中测试全还是 Qt 自己那套；松手再按手指
-速度做惯性衰减(和 QScroller 同样的指数模型)。
+标签条为什么还留一小段"滚轮致动"：QTabBar 的 scrollOffset 是私有成员，唯一能
+按像素滚动它的公开入口是 wheelEvent 里"设备带 PixelScroll 能力就按像素滚"那条
+分支(平台自带设备没有这个能力)。分工是：手势/速度/惯性 = QScroller(Qt 原生
+平滑滚动)，"把增量送进 QTabBar 自己的输入路径" = 这一小段致动。第一次摸到
+标签条时仍自检一次(SelfCheck)：真机上要是这条致动不通，横划自动退化为"不滚"，
+点按与两端箭头照旧。
 
-滚动区域要 QScroller 接管才认手指(见 MakeScrollable)，而**滚动区域是会"后来才建"
-出来的**：首页除"最新上传"以外的分区页是网络回来后由 IndexView.InitBack 逐个
-AddTab 建的；详情页/设置页里的滚动区、看图工具菜单也一样。`EnableTouchScroll` 只在
-窗口 Apply/OnShown 时跑一遍，那时这些控件还不存在 -> 它们从来没被接管，手指在上面
-划就是"完全不动"(真机现象：首页只有最新上传能滑)。
-
-所以接管这件事有**两半**，都在本文件：
+滚动区域是会"后来才建"出来的(首页分区页是网络回来后 AddTab 建的；详情页/设置页
+里的滚动区、看图工具菜单也一样)。接管这件事有两半：
     * `_ScrollWatcher`(App 级过滤器) —— 听 ChildAdded/ChildPolished，建立即接管
-    * `_TouchGuard.OnPress` 里的 `_AdoptScrollArea` —— 手指按上去时兜底补装
+      (顺带接管新标签条的横划)
+    * `_TouchRouter.OnTouch` 里的 `_AdoptScrollArea` —— 手指按上去时兜底补装
 """
 import time
 
-from PySide6.QtCore import QEvent, QObject, QPoint, QPointF, Qt, QTimer
-from PySide6.QtGui import QInputDevice, QMouseEvent, QPointingDevice, QWheelEvent
-from PySide6.QtWidgets import QAbstractItemView, QAbstractScrollArea, QAbstractSpinBox, QApplication, QComboBox, QGraphicsView, QScroller, QScrollerProperties, QScrollBar, QSlider, QWidget
+from PySide6.QtCore import QEvent, QObject, QPoint, QPointF, QRectF, QSizeF, Qt, QTimer
+from PySide6.QtGui import (QEventPoint, QInputDevice, QPointingDevice, QScrollEvent,
+                           QScrollPrepareEvent, QWheelEvent)
+from PySide6.QtWidgets import (QAbstractButton, QAbstractItemView,
+                               QAbstractScrollArea, QAbstractSpinBox, QApplication,
+                               QComboBox, QGraphicsView, QLineEdit, QPlainTextEdit,
+                               QScroller, QScrollerProperties, QScrollBar, QSlider,
+                               QTabBar, QTextEdit, QWidget)
 from tools.log import Log
 from tools.mobile_ui_base import *  # noqa: F401,F403
-from tools.mobile_ui_base import (_DescribeWidget, _EventGlobalPos, _EventLocalPos, _GuardMode, _InPopup, _InTouchArea, _IsDescendant, _SelfAndChildren, _TabBarAncestor, _WidgetAlive)
+from tools.mobile_ui_base import (_DescribeWidget, _InPopup, _InTouchArea, _IsDescendant,
+                                  _SelfAndChildren, _TabBarAncestor, _WidgetAlive)
 from tools import mobile_ui
 
 
 # ---------------------------------------------------------------------------
-# 分区标签条横划：合成"逐像素滚轮事件"驱动 QTabBar
+# 分区标签条横划：QScroller 接管(手势/惯性)，QScrollEvent 增量致动到像素滚轮路径
 # ---------------------------------------------------------------------------
 
-class _TabBarScroll(QObject):
-    """ 把手指横划换算成"逐像素滚轮事件"喂给标签条(模块头有为什么这么做) """
+class _TabSwipe(QObject):
+    """ 标签条横划：QScroller(TouchGesture) + 增量致动(模块头有分工说明)
+
+    保留旧实现的统计面(Begins/Feeds/Flings/LastScrolled/Running)给宿主回归与
+    真机日志；惯性不再自己算 —— 速度/摩擦/衰减全是 QScroller 的。
+    """
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._bar = None
-        self._device = None
-        self._lastX = None
-        self._lastMoveAt = 0.0
-        self._lastTickAt = 0.0
-        self._velocity = 0.0
-        # 不足 1 像素的余量：滚轮事件只认整数像素，慢速拖动不能每帧都丢掉小数
-        self._carry = 0.0
-        # 速度估计的累计器(见 Move 里为什么不能直接 dx/dt)
-        self._accDx = 0.0
-        self._accDt = 0.0
+        self._bar = None            # 当前手势的标签条
+        self._fingerDown = False
+        self._engaged = False       # 这次手势里 QScroller 的 ScrollPrepare 到过没有
         self._startOffset = 0
-        self._timer = QTimer(self)
-        self._timer.setInterval(max(1, int(TabFlingIntervalMs)))
-        self._timer.timeout.connect(self.OnTick)
+        self._device = None
+        self._carry = 0.0
         self.Begins = 0
         self.Feeds = 0
         self.Flings = 0
@@ -85,111 +102,131 @@ class _TabBarScroll(QObject):
         except Exception:
             return 0
 
-    def Stop(self):
-        self._timer.stop()
-        self._bar = None
-        self._lastX = None
-        self._velocity = 0.0
-        self._carry = 0.0
-        self._accDx = 0.0
-        self._accDt = 0.0
-        return
+    @staticmethod
+    def MaxOffset(bar):
+        """ 标签条最多能滚多远(px) """
+        try:
+            if bar is None or bar.count() <= 0:
+                return 0
+            return max(0, bar.tabRect(bar.count() - 1).right() + 8 - bar.width())
+        except Exception:
+            return 0
 
     def Running(self):
-        """ 惯性还在滚吗 """
-        return self._bar is not None
-
-    def Begin(self, bar, x):
-        """ 手指在标签条上开始横划(x = 手指**按下**的位置，第一次位移由调用方补喂) """
-        self.Stop()
-        if bar is None or bar.count() <= 1:
+        """ 惯性还在滚吗(QScroller 离手后仍处于 Scrolling) """
+        if self._fingerDown:
             return False
-        self._bar = bar
-        self._lastX = x
-        self._lastMoveAt = time.monotonic()
-        self._startOffset = self.Offset(bar)
-        self.Begins += 1
+        scroller = self._Scroller()
+        return scroller is not None and scroller.state() != QScroller.State.Inactive
+
+    def Engaged(self):
+        """ 这次手势 QScroller 有没有接管(没有就走直接致动兜底) """
+        return self._engaged
+
+    def _Scroller(self):
+        bar = self._bar
+        if bar is None or not _WidgetAlive(bar):
+            return None
+        try:
+            return QScroller.scroller(bar)
+        except Exception:
+            return None
+
+    # -- 手势生命周期(由 _TouchRouter 调) ---------------------------------
+    def Attach(self, bar):
+        """ 让一个标签条支持横划(接管一次；致动自检不过就只留点按/箭头) """
+        if bar is None or getattr(bar, "_jmTabSwipe", False):
+            return False
+        bar._jmTabSwipe = True
+        # 触控路由要能看到这个标签条上的 QTouchEvent
+        bar.setAttribute(Qt.WidgetAttribute.WA_AcceptTouchEvents, True)
+        if bar.count() <= 1:
+            return False
         if not self.SelfCheck(bar):
-            # 这条通道在这台机器上推不动标签条(样式/设备能力不同)：
-            # 别装成在滚，点按与两端箭头照旧
-            self.Stop()
+            return False
+        try:
+            QScroller.grabGesture(bar, QScroller.ScrollerGestureType.TouchGesture)
+            props = QScroller.scroller(bar).scrollerProperties()
+            props.setScrollMetric(QScrollerProperties.ScrollMetric.HorizontalOvershootPolicy,
+                                  QScrollerProperties.OvershootPolicy.OvershootAlwaysOff)
+            props.setScrollMetric(QScrollerProperties.ScrollMetric.VerticalOvershootPolicy,
+                                  QScrollerProperties.OvershootPolicy.OvershootAlwaysOff)
+            QScroller.scroller(bar).setScrollerProperties(props)
+        except Exception as es:
+            Log.Error(es)
             return False
         return True
 
-    def Move(self, x):
-        """ 手指移动：位移直接换算成滚动量(1:1 跟手) """
-        bar = self._bar
-        if bar is None or self._lastX is None:
-            return
-        dx = x - self._lastX
-        self._lastX = x
-        now = time.monotonic()
-        dt = now - self._lastMoveAt
-        self._lastMoveAt = now
-        # 速度估计：位移和时间先**攒够一个窗口**再算。安卓会把一帧里的多条触摸事件
-        # 合到同一次投递里(dt≈0)，直接 dx/dt 会算出天量速度 -> 一松手就冲到尽头。
-        self._accDx += dx
-        self._accDt += dt
-        if self._accDt >= TabVelocityWindowMs / 1000.0:
-            self.UpdateVelocity()
-        self.Feed(bar, dx)
-        return
+    def NoteBegin(self, bar):
+        """ 一根手指落到标签条上：开始一次横划手势 """
+        self._bar = bar
+        self._fingerDown = True
+        self._engaged = False
+        self._startOffset = self.Offset(bar)
+        self._carry = 0.0
+        self.Begins += 1
 
-    def UpdateVelocity(self):
-        """ 用攒下的位移/时间更新一次速度(指数平滑)，见 Move 的注释 """
-        if self._accDt <= 0.0:
-            return
-        self._velocity = 0.4 * (self._accDx / self._accDt) + 0.6 * self._velocity
-        self._accDx = 0.0
-        self._accDt = 0.0
-        return
-
-    def End(self):
-        """ 松手：按手指速度做惯性(指数衰减)，返回这次总共滚了多少像素 """
-        bar = self._bar
-        if bar is None:
-            self.LastScrolled = 0
-            return 0
-        idleMs = (time.monotonic() - self._lastMoveAt) * 1000.0
-        if idleMs <= TabFlingStopGapMs:
-            # 松手前攒着的那点位移也算进来(最后一次可能还没攒够一个窗口)
-            self.UpdateVelocity()
-            velocity = self._velocity
-        else:
-            velocity = 0.0
+    def NoteEnd(self, bar):
+        """ 手指离屏：结算这次手势，返回跟手期间滚了多少像素 """
+        self._fingerDown = False
         self.LastScrolled = self.Offset(bar) - self._startOffset
-        if abs(velocity) < TabFlingMinVelocity:
-            self.Stop()
-            return self.LastScrolled
-        self._velocity = max(-TabFlingMaxVelocity, min(TabFlingMaxVelocity, velocity))
-        self._lastTickAt = time.monotonic()
-        self.Flings += 1
-        self._timer.start()
+        scroller = self._Scroller()
+        if scroller is not None and scroller.state() == QScroller.State.Scrolling:
+            # 松手后 QScroller 进入惯性(ScrollerGesture 的 fling)
+            self.Flings += 1
         return self.LastScrolled
 
-    def OnTick(self):
-        """ 惯性帧：速度按 TabFlingDecay^(秒) 衰减，到头了或慢下来就停 """
-        bar = self._bar
-        if bar is None:
-            self.Stop()
-            return
-        now = time.monotonic()
-        dt = now - self._lastTickAt
-        self._lastTickAt = now
-        if dt <= 0.0:
-            return
-        moved = self.Feed(bar, self._velocity * dt)
-        self._velocity *= TabFlingDecay ** dt
-        if not moved or abs(self._velocity) < TabFlingMinVelocity:
-            self.Stop()
-        return
+    def Stop(self):
+        """ 停住惯性(新的手指落下/手势作废时) """
+        scroller = self._Scroller()
+        if scroller is not None:
+            try:
+                scroller.stop()
+            except Exception:
+                pass
+        self._fingerDown = False
+        self._engaged = False
 
-    # -- 驱动 --------------------------------------------------------------
+    # -- QScroller -> QTabBar 致动 ----------------------------------------
+    def OnPrepare(self, bar, event):
+        """ QScrollPrepareEvent：把标签条的滚动范围报给 QScroller """
+        self._bar = bar
+        self._engaged = True
+        maxOffset = self.MaxOffset(bar)
+        try:
+            event.setContentSize(QSizeF(bar.width() + maxOffset, bar.height()))
+            event.setViewportRect(QRectF(bar.rect()))
+            event.setContentPos(QPointF(self.Offset(bar), 0))
+            event.accept()
+        except Exception as es:
+            Log.Error(es)
+            return False
+        return True
+
+    def OnScroll(self, bar, event):
+        """ QScrollEvent：把这一帧的增量喂进 QTabBar 自己的像素滚动路径
+
+        contentPos 正向 = 往后滚 = 内容往左(偏移增大)；而 Feed(delta>0) 表示
+        "内容往右"，所以要取反。
+        """
+        try:
+            delta = -event.contentPosDelta().x()
+            if delta:
+                self.Feed(bar, delta)
+            event.accept()
+        except Exception as es:
+            Log.Error(es)
+            return False
+        return True
+
+    # -- 致动 --------------------------------------------------------------
     @staticmethod
     def PixelDevice():
         """ 自造一个"能报像素滚动"的输入设备
 
-        只有 `capabilities()` 会被读到(见模块头)，不参与平台的真实输入。
+        只有 capabilities() 会被 QTabBar::wheelEvent 读到(像素滚动分支)，不参与
+        平台的真实输入。这是把增量送进 QTabBar 公开输入路径的**内部致动**，
+        不是把用户触控映射成鼠标/滚轮操作。
         """
         return QPointingDevice("jm-tabbar-strip", 0, QInputDevice.DeviceType.TouchScreen,
                                QPointingDevice.PointerType.Finger,
@@ -203,7 +240,7 @@ class _TabBarScroll(QObject):
     def Feed(self, bar, delta):
         """ 让标签条滚 delta 像素(delta>0 = 内容往右)。
 
-        返回 False 表示"喂进去了但偏移没动"(到两端尽头，或这条通道不通)。
+        返回 False 表示"喂进去了但偏移没动"(到两端尽头，或致动通道不通)。
         """
         self._carry += delta
         step = int(self._carry)
@@ -227,7 +264,7 @@ class _TabBarScroll(QObject):
         return self.Offset(bar) != before
 
     def SelfCheck(self, bar):
-        """ 第一次摸到这个标签条时验一次"合成的像素滚轮到底推不推得动它"
+        """ 第一次摸到这个标签条时验一次"像素滚轮致动到底推不推得动它"
 
         各平台/样式的 styleHint(SH_TabBar_AllowWheelScrolling) 或设备能力可能不同；
         真机上要是还滑不动，这一行日志能直接指出是不是这条通道没通。
@@ -252,36 +289,124 @@ class _TabBarScroll(QObject):
             Log.Error(es)
         bar._jmTabWheel = ok
         if ok:
-            Log.Warn("portrait: 标签条横划用逐像素滚轮驱动(自检通过)")
+            Log.Warn("portrait: 标签条横划用 QScroller+像素滚轮致动(自检通过)")
         else:
-            Log.Warn("portrait: 标签条横划自检失败(合成滚轮推不动标签条, 只剩点按与两端箭头)")
+            Log.Warn("portrait: 标签条横划致动自检失败(像素滚轮推不动标签条, 只剩点按与两端箭头)")
         return ok
 
 
 # ---------------------------------------------------------------------------
-# 滑动防误触 + 分区标签条横划(同一个状态机)
+# 点按激活：走控件自己的公开入口(不构造任何输入事件)
 # ---------------------------------------------------------------------------
 
-class _TouchGuard(QObject):
-    """ App 级事件过滤器：把每一次手指滑动判定一次(点按/滑动/标签条横划) """
+def _ActivateItemView(view, globalPos):
+    """ 项视图点按：选中 + 走 clicked/itemClicked 信号(应用自己接的激活链) """
+    try:
+        local = view.mapFromGlobal(QPoint(int(globalPos.x()), int(globalPos.y())))
+        index = view.indexAt(local)
+        if not index.isValid():
+            # 点在空白处：和真实点击一样"取消选中"
+            try:
+                view.selectionModel().clear()
+                view.setCurrentIndex(index)
+            except Exception:
+                pass
+            return None
+        view.setCurrentIndex(index)
+        view.clicked.emit(index)
+        getItem = getattr(view, "itemFromIndex", None)
+        if callable(getItem) and hasattr(view, "itemClicked"):
+            item = getItem(index)
+            if item is not None:
+                view.itemClicked.emit(item)
+        # 双击(两次点按)走 doubleClicked —— 合成鼠标时代由 Qt 自己拼，现在自己判
+        now = time.monotonic()
+        last = getattr(view, "_jmLastTap", None)
+        view._jmLastTap = (now, QPointF(globalPos))
+        if last is not None and (now - last[0]) * 1000.0 <= QApplication.doubleClickInterval() \
+                and (QPointF(globalPos) - last[1]).manhattanLength() <= TouchSlopPx * 2:
+            view._jmLastTap = None
+            view.doubleClicked.emit(index)
+    except Exception as es:
+        Log.Error(es)
+    return _DescribeWidget(view)
+
+
+def _Activate(widget, globalPos):
+    """ 点按激活：按就近原则走控件**自己的公开入口**，返回被激活的控件描述
+
+    不构造 QMouseEvent —— click()/showPopup()/stepBy()/setCurrentIndex()/
+    clicked 信号就是这些控件公开的"被点了一下"入口。
+    """
+    node = widget
+    while node is not None and _WidgetAlive(node):
+        try:
+            if isinstance(node, QAbstractButton):
+                # 勾选框/单选/按钮/工具按钮(含标签条两端的滚动箭头)
+                node.click()
+                return _DescribeWidget(node)
+            if isinstance(node, QComboBox):
+                try:
+                    if node.view().isVisible():
+                        node.hidePopup()
+                    else:
+                        node.showPopup()
+                except Exception:
+                    node.showPopup()
+                return _DescribeWidget(node)
+            if isinstance(node, QAbstractSpinBox):
+                # 上半屏 +1、下半屏 -1(和它自己的鼠标按下语义一致)
+                local = node.mapFromGlobal(QPoint(int(globalPos.x()), int(globalPos.y())))
+                node.stepBy(1 if local.y() < node.height() / 2 else -1)
+                return _DescribeWidget(node)
+            if isinstance(node, QTabBar):
+                local = node.mapFromGlobal(QPoint(int(globalPos.x()), int(globalPos.y())))
+                index = node.tabAt(local)
+                if index >= 0:
+                    node.setCurrentIndex(index)
+                return _DescribeWidget(node)
+            if isinstance(node, QAbstractItemView):
+                return _ActivateItemView(node, globalPos)
+            toggle = getattr(node, "Toggle", None)
+            if callable(toggle):
+                # 自定义控件自己的公开激活入口(如 SwitchButton.Toggle)
+                toggle()
+                return _DescribeWidget(node)
+        except Exception as es:
+            Log.Error(es)
+            return None
+        node = node.parentWidget()
+    return None
+
+
+# ---------------------------------------------------------------------------
+# 触控路由：App 级事件过滤器，把每一次手指操作判定一次(点按/滑动/标签条横划)
+# ---------------------------------------------------------------------------
+
+class _TouchRouter(QObject):
+    """ App 级事件过滤器：只处理 QTouchEvent/QScrollEvent，不再拦截/重放鼠标
+
+    序列判定：
+        * TouchBegin  -> 认领(接受触控，Qt 不再合成鼠标)，记录按下点
+        * TouchUpdate -> 记录位移；超过 TouchSlopPx 标记为滑动
+        * TouchEnd    -> 滑动：什么都不激活；点按：走 _Activate
+        * 多指        -> 整个手势都按滑动处理(双指缩放/系统手势，不许变点击)
+
+    "native" 模式(滑块/滚动条/输入框/弹窗/已接管滚动区之外)完全不入表、
+    不接受事件 —— Qt 自己的未消费触控->鼠标合成路径原样生效。
+    """
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._widget = None
-        self._bar = None
-        self._pressPos = None
-        self._localPos = None
-        self._globalPos = None
-        self._mode = "slide"
-        self._dragging = False
-        self._dragPx = 0
-        self._undo = None
-        self._replaying = False
-        self._tabScroll = _TabBarScroll(self)
+        self._seqs = {}            # 触点id -> 手势状态(只有"接管"的序列才入表)
+        self._multi = False        # 当前手势出现过第二根手指
+        self._dryMarks = {}        # dry 模式按下去重(同一 TouchBegin 会在父级链上重复投递)
+        self._tabSwipe = _TabSwipe(self)
+        self._busy = False         # 激活控件期间防重入
         self.Presses = 0
         self.Drags = 0
         self.Suppressed = 0
-        self.Replayed = 0
+        self.Replayed = 0          # 点按被激活的次数(统计名沿用旧版)
         self.LastSuppressed = ""
         self.LastReplayed = ""
         self.DryRun = False
@@ -289,222 +414,348 @@ class _TouchGuard(QObject):
 
     # -- 状态 --------------------------------------------------------------
     def Reset(self):
-        self._widget = None
-        self._bar = None
-        self._pressPos = None
-        self._localPos = None
-        self._globalPos = None
-        self._mode = "slide"
-        self._dragging = False
-        self._dragPx = 0
-        self._undo = None
+        for seq in self._seqs.values():
+            self._UnwatchScroller(seq)
+        self._seqs.clear()
+        self._multi = False
+        self._dryMarks.clear()
         return
 
     def TabScrollStats(self):
         """ 标签条横划的计数/参数(给宿主回归与真机日志看) """
-        return self._tabScroll
+        return self._tabSwipe
 
-    @staticmethod
-    def _Snapshot(widget):
-        """ 记录"滑动时可能需要回滚"的状态，返回一个回滚函数
-
-        只用于 press 阶段就生效、但又必须放过 press 的控件(滑块/滚动条)。
-        """
-        node = widget
-        while node is not None:
-            if isinstance(node, QAbstractSpinBox):
-                value = node.value()
-                return lambda w=node, v=value: w.setValue(v)
-            if isinstance(node, QSlider):
-                value = node.value()
-                return lambda w=node, v=value: w.setValue(v)
-            if isinstance(node, QComboBox):
-                # 手指落在下拉框**弹出的列表**里时，用户是在滚动那个列表，
-                # 这时不能把弹窗收起来(否则列表滚动就废了)
-                if widget is not node and _IsDescendant(widget, node.view()):
-                    return None
-
-                def Close(w=node):
-                    try:
-                        if w.view().isVisible():
-                            w.hidePopup()
-                    except Exception:
-                        pass
-                return Close
-            node = node.parentWidget()
-        return None
-
-    def Undo(self):
-        undo, self._undo = self._undo, None
-        if undo is None:
-            return
-        try:
-            undo()
-        except Exception as es:
-            Log.Error(es)
-        return
-
-    def Replay(self, widget=None, local=None, glob=None):
-        """ 把这次点按原样重放给控件(press + release)
-
-        重放期间必须**关掉守卫自己**：sendEvent 同样会走 QApplication 的过滤器，
-        不关的话重放的 press/release 又会被守卫接住 -> 无限递归(真机/主机都踩过)。
-        """
-        widget = self._widget if widget is None else widget
-        local = self._localPos if local is None else local
-        glob = self._globalPos if glob is None else glob
-        if widget is None or local is None or glob is None or not _WidgetAlive(widget):
-            return
-        self._replaying = True
-        try:
-            for eventType in (QEvent.Type.MouseButtonPress, QEvent.Type.MouseButtonRelease):
-                event = QMouseEvent(eventType, local, local, glob,
-                                    Qt.MouseButton.LeftButton, Qt.MouseButton.LeftButton,
-                                    Qt.KeyboardModifier.NoModifier)
-                QApplication.sendEvent(widget, event)
-        finally:
-            self._replaying = False
-        self.Replayed += 1
-        self.LastReplayed = _DescribeWidget(widget)
-        return
+    def TabSwipeAttach(self, bar):
+        return self._tabSwipe.Attach(bar)
 
     # -- 事件 --------------------------------------------------------------
     def eventFilter(self, obj, event):
-        if not self.Enabled or self._replaying:
+        if not self.Enabled or self._busy:
             return False
         try:
             eventType = event.type()
-            if eventType == QEvent.Type.MouseButtonPress:
-                return self.OnPress(obj, event)
-            elif eventType == QEvent.Type.MouseMove:
-                return bool(self.OnMove(obj, event))
-            elif eventType == QEvent.Type.MouseButtonRelease:
-                return self.OnRelease(obj, event)
+            if eventType == QEvent.Type.TouchBegin or eventType == QEvent.Type.TouchUpdate \
+                    or eventType == QEvent.Type.TouchEnd or eventType == QEvent.Type.TouchCancel:
+                return self.OnTouch(obj, event)
+            if eventType == QEvent.Type.ScrollPrepare:
+                return self.OnScrollPrepare(obj, event)
+            if eventType == QEvent.Type.Scroll:
+                return self.OnScroll(obj, event)
         except Exception as es:
             Log.Error(es)
             self.Reset()
         return False
 
-    def OnPress(self, obj, event):
-        self.Reset()
+    def OnScrollPrepare(self, obj, event):
+        if not isinstance(obj, QTabBar) or not getattr(obj, "_jmTabSwipe", False):
+            return False
+        return self._tabSwipe.OnPrepare(obj, event)
+
+    def OnScroll(self, obj, event):
+        if not isinstance(obj, QTabBar) or not getattr(obj, "_jmTabSwipe", False):
+            return False
+        return self._tabSwipe.OnScroll(obj, event)
+
+    # -- 触控序列 ----------------------------------------------------------
+    @staticmethod
+    def _DeepAt(obj, point):
+        """ 从 obj 顺着触点位置往下找最深的子控件(不依赖屏幕坐标，主机/真机都稳)
+
+        坐标一律用 globalPosition() 换算：position() 只在 Qt 自己投递时才是
+        "接收控件本地坐标"，测试合成的 QEventPoint 未必填了它。
+        """
         try:
-            if event.button() != Qt.MouseButton.LeftButton:
-                return False
+            glob = point.globalPosition()
+            pos = obj.mapFromGlobal(QPoint(int(glob.x()), int(glob.y())))
+        except Exception:
+            return obj
+        node = obj
+        while True:
+            try:
+                child = node.childAt(pos)
+            except Exception:
+                break
+            if child is None:
+                break
+            pos = child.mapFrom(node, pos)
+            node = child
+        while node is not None and not node.isEnabled():
+            node = node.parentWidget()
+        return node if node is not None else obj
+
+    @staticmethod
+    def _Classify(widget):
+        """ 手指下的控件该走哪条通道
+
+        "activate" -> 点按激活(按钮/下拉框/数值框/标签条)
+        "tabbar"   -> 同 activate，但滑动改成"横划滚动标签条"(QScroller)
+        "view"     -> 项视图/滚动区内容：滑动不许变成点击，点按走信号链
+        "reader"   -> 看图控件(有自己的触控处理，这里完全不插手)
+        "native"   -> 需要真鼠标按下语义的控件(滑块/滚动条/输入框)：
+                      不认领触控，Qt 原生"未消费触控->鼠标"合成照常工作
+        """
+        node = widget
+        while node is not None:
+            if isinstance(node, QGraphicsView):
+                return "reader"
+            if isinstance(node, QTabBar):
+                return "tabbar" if node.count() > 1 else "activate"
+            if isinstance(node, QAbstractButton):
+                if isinstance(node.parentWidget(), QTabBar):
+                    return "tabbar"
+                return "activate"
+            if isinstance(node, QComboBox):
+                return "activate"
+            if isinstance(node, QAbstractSpinBox):
+                return "activate"
+            if isinstance(node, (QSlider, QScrollBar)):
+                return "native"
+            if isinstance(node, (QTextEdit, QPlainTextEdit)):
+                return "native"
+            if isinstance(node, QLineEdit):
+                if not isinstance(node.parentWidget(), (QComboBox, QAbstractSpinBox)):
+                    return "native"
+                # 数值框/下拉框内部的输入行，继续往上交给它们判
+            if isinstance(node, QAbstractItemView):
+                return "view"
+            if getattr(node, "_jmTouchScroll", False):
+                return "view"
+            node = node.parentWidget()
+        return "native"
+
+    def OnTouch(self, obj, event):
+        eventType = event.type()
+        if eventType == QEvent.Type.TouchCancel:
+            self._tabSwipe.Stop()
+            self.Reset()
+            return False
+        try:
+            points = list(event.points())
         except Exception:
             return False
-        if not isinstance(obj, QWidget):
-            return False
-        # 滚动条自己要被拖动；看图控件有自己的拖动/翻页逻辑；弹窗不插手
-        if isinstance(obj, (QScrollBar, QGraphicsView)):
-            return False
-        if _InPopup(obj):
-            return False
-        # 兜底：后来才建出来的滚动区域(见模块头)第一次被手指按到时就地补装 QScroller。
-        # 放在判定模式之前 —— 装上之后 _InTouchArea 才算"在已接管区域里"，
-        # 连带"滑动不误触"也一起生效(否则新页面里滑动还会误点上控件)。
-        _AdoptScrollArea(obj)
-        # 新的手指落下就该停住上一次的标签条惯性(和原生滚动一致)
-        self._tabScroll.Stop()
-        mode = _GuardMode(obj)
-        if mode == "tabbar":
-            # 标签条一般不在"已接管手指滚动"的区域里，不套 _InTouchArea 那个限制
-            bar = _TabBarAncestor(obj)
-            if bar is None:
-                return False
-            self._bar = bar
-        elif not _InTouchArea(obj):
-            return False
-        self._widget = obj
-        self._pressPos = _EventGlobalPos(event)
-        self._localPos = _EventLocalPos(event)
-        self._globalPos = _EventGlobalPos(event)
-        self._mode = mode
-        if self._pressPos is None:
-            return False
-        if mode == "slide":
-            self._undo = self._Snapshot(obj)
-        self.Presses += 1
-        # "tap" 类控件连 press 都不能让它看到：下拉框会在 press 时弹出来，
-        # 数值框会在 press 时开始自动重复(而且只认 release 停)；
-        # 标签条也在 press 时就把手指底下的标签切成当前分区(横划会白跑一次网络请求)
-        return mode in ("tap", "tabbar") and not self.DryRun
 
-    def OnMove(self, obj, event):
-        if self._widget is None or self._pressPos is None:
+        # 1) 新触点：判定通道(同一次 TouchBegin 会在父级链上重复投递几次，
+        #    已在表里的触点直接跳过；dry 模式按时间窗去重)
+        for point in points:
+            try:
+                if point.state() != QEventPoint.State.Pressed:
+                    continue
+                pid = point.id()
+            except Exception:
+                continue
+            if pid in self._seqs:
+                continue
+            if self.DryRun:
+                now = time.monotonic()
+                self._dryMarks = {k: v for k, v in self._dryMarks.items()
+                                  if now - v < 0.5}
+                if pid in self._dryMarks:
+                    continue
+                self._dryMarks[pid] = now
+            self.OnPress(obj, point, event)
+
+        # 2) 位移跟踪 / 松手结算
+        handled = bool(self._seqs)
+        for point in points:
+            seq = self._seqs.get(point.id())
+            if seq is None:
+                continue
+            try:
+                state = point.state()
+                pos = QPointF(point.globalPosition())
+            except Exception:
+                continue
+            if state == QEventPoint.State.Released:
+                self.OnRelease(seq, pos)
+                handled = True
+            else:
+                self.OnMove(seq, pos)
+                handled = True
+        return handled
+
+    def OnPress(self, obj, point, event):
+        try:
+            pos = QPointF(point.globalPosition())
+        except Exception:
             return
-        pos = _EventGlobalPos(event)
-        if pos is None:
+        if self._seqs:
+            # 第二根手指：整个手势都不再当点按(并入表里一起吞掉)
+            self._multi = True
+        else:
+            # 新的一根手指落下就该停住上一次的标签条惯性(和原生滚动一致)
+            self._tabSwipe.Stop()
+        # 兜底：后来才建出来的滚动区域(见模块头)第一次被手指按到时就地补装
+        widget = self._DeepAt(obj, point)
+        if widget is not None:
+            _AdoptScrollArea(widget)
+        if _InPopup(obj) or _InPopup(widget):
             return
-        if self._dragging:
-            if self._mode == "tabbar":
-                self._dragPx = pos.x() - self._pressPos.x()
-                self._tabScroll.Move(pos.x())
-                return True
+        mode = self._Classify(widget)
+        if mode == "reader":
+            # 看图控件有自己的触控处理(mobile_ui_reader)
             return
-        if (pos - self._pressPos).manhattanLength() < TouchSlopPx:
+        if mode != "tabbar":
+            # 只管"已接管手指滚动"的区域里的控件(和旧守卫同作用域)：
+            # 区域外的按钮/输入框完全交给 Qt 原生行为
+            if not _InTouchArea(widget):
+                return
+        if mode == "native":
             return
-        self._dragging = True
-        self.Drags += 1
-        # press 阶段就已经生效的控件(滑块/滚动条/被放过 press 的控件)，在这里回滚
-        self.Undo()
-        if self._mode == "tabbar":
-            self._dragPx = pos.x() - self._pressPos.x()
-            # 从**按下**的位置起算：别让这 TouchSlopPx 的死区把手指头 16px 位移吃掉
-            if self._tabScroll.Begin(self._bar, self._pressPos.x()):
-                self._tabScroll.Move(pos.x())
-            return True
+        if self.DryRun:
+            # 只记录不接管(不接受触控)：让 Qt 的原生合成照常发生，用来复现旧问题
+            self.Presses += 1
+            Log.Warn("touch[dry]: 本该接管 {} ({})".format(_DescribeWidget(widget), mode))
+            return
+        seq = {"id": point.id(), "widget": widget, "mode": mode, "press": pos,
+               "last": pos, "moved": False, "bar": None, "conn": None}
+        if mode == "tabbar":
+            bar = _TabBarAncestor(widget) if not isinstance(widget, QTabBar) else widget
+            if bar is None:
+                return
+            seq["bar"] = bar
+            self._tabSwipe.NoteBegin(bar)
+        else:
+            # QScroller 认领手势后会把后续 TouchUpdate 吞掉(手势过滤器先于应用过滤器)，
+            # 位移就再从 scroller 状态观察一路：进过 Dragging/Scrolling 就算滑动过
+            self._WatchScroller(seq, widget)
+        self._seqs[point.id()] = seq
+        self.Presses += 1
+        try:
+            event.accept()
+        except Exception:
+            pass
         return
 
-    def OnRelease(self, obj, event):
-        widget, dragging, dry = self._widget, self._dragging, self.DryRun
-        mode = self._mode
-        local, glob = self._localPos, self._globalPos
-        dragPx = self._dragPx
-        self.Reset()
-        if widget is None:
-            return False
-        if dragging:
-            if dry:
-                Log.Warn("touch guard[dry]: 本该拦下一次误触点击 {}".format(
-                    _DescribeWidget(widget)))
-                return False
+    def _WatchScroller(self, seq, widget):
+        try:
+            node = widget
+            area = None
+            while node is not None:
+                if isinstance(node, QAbstractScrollArea) and getattr(node, "_jmTouchScroll", False):
+                    area = node
+                    break
+                node = node.parentWidget()
+            if area is None:
+                return
+            target = area.viewport() if area.viewport() is not None else area
+            scroller = QScroller.scroller(target)
+            owner = self
+
+            def OnState(state, _seq=seq, _owner=owner):
+                if state != QScroller.State.Inactive and state != QScroller.State.Pressed:
+                    _owner._MarkMoved(_seq)
+
+            scroller.stateChanged.connect(OnState)
+            seq["conn"] = (scroller, OnState)
+        except Exception:
+            return
+
+    def _UnwatchScroller(self, seq):
+        conn = seq.get("conn")
+        seq["conn"] = None
+        if conn is None:
+            return
+        try:
+            scroller, callback = conn
+            scroller.stateChanged.disconnect(callback)
+        except Exception:
+            pass
+        return
+
+    def _MarkMoved(self, seq):
+        """ 标记"这次手势滑动过"(所有判定点共用，Drags 只数一次) """
+        if seq.get("moved"):
+            return
+        seq["moved"] = True
+        self.Drags += 1
+        return
+
+    def OnMove(self, seq, pos):
+        if not seq["moved"] and (pos - seq["press"]).manhattanLength() > TouchSlopPx:
+            self._MarkMoved(seq)
+        if seq["mode"] == "tabbar" and seq["bar"] is not None:
+            if not self._tabSwipe.Engaged():
+                # QScroller 没接管这条手势时的直接致动兜底(平台/样式差异保险)
+                self._tabSwipe.Feed(seq["bar"], pos.x() - seq["last"].x())
+        seq["last"] = pos
+        return
+
+    def OnRelease(self, seq, pos):
+        self._seqs.pop(seq["id"], None)
+        try:
+            self._UnwatchScroller(seq)
+            self._finalize(seq, pos)
+        finally:
+            if not self._seqs:
+                self._multi = False
+        return
+
+    def _finalize(self, seq, pos):
+        mode = seq["mode"]
+        widget = seq["widget"]
+        # 滑动判定三保险：跟踪到的位移 / 松手位置离按下点 / QScroller 活过没有
+        # (QScroller 认领会吞掉中途的 TouchUpdate，后两条兜住这种情况)
+        if (pos - seq["press"]).manhattanLength() > TouchSlopPx:
+            self._MarkMoved(seq)
+        if self._multi or seq["moved"]:
+            # 滑动(或多指)：什么都不激活 —— 滚动由 QScroller 自己完成
             self.Suppressed += 1
             self.LastSuppressed = _DescribeWidget(widget)
-            if mode == "tabbar":
-                # 松手后按速度继续滚(惯性)，这一下 release 不给标签条(否则会切分区)
-                scrolled = self._tabScroll.End()
-                Log.Warn("touch guard: 标签条横划 {}px -> 标签条滚 {}px(惯性 {} 次), 未传给 {}".format(
-                    int(dragPx), scrolled, self._tabScroll.Flings, self.LastSuppressed))
-                return True
-            self._tabScroll.Stop()
-            Log.Warn("touch guard: 拦下滑动误触 release, 未传给 {}".format(self.LastSuppressed))
-            return True
-        self._tabScroll.Stop()
-        if mode not in ("tap", "tabbar"):
-            # press 已经放过去了，正常点击交给控件自己处理
-            return False
-        if dry:
-            Log.Warn("touch guard[dry]: 本该重放一次点按 {}".format(_DescribeWidget(widget)))
-            return False
-        # 点按：press 被扣住了，这里补一次完整的点击(分区标签条也由此切分区)
-        if not _WidgetAlive(widget):
-            return True
+            if mode == "tabbar" and seq["bar"] is not None:
+                scrolled = self._tabSwipe.NoteEnd(seq["bar"])
+                Log.Warn("touch: 标签条横划 {}px -> 已滚 {}px(惯性 {} 次), 未切分区".format(
+                    int((pos - seq["press"]).x()), scrolled, self._tabSwipe.Flings))
+            else:
+                Log.Warn("touch: 滑动松手未触发控件 {}".format(self.LastSuppressed))
+            return
+        if mode == "tabbar" and seq["bar"] is not None:
+            self._tabSwipe.NoteEnd(seq["bar"])
+        # 点按：走控件自己的公开入口
+        self._busy = True
         try:
-            self.Replay(widget, local, glob)
-        except Exception as es:
-            Log.Error(es)
-        return True
+            desc = _Activate(widget, pos)
+        finally:
+            self._busy = False
+        if desc:
+            self.Replayed += 1
+            self.LastReplayed = desc
+            Log.Warn("touch: 点按激活 {}".format(desc))
+        return
+
+
+# 需要触控路由"认领"的点按类控件：让它们收到 QTouchEvent
+# (否则 TouchBegin 只会在它们的**父级**上投递，扣不住 press 语义，
+#  Qt 的 focus-follow 也认不出手指下的控件)
+_TapClassWidgets = (QAbstractButton, QComboBox, QAbstractSpinBox, QTabBar)
+
+
+def MarkTapClass(widget):
+    """ 给点按类控件打开触控接收(幂等，建出来就打一次) """
+    try:
+        widget.setAttribute(Qt.WidgetAttribute.WA_AcceptTouchEvents, True)
+    except Exception:
+        pass
+    return
 
 
 def InstallTouchGuard(mainView):
-    """ 装上全局的滑动守卫(只在移动端)：防误触 + 分区标签条横划 """
+    """ 装上全局触控路由(只在移动端)：点按激活 + 滑动防误触 + 标签条横划 """
     if not IsEnabled() or mobile_ui._touchGuard is not None:
         return
     app = QApplication.instance()
     if app is None:
         return
-    mobile_ui._touchGuard = _TouchGuard(app)
+    mobile_ui._touchGuard = _TouchRouter(app)
     app.installEventFilter(mobile_ui._touchGuard)
+    # 现存控件就地接管(后建的由 _ScrollWatcher 负责)
+    try:
+        for bar in _SelfAndChildren(mainView, QTabBar):
+            mobile_ui._touchGuard.TabSwipeAttach(bar)
+        for cls in (QAbstractButton, QComboBox, QAbstractSpinBox):
+            for widget in _SelfAndChildren(mainView, cls):
+                MarkTapClass(widget)
+    except Exception as es:
+        Log.Error(es)
     return
 
 
@@ -516,7 +767,7 @@ def TouchGuardStats():
 
 def TabBarOffset(bar):
     """ 标签条当前滚到哪了(px)。QTabBar 没有偏移 API，只能从 tabRect 反推 """
-    return _TabBarScroll.Offset(bar)
+    return _TabSwipe.Offset(bar)
 
 
 # ---------------------------------------------------------------------------
@@ -524,20 +775,29 @@ def TabBarOffset(bar):
 # ---------------------------------------------------------------------------
 
 def MakeScrollable(area):
-    """ 让一个滚动区域支持手指拖动滚动(QScroller) + 逐像素滚动
+    """ 让一个滚动区域支持手指拖动滚动(QScroller 平滑滚动) + 逐像素滚动
 
     返回 True 表示"这一次真的接管了"(首次)；已经接管过/看图控件返回 False。
     """
     if area is None or isinstance(area, QGraphicsView):
-        # 看图界面有自己的一套拖动/翻页逻辑，不接管
+        # 看图界面有自己的一套触控处理(mobile_ui_reader)，不接管
         return False
     if getattr(area, "_jmTouchScroll", False):
         return False
     target = area.viewport() if area.viewport() is not None else area
+    # 触控路由要能在视口这一层看到/认领 QTouchEvent(见 _TouchRouter)
+    target.setAttribute(Qt.WidgetAttribute.WA_AcceptTouchEvents, True)
     QScroller.grabGesture(target, QScroller.ScrollerGestureType.TouchGesture)
     if isinstance(area, QAbstractItemView):
         # 只有项视图有 setVerticalScrollMode；QPlainTextEdit/QTextEdit 本身已是逐像素
         area.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+    # QScroller 要 1:1 跟手：SmoothScrollBar 的自定义缓动(500ms OutQuint)会让
+    # "滚动条实际值"滞后于手指，也叠掉了 QScroller 自己的惯性手感 —— 移动端关掉，
+    # 跟手/惯性完全交给 Qt 原生平滑滚动
+    for bar in (area.horizontalScrollBar(), area.verticalScrollBar()):
+        setSmooth = getattr(bar, "SetSmooth", None)
+        if callable(setSmooth):
+            setSmooth(False)
     _TuneScroller(target)
     area._jmTouchScroll = True
     return True
@@ -599,7 +859,7 @@ def TouchScrollAreas(root):
 
 
 class _ScrollWatcher(QObject):
-    """ App 级事件过滤器：**后来才建出来的**滚动区域自动装上 QScroller
+    """ App 级事件过滤器：**后来才建出来的**滚动区域/标签条自动接管
 
     真机现象：首页除"最新上传"以外的分区列表完全不能滑动(见模块头)。
     建立即接管是这里唯一要干的事；至于为什么不当场扫、要延迟一拍：
@@ -607,7 +867,7 @@ class _ScrollWatcher(QObject):
     还没构造完(属性/重写都还没挂上) —— 攒起来用 0ms 定时器推到下一轮事件循环，
     那时控件已经完整，扫出来的结果才靠得住。
 
-    和 _TouchGuard.OnPress 里的 _AdoptScrollArea 是一件事的两半：这一半"建出来就接管"，
+    和 _TouchRouter.OnTouch 里的 _AdoptScrollArea 是一件事的两半：这一半"建出来就接管"，
     那一半"万一漏了，手指按上去时兜底"。
     """
 
@@ -630,9 +890,10 @@ class _ScrollWatcher(QObject):
             child = event.child()
         except Exception:
             return False
-        # 只看滚动区域自己：普通容器不用管 —— 它里面真装了滚动区域，那个区域建出来时
-        # 也会各发一次 ChildAdded(漫画 item 那种叶子控件一天几百个，不筛会白扫)
-        if not isinstance(child, QAbstractScrollArea):
+        # 只看滚动区域/标签条/点按类控件自己：普通容器不用管 —— 它里面真装了这些，
+        # 那个控件建出来时也会各发一次 ChildAdded(漫画 item 那种叶子控件一天几百个，
+        # 不筛会白扫)
+        if not isinstance(child, (QAbstractScrollArea,) + _TapClassWidgets):
             return False
         self.Seen += 1
         self._pending.append(child)
@@ -645,8 +906,18 @@ class _ScrollWatcher(QObject):
     def Flush(self):
         pending, self._pending = self._pending, []
         self.Scans += 1
+        guard = mobile_ui._touchGuard
         for widget in pending:
             if not _WidgetAlive(widget):
+                continue
+            if isinstance(widget, QTabBar):
+                if guard is not None:
+                    guard.TabSwipeAttach(widget)
+                else:
+                    MarkTapClass(widget)
+                continue
+            if isinstance(widget, _TapClassWidgets):
+                MarkTapClass(widget)
                 continue
             self.Adopted += EnableTouchScroll(widget)
         return
@@ -669,7 +940,7 @@ def InstallScrollWatcher(mainView):
     if mobile_ui._scrollWatcher is None:
         mobile_ui._scrollWatcher = _ScrollWatcher(app)
         app.installEventFilter(mobile_ui._scrollWatcher)
-        Log.Warn("portrait: 后建滚动区域自动接管已开启(分区页/详情页/工具菜单等)")
+        Log.Warn("portrait: 后建滚动区域/标签条自动接管已开启(分区页/详情页/工具菜单等)")
     mobile_ui._scrollWatcher.Adopted += EnableTouchScroll(mainView)
     return mobile_ui._scrollWatcher
 

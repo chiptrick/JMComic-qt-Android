@@ -359,22 +359,54 @@ asyncio.run(_asyncProbe())
 print("[ok] curl_cffi 垫片提供 AsyncSession(回归 jmcomic 图片解密 ImportError)")
 
 # 真机 bug 回归9：在设置页用手指滑动时，手指下的勾选框会被"顺手点一下"，
-# 于是滑一下设置就被改了。守卫只吃掉"位移超过阈值"的 release。
+# 于是滑一下设置就被改了。触控路由认领整个触控序列：滑动不激活任何控件，
+# 点按才走控件自己的公开入口(勾选框 click())。
 guard = mobile_ui.TouchGuardStats()
-assert guard is not None, "移动端应装上滑动防误触守卫"
+assert guard is not None, "移动端应装上触控路由"
 box = setting.downAuto
 assert getattr(setting.scrollArea, "_jmTouchScroll", False), \
     "设置页滚动区域应已接管手指滚动"
 
+from PySide6.QtGui import QEventPoint, QInputDevice, QPointingDevice, QTouchEvent  # noqa: E402
 
-def sendMouse(kind, widget, localPos):
-    globalPos = QPointF(widget.mapToGlobal(localPos.toPoint()))
-    isRelease = (kind == QEvent.Type.MouseButtonRelease)
-    event = QMouseEvent(kind, localPos, globalPos,
-                        Qt.MouseButton.LeftButton,
-                        Qt.MouseButton.NoButton if isRelease else Qt.MouseButton.LeftButton,
-                        Qt.KeyboardModifier.NoModifier)
-    app.sendEvent(widget, event)
+TOUCH_DEVICE = QPointingDevice("jm-smoke-touch", 1, QInputDevice.DeviceType.TouchScreen,
+                               QPointingDevice.PointerType.Finger,
+                               QInputDevice.Capability.PixelScroll, 10, 0)
+
+
+def sendTouch(kind, state, widget, localPos):
+    """ 给控件合成一个触摸事件(每个事件一条独立序列，和真机一样) """
+    point = QEventPoint(0, state, QPointF(localPos),
+                        QPointF(widget.mapToGlobal(localPos.toPoint())))
+    app.sendEvent(widget, QTouchEvent(kind, TOUCH_DEVICE,
+                                      Qt.KeyboardModifier.NoModifier, [point]))
+    return
+
+
+def touchTap(widget, localPos, drift=0.0):
+    """ 一次点按(可带几像素漂移)：按下 -> (漂移) -> 松手 """
+    sendTouch(QEvent.Type.TouchBegin, QEventPoint.State.Pressed, widget, localPos)
+    if drift:
+        end = QPointF(localPos.x(), localPos.y() + drift)
+        sendTouch(QEvent.Type.TouchUpdate, QEventPoint.State.Updated, widget, end)
+    else:
+        end = QPointF(localPos)
+    sendTouch(QEvent.Type.TouchEnd, QEventPoint.State.Released, widget, end)
+    app.processEvents()
+    return
+
+
+def touchSwipe(widget, start, end, steps=4):
+    """ 一次滑动：按下 -> 若干移动 -> 松手 """
+    sendTouch(QEvent.Type.TouchBegin, QEventPoint.State.Pressed, widget, start)
+    for step in range(1, steps + 1):
+        app.processEvents()
+        time.sleep(0.008)               # 真机上两帧之间有真实间隔
+        pos = QPointF(start.x() + (end.x() - start.x()) * step / float(steps),
+                      start.y() + (end.y() - start.y()) * step / float(steps))
+        sendTouch(QEvent.Type.TouchUpdate, QEventPoint.State.Updated, widget, pos)
+    sendTouch(QEvent.Type.TouchEnd, QEventPoint.State.Released, widget, end)
+    app.processEvents()
     return
 
 
@@ -382,48 +414,43 @@ slop = mobile_ui.TouchSlopPx
 center = QPointF(box.width() / 2.0, box.height() / 2.0)
 inside = QPointF(box.width() / 2.0, box.height() / 2.0 + slop + 2)
 
-# 9a: 滑动(位移超过阈值) -> release 被吃掉, 勾选状态不变
+# 9a: 滑动(位移超过阈值) -> 不激活任何控件, 勾选状态不变
 box.setChecked(False)
 Setting.DownloadAuto.SetValue(0)
 pressedBefore, suppressedBefore, dragsBefore = guard.Presses, guard.Suppressed, guard.Drags
-sendMouse(QEvent.Type.MouseButtonPress, box, center)
-assert guard.Presses == pressedBefore + 1, "按下应被守卫看到"
-sendMouse(QEvent.Type.MouseMove, box, inside)
-app.processEvents()
+touchSwipe(box, center, inside)
+assert guard.Presses == pressedBefore + 1, "按下应被触控路由看到"
 assert guard.Drags == dragsBefore + 1, "超过阈值的位移应被判定为滑动"
 assert box.isChecked() is False, "滑动过程中不应该切换勾选框"
-sendMouse(QEvent.Type.MouseButtonRelease, box, inside)
-app.processEvents()
-assert guard.Suppressed == suppressedBefore + 1, "滑动的 release 应被拦下"
+assert guard.Suppressed == suppressedBefore + 1, "滑动松手不应激活控件"
 assert box.isChecked() is False, "滑动后勾选框不应被切换"
 assert not box.isDown(), "滑动后勾选框不应停留在按下状态"
 assert Setting.DownloadAuto.value == 0, "滑动后设置值不应被改写"
-print("[ok] 滑动防误触: 位移 %dpx > 阈值 %dpx 时 release 被拦下, 设置未被改动 (%s)"
+print("[ok] 滑动防误触: 位移 %dpx > 阈值 %dpx 时控件未被激活, 设置未被改动 (%s)"
       % ((inside - center).manhattanLength(), slop, guard.LastSuppressed))
 
-# 9b: 正常点按(位移小于阈值) 必须仍然生效
+# 9b: 正常点按(位移小于阈值) 必须仍然生效 —— 走控件公开入口 click()
 suppressedBefore = guard.Suppressed
-sendMouse(QEvent.Type.MouseButtonPress, box, center)
-sendMouse(QEvent.Type.MouseMove, box, QPointF(center.x(), center.y() + 3))
-sendMouse(QEvent.Type.MouseButtonRelease, box, QPointF(center.x(), center.y() + 3))
-app.processEvents()
+replayedBefore = guard.Replayed
+touchTap(box, center, drift=3.0)
 assert box.isChecked() is True, "正常点按必须仍然切换勾选框"
 assert Setting.DownloadAuto.value == 1, "正常点按必须仍然写入设置"
 assert guard.Suppressed == suppressedBefore, "正常点按不应被拦截"
+assert guard.Replayed == replayedBefore + 1, "点按应走控件公开入口激活"
 print("[ok] 防误触不影响正常点按: 3px 位移仍然算点击, 设置已写入=%d" % Setting.DownloadAuto.value)
 
-# 9c: 滚动条/非滚动区域的控件不受影响
+# 9c: 滚动条/非滚动区域的控件完全不被触控路由认领(它们靠 Qt 原生合成鼠标)
 pressesBefore = guard.Presses
-sendMouse(QEvent.Type.MouseButtonPress, setting.scrollArea.vScrollBar,
-          QPointF(4, setting.scrollArea.vScrollBar.height() / 2.0))
-assert guard.Presses == pressesBefore, "滚动条不应该被守卫接管(拖滚动条要能用)"
-sendMouse(QEvent.Type.MouseButtonPress, main.menuButton, QPointF(2, 2))
-assert guard.Presses == pressesBefore, "不在滚动区域里的控件不应该被守卫接管"
+touchTap(setting.scrollArea.vScrollBar,
+         QPointF(4, setting.scrollArea.vScrollBar.height() / 2.0))
+assert guard.Presses == pressesBefore, "滚动条不应该被触控路由接管(拖滚动条要能用)"
+touchTap(main.menuButton, QPointF(2, 2))
+assert guard.Presses == pressesBefore, "不在滚动区域里的控件不应该被触控路由接管"
 # 下拉框弹出列表是 combo 的子孙：在里面滑动是滚列表，不能把弹窗收起来
 assert mobile_ui._IsDescendant(setting.downAuto, setting.scrollArea)
 assert not mobile_ui._IsDescendant(main.menuButton, setting.scrollArea)
 assert mobile_ui._IsDescendant(setting.colorBox.view(), setting.colorBox)
-print("[ok] 防误触只管滚动区域: 滚动条与顶栏按钮不受影响, 下拉弹窗归属判定正确")
+print("[ok] 触控路由只管滚动区域/标签条: 滚动条与顶栏按钮不受影响, 下拉弹窗归属判定正确")
 
 # 真机取证用的竖屏几何描述(verify_on_device.ps1 解析的就是这些行)
 portrait = mobile_ui.DescribePortrait(main)
@@ -730,7 +757,7 @@ app.processEvents()
 #   ② 标签条溢出时 Qt 只在两端放两个 16x32 的滚动箭头，手指横划完全没有反应
 #      (QTabBar 没有拖动滚动，也没有公开的滚动偏移 API)。走的是它的
 #      wheelEvent 里那条"设备带 PixelScroll 能力就按像素滚"的分支：
-#      把手指数十像素的位移合成成 QWheelEvent 喂进去(见 mobile_ui_touch._TabBarScroll)。
+#      手势/惯性由 QScroller 接管，QScrollEvent 增量致动到像素滚轮路径(见 mobile_ui_touch._TabSwipe)。
 from PySide6.QtWidgets import QTabWidget, QVBoxLayout, QWidget  # noqa: E402
 
 mobile_ui.ResetGridCover()
@@ -765,13 +792,11 @@ _StopPendingGrid()
 mobile_ui.ApplyGridCoverSize(tabsLists[1])
 assert mobile_ui._gridAvail == 0, \
     "隐藏标签页的列表被当成了可测量对象(量到 %dpx 的假宽度)" % mobile_ui._gridAvail
-# 点按第 2 个标签：既验证"点按仍能选中"(press 被扣住后靠重放补发)，也就是真机切分区的路径
+# 点按第 2 个标签：既验证"点按仍能选中"(走 setCurrentIndex 激活)，也就是真机切分区的路径
 tabRect = tabBar.tabRect(1)
 assert tabRect.x() >= 0 and tabRect.right() < tabBar.width() - 60, \
     "第 2 个标签不在可视区(标签条应该溢出): %s" % tabRect
-sendMouse(QEvent.Type.MouseButtonPress, tabBar, QPointF(tabRect.center().x(), tabRect.center().y()))
-sendMouse(QEvent.Type.MouseButtonRelease, tabBar, QPointF(tabRect.center().x(), tabRect.center().y()))
-app.processEvents()
+touchTap(tabBar, QPointF(tabRect.center().x(), tabRect.center().y()))
 assert tabsHost.currentIndex() == 1, \
     "点按标签应该选中它, 实际 currentIndex=%d" % tabsHost.currentIndex()
 # 切过去之后列表才真的可见 -> 换页重排应该把它收成"一行 2 个"
@@ -794,23 +819,18 @@ print("[ok] 分区(隐藏标签页)封面: 隐藏时不参与测量 -> 切过去
       "视口 %dpx -> 一行 2 个" % (tabsLists[1].count(), cell, tabsLists[1].viewport().width()))
 print("     |", mobile_ui.GridStatsLines(tabsLists[1])[0])
 # 横划滚动：内容要跟着手指走(1:1)，松手还要有惯性，而且不能顺带切换分区
+# (手势/惯性由 QScroller 接管，QScrollEvent 增量致动到像素滚轮路径)
 tabScroll = guard.TabScrollStats()
-feedsBefore = tabScroll.Feeds
 assert tabBar.count() == 9 and tabBar.tabRect(8).right() > tabBar.width(), \
     "9 个标签应该溢出(最后一个在可视区外): %s" % tabBar.tabRect(8)
 barIndex = tabsHost.currentIndex()
 startX = tabBar.width() * 0.6
-sendMouse(QEvent.Type.MouseButtonPress, tabBar, QPointF(startX, 16.0))
-for step in range(1, 8):
-    app.processEvents()
-    time.sleep(0.008)                       # 真机上两帧之间有真实间隔(松手后的速度要用它算)
-    sendMouse(QEvent.Type.MouseMove, tabBar, QPointF(startX - step * 30.0, 16.0))
-sendMouse(QEvent.Type.MouseButtonRelease, tabBar, QPointF(startX - 7 * 30.0, 16.0))
-app.processEvents()
+touchSwipe(tabBar, QPointF(startX, 16.0), QPointF(startX - 210.0, 16.0), steps=7)
 assert tabsHost.currentIndex() == barIndex, \
     "横划不应该顺带切换分区: %d -> %d" % (barIndex, tabsHost.currentIndex())
 scrolled = tabScroll.LastScrolled
 assert scrolled > 100, "手指横划 210px 只滚了 %dpx" % scrolled
+assert tabScroll.Feeds > 0, "横划应该有像素滚动致动"
 assert tabScroll.Flings >= 1, "松手后应该开始惯性滚动"
 deadline = time.time() + 1.5
 while time.time() < deadline and tabScroll.Running():
@@ -832,32 +852,17 @@ app.processEvents()
 #   -> 分区列表从来没被 QScroller 接管(_jmTouchScroll=False)，手指在上面划一点不动。
 #   修法有两半，都要在这里量到：
 #     a) mobile_ui_touch._ScrollWatcher(App 级过滤器)：后建出来的滚动区域建立即接管
-#     b) _TouchGuard.OnPress 里的 _AdoptScrollArea：万一漏了，手指按上去时就地兜底补装
+#     b) _TouchRouter.OnTouch 里的 _AdoptScrollArea：万一漏了，手指按上去时就地兜底补装
 #   滑动本身用合成触摸事件量：Qt 手势框架 -> QScroller -> 滚动条，和真机同一条路。
 #   (offscreen 上 QTest.touchEvent(QWindow*) 送不进应用主窗口的那一层，但 sendEvent
 #    这条路的手势识别/QScroller/惯性完全一样，主机上量到过 824px + 惯性)
-from PySide6.QtGui import QEventPoint, QInputDevice, QPointingDevice, QTouchEvent  # noqa: E402
-
-TOUCH_DEVICE = QPointingDevice("jm-smoke-touch", 1, QInputDevice.DeviceType.TouchScreen,
-                               QPointingDevice.PointerType.Finger,
-                               QInputDevice.Capability.PixelScroll, 10, 0)
-
-
-def sendTouch(kind, state, widget, localPos):
-    """ 给控件合成一个触摸事件(每个事件一条独立序列，和真机一样) """
-    point = QEventPoint(0, state, QPointF(localPos),
-                        QPointF(widget.mapToGlobal(localPos.toPoint())))
-    app.sendEvent(widget, QTouchEvent(kind, TOUCH_DEVICE,
-                                      Qt.KeyboardModifier.NoModifier, [point]))
-    return
 
 
 def touchDrag(area, dyPx=150, steps=8, holdSecs=0.4):
     """ 在滚动区域视口上合成一次手指纵向拖动(内容往上滚 dyPx)，返回(跟手, 停稳)
 
-    跟手要在**手指还按着**的时候读：滚动条(SmoothScrollBar)对 setValue 有 500ms 缓动，
-    松手那一刻它还在半路上，等它走完(0.4s，OutQuint 已到 99%+)再读才是真实跟手量；
-    松手之后测到的增量才是惯性(所以不能拿它当跟手量)。
+    移动端滚动条直通置值(SmoothScrollBar 的缓动被关掉，QScroller 1:1 跟手)，
+    手指按着时读到的就是真实跟手量；松手之后测到的增量才是惯性。
     """
     vp = area.viewport()
     bar = area.verticalScrollBar()
@@ -870,7 +875,7 @@ def touchDrag(area, dyPx=150, steps=8, holdSecs=0.4):
         time.sleep(0.01)                    # 真机两帧之间有真实间隔(松手后的速度靠它算)
         sendTouch(QEvent.Type.TouchUpdate, QEventPoint.State.Updated, vp,
                   QPointF(x, y0 - dyPx * step / float(steps)))
-    hold = time.time() + holdSecs           # 手指不动，等滚动条缓动走完(纯跟手，还没惯性)
+    hold = time.time() + holdSecs           # 手指不动(纯跟手，还没惯性)
     while time.time() < hold:
         app.processEvents()
         time.sleep(0.01)
@@ -948,12 +953,12 @@ print("[ok] 后建分区列表松手惯性: 再划 150px -> 停稳共 %dpx(手�
 lateList._jmTouchScroll = False
 pressesBefore = guard.Presses
 lowPoint = QPointF(lateList.viewport().width() / 2.0, lateList.viewport().height() - 30.0)
-sendMouse(QEvent.Type.MouseButtonPress, lateList.viewport(), lowPoint)
+touchSwipe(lateList.viewport(), lowPoint,
+           QPointF(lowPoint.x(), lowPoint.y() - mobile_ui.TouchSlopPx - 4))
 assert getattr(lateList, "_jmTouchScroll", False), \
     "手指按上去时应该兜底补装 QScroller(_AdoptScrollArea 没生效)"
 assert guard.Presses == pressesBefore + 1, \
     "补装要发生在判定模式之前：同一次按下就该算进'已接管滚动区域'"
-sendMouse(QEvent.Type.MouseButtonRelease, lateList.viewport(), lowPoint)
 print("[ok] 兜底补装: 抹掉接管标记后按下 -> 就地重新接管，同一次按下即算进滑动区")
 
 # 启动时就存在的页面也要能手指滑动(接管状态 + 有内容时量跟手)
@@ -966,9 +971,8 @@ for label, page, area in (("首页 最新上传", main.indexView, main.indexView
     main.SwitchWidgetAndClear(main.subStackWidget.indexOf(page))
     app.processEvents()
     if label == "设置页":
-        # 上面 §9c 在设置页滚动条上按了一下没松(那是刻意留着的)，补一个抬起，
-        # 否则滚动条会跟着后面合成的鼠标移动走拖动逻辑，把"跟手量"弄成大一圈的假值
-        sendMouse(QEvent.Type.MouseButtonRelease, area.vScrollBar, QPointF(4, 4))
+        # §9c 已经没有"没松开的鼠标按住"了(触控序列都在 touchTap 里成对结束)，
+        # 这里保留一次抬起只是为了让跟手量干干净净
         app.processEvents()
     deadline = time.time() + 2.0
     while time.time() < deadline and not area.isVisible():
@@ -992,7 +996,7 @@ print("[ok] 全量清点: %d 个滚动区域里只剩看图控件(QGraphicsView 
       % len(mobile_ui.TouchScrollAreas(main)))
 
 # ④ "在下拉框/数值框附近滑动会误触它们"
-#    下拉框/数值框在 **press** 时就生效，所以守卫要连 press 一起扣住，点按时再重放。
+#    下拉框/数值框在 **press** 时就生效，所以触控路由认领整个序列，点按才激活。
 main.SwitchWidgetAndClear(main.subStackWidget.indexOf(main.settingView))
 app.processEvents()
 
@@ -1013,37 +1017,29 @@ spin = pickAny(setting, QAbstractSpinBox, 40)
 assert combo is not None and spin is not None, "设置页应有下拉框/数值框"
 for widget in (combo, spin):
     before = guard.Presses
-    sendMouse(QEvent.Type.MouseButtonPress, widget, QPointF(widget.width() / 2.0, 6))
-    assert guard.Presses == before + 1, "%s 的按下应被守卫接管" % widget.objectName()
-    sendMouse(QEvent.Type.MouseMove, widget, QPointF(widget.width() / 2.0, 6 + slop + 4))
-    app.processEvents()
+    touchSwipe(widget, QPointF(widget.width() / 2.0, 6),
+               QPointF(widget.width() / 2.0, 6 + slop + 4))
+    assert guard.Presses == before + 1, "%s 的按下应被触控路由接管" % widget.objectName()
     assert not (combo.view().isVisible() if widget is combo else False), \
         "滑动过程中下拉框不应该弹出来"
 comboValue = combo.currentText()
 spinValue = spin.value()
-sendMouse(QEvent.Type.MouseButtonRelease, combo, QPointF(combo.width() / 2.0, 6 + slop + 4))
-sendMouse(QEvent.Type.MouseButtonRelease, spin, QPointF(spin.width() / 2.0, 6 + slop + 4))
-app.processEvents()
 assert combo.currentText() == comboValue, "滑过下拉框不应该改它的值"
 assert spin.value() == spinValue, "滑过数值框不应该改它的值"
 assert not combo.view().isVisible(), "滑动不应该把下拉列表弹出来"
 print("[ok] 下拉框/数值框附近滑动不再误触: %s=%r / %s=%d 均未变"
       % (combo.objectName(), comboValue, spin.objectName(), spinValue))
 
-# 点按仍然生效(重放 press+release)：下拉框应该弹出列表
+# 点按仍然生效(走控件公开入口 showPopup)：下拉框应该弹出列表
 combo.setCurrentIndex(0)
-sendMouse(QEvent.Type.MouseButtonPress, combo, QPointF(combo.width() / 2.0, combo.height() / 2.0))
-sendMouse(QEvent.Type.MouseButtonRelease, combo, QPointF(combo.width() / 2.0, combo.height() / 2.0))
-app.processEvents()
-assert combo.view().isVisible(), "正常点按必须仍然弹出下拉列表(重放链路断了)"
+touchTap(combo, QPointF(combo.width() / 2.0, combo.height() / 2.0))
+assert combo.view().isVisible(), "正常点按必须仍然弹出下拉列表(激活链路断了)"
 combo.hidePopup()
 app.processEvents()
-# 数值框：点它的"上箭头"应该加 1(说明重放真的落到了控件自己的处理逻辑里)
+# 数值框：点它的"上箭头"应该加 1(激活走的是控件自己的按钮 click())
 upX = spin.width() - 6
 beforeValue = spin.value()
-sendMouse(QEvent.Type.MouseButtonPress, spin, QPointF(upX, 6))
-sendMouse(QEvent.Type.MouseButtonRelease, spin, QPointF(upX, 6))
-app.processEvents()
+touchTap(spin, QPointF(upX, 6))
 assert spin.value() == beforeValue + 1, \
     "点数值框上箭头应该 +1, 实际 %d -> %d" % (beforeValue, spin.value())
 print("[ok] 正常点按仍然生效: 下拉框弹出列表, 数值框箭头 %d -> %d"
