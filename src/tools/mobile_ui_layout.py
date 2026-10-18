@@ -167,7 +167,14 @@ def StackBookInfo(view):
         grid.addLayout(infoLayout, grid.rowCount(), 0, 1, 1)
         if picture is not None:
             picture.setMinimumWidth(0)
-            picture.setMaximumWidth(mobile_ui.CurrentLimit())
+            picture.setMinimumHeight(0)
+            # 封面必须是**固定尺寸**，不能只放宽策略：
+            #   * 只 Ignored -> 布局把它压成 0 宽(真机现象：详情页封面缩成小方块)
+            #   * 不设固定 -> QLabel 带 pixmap 时 minimumSizeHint 就是 pixmap 尺寸，
+            #     会把整页最小宽度顶回封面宽度(真机现象：整页比屏幕宽、右边被裁)
+            # 给一个"放得下又有面子"的固定 4:3 竖版尺寸，页面宽度就只由文字行决定。
+            width = min(300, max(200, mobile_ui.CurrentLimit()))
+            picture.setFixedSize(width, int(width * 4 / 3))
             picture.setAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop)
         view._jmStacked = True
         Log.Warn("book info layout stacked for portrait")
@@ -757,6 +764,35 @@ def ShrinkToFit(root, available):
     return count
 
 
+def _LogWideChildren(content, width, area):
+    """ 记日志：这个页面的内容为什么比视口宽(真机上"详情页超宽"只能靠它定位)
+
+    QScrollArea(widgetResizable) 会给内容 widget 取
+    max(视口宽, content.minimumSizeHint().width()) —— 只要有一个子控件的
+    minimumSizeHint 很宽，整页就跟着变宽、右边被裁掉。这里把最宽的几名列出来，
+    就知道该收谁(真机日志里直接看 "最宽的控件: ...")。
+    """
+    try:
+        rows = []
+        for child in content.findChildren(QWidget):
+            try:
+                need = child.minimumSizeHint().width()
+            except Exception:
+                continue
+            if need > width:
+                rows.append((need, type(child).__name__, child.objectName() or "?"))
+        if not rows:
+            return
+        rows.sort(reverse=True)
+        text = ", ".join("{}({}px)".format(name or cls, need)
+                         for need, cls, name in rows[:8])
+        Log.Warn("portrait: {} 内容 {}px > 视口 {}px, 最宽的控件: {}".format(
+            area.objectName() or "?", content.minimumSizeHint().width(), width, text))
+    except Exception as es:
+        Log.Error(es)
+    return
+
+
 def ClampPageWidth(root, available):
     """ 最后一道保险：页面内容不允许比视口宽
 
@@ -788,6 +824,8 @@ def ClampPageWidth(root, available):
                 content.setMinimumWidth(0)
             need = content.minimumSizeHint().width() > width
             clamped = bool(getattr(content, "_jmWidthClamped", False))
+            if need:
+                _LogWideChildren(content, width, area)
             if need and not clamped:
                 content.setMaximumWidth(width)
                 content._jmWidthClamped = True

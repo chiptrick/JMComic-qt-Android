@@ -364,16 +364,40 @@ class BookInfoView(QtWidgets.QWidget, Ui_BookInfo, QtTaskBase):
         self.flowLayout.addWidget(box)
         return
 
+    def FitPicture(self):
+        """ 按当前标签尺寸重画封面(竖屏把页面夹窄之后必须跟着缩放)
+
+        以前只在 UpdatePicture 里按"当时的标签尺寸"缩放一次：竖屏适配把页面
+        从 700px 夹到 370px 之后标签变窄了，pixmap 还是按旧尺寸画的 —— 用户看到的
+        就是"封面被右边裁掉"。反过来，QLabel 带 pixmap 时 minimumSizeHint 就是
+        pixmap 尺寸，会把整页最小宽度顶回封面宽度。这边两个方向都治。
+        """
+        if not self.pictureData or self.picture is None:
+            return
+        try:
+            radio = self.devicePixelRatio()
+            target = self.picture.size() * radio
+            if target.width() <= 2 or target.height() <= 2:
+                return
+            current = self.picture.pixmap()
+            if not current.isNull() and abs(current.width() - target.width()) <= 2:
+                # 已经是这个宽度了：别再 setPixmap，否则会来回抖动
+                return
+            pic = QtGui.QPixmap()
+            if not pic.loadFromData(self.pictureData):
+                return
+            pic.setDevicePixelRatio(radio)
+            self.picture.setPixmap(pic.scaled(target, QtCore.Qt.KeepAspectRatio,
+                                              QtCore.Qt.SmoothTransformation))
+        except Exception as es:
+            from tools.log import Log
+            Log.Error(es)
+        return
+
     def UpdatePicture(self, data, status):
         if status == Status.Ok:
             self.pictureData = data
-            pic = QtGui.QPixmap()
-            pic.loadFromData(data)
-            radio = self.devicePixelRatio()
-            pic.setDevicePixelRatio(radio)
-            newPic = pic.scaled(self.picture.size()*radio, QtCore.Qt.KeepAspectRatio, Qt.SmoothTransformation)
-            self.picture.setPixmap(newPic)
-            # self.picture.setScaledContents(True)
+            self.FitPicture()
             if Setting.CoverIsOpenWaifu.value:
                 w, h, mat, _ = ToolUtil.GetPictureSize(self.pictureData)
                 if max(w, h) <= Setting.CoverMaxNum.value:
@@ -386,12 +410,8 @@ class BookInfoView(QtWidgets.QWidget, Ui_BookInfo, QtTaskBase):
 
     def Waifu2xPictureBack(self, data, waifuId, index, tick):
         if data:
-            pic = QtGui.QPixmap()
-            pic.loadFromData(data)
-            radio = self.devicePixelRatio()
-            pic.setDevicePixelRatio(radio)
-            newPic = pic.scaled(self.picture.size()*radio, QtCore.Qt.KeepAspectRatio, Qt.SmoothTransformation)
-            self.picture.setPixmap(newPic)
+            self.pictureData = data
+            self.FitPicture()
         return
 
     def GetEpsBack(self, raw):
@@ -594,6 +614,10 @@ class BookInfoView(QtWidgets.QWidget, Ui_BookInfo, QtTaskBase):
         QtOwner().CopyText(text)
 
     def eventFilter(self, obj, event):
+        if obj == self.picture and event.type() == QEvent.Resize:
+            # 标签变宽/变窄(竖屏夹宽、旋转)后按新尺寸重画封面
+            self.FitPicture()
+            return False
         if event.type() == QEvent.MouseButtonPress:
             if event.button() == Qt.LeftButton:
                 if obj == self.picture:

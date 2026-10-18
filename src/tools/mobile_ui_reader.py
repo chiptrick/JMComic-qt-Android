@@ -252,6 +252,7 @@ class _ReaderPinch(QObject):
         self._startDist = 0.0
         self._basePercent = 100
         self._ratio = 1.0
+        self._liveRatio = 1.0
         self.Touches = 0
         self.Pinches = 0
         self.LastPercent = 100
@@ -262,6 +263,7 @@ class _ReaderPinch(QObject):
         self._pinching = False
         self._startDist = 0.0
         self._ratio = 1.0
+        self._liveRatio = 1.0
 
     # -- 事件 --------------------------------------------------------------
     def eventFilter(self, obj, event):
@@ -325,6 +327,9 @@ class _ReaderPinch(QObject):
         if pinching and not cancelled:
             # 抬手才真正应用缩放(见 ApplyPinch 的注释)
             self.FinishPinch()
+        elif pinching:
+            # 被打断(来电/系统手势)：把预览缩放撤掉，别留在半缩放状态
+            self.ResetPreview()
         self.Reset()
         return True
 
@@ -348,12 +353,15 @@ class _ReaderPinch(QObject):
         return
 
     def ApplyPinch(self, points):
-        """ 缩放过程中**只记比例**，不重排图形
+        """ 缩放过程中只做**视图缩放预览**(QGraphicsView.scale)，抬手才真正重排
 
-        以前这里每动 5% 就调一次 ScalePicture2 —— 那会走 changeScale -> 整页重排
-        (几十张图重新定位)，手指还在屏幕上时做这个，真机直接卡住(C 侧 qnn/图像线程
-        也被拖慢)。改成抬手时算一次、下一轮事件循环再应用：既不卡，也不会在输入
-        事件处理里改布局。
+        为什么不能用 ScalePicture2 做实时缩放：它走 changeScale -> ShowImgAll，
+        也就是**每一帧把所有可见图重新定位/重新缩放**，手指还在屏幕上时干这个，
+        真机上就是卡住不动(而且还可能顺带触发重解码)。改成：
+          * 手势中：`QGraphicsView.scale(step, step)` —— 只是改绘制变换，不动图元，
+            每帧几乎零成本，跟手
+          * 抬手时：先 resetTransform() 复位，再按目标百分比走一次 ScalePicture2
+            (整页重排只发生一次，且延后到事件循环外)
         """
         if self._startDist <= 1.0:
             self._startDist = _Distance(points)
@@ -362,14 +370,44 @@ class _ReaderPinch(QObject):
         if dist <= 1.0:
             return
         self._ratio = dist / self._startDist
+        self.ApplyPreview(self._ratio)
+        return
+
+    def ApplyPreview(self, ratio):
+        """ 按累计比例做视图缩放(只画，不重排) """
+        view = self._view
+        if view is None or not hasattr(view, "scale"):
+            return
+        try:
+            target = max(PinchMinPercent / 100.0,
+                         min(PinchMaxPercent / 100.0, max(0.05, ratio)))
+            step = target / max(0.05, self._liveRatio)
+            if abs(step - 1.0) < 0.01:
+                return
+            view.scale(step, step)
+            self._liveRatio = target
+        except Exception as es:
+            Log.Error(es)
+        return
+
+    def ResetPreview(self):
+        """ 撤掉预览用的视图缩放(不碰 scaleCnt) """
+        if abs(self._liveRatio - 1.0) < 0.001:
+            return
+        try:
+            self._view.resetTransform()
+        except Exception as es:
+            Log.Error(es)
+        self._liveRatio = 1.0
         return
 
     def FinishPinch(self):
-        """ 抬手：算出目标百分比，延后一拍应用(见 ApplyPinch 的注释) """
+        """ 抬手：撤掉预览，按目标百分比走一次真正的重排 """
         if not self._pinching:
             return
         base = self._basePercent
         ratio = self._ratio if self._ratio > 0 else 1.0
+        self.ResetPreview()
         percent = int(round(base * ratio))
         percent = max(PinchMinPercent, min(PinchMaxPercent, percent))
         if abs(percent - base) < PinchStepPercent:
@@ -396,6 +434,7 @@ class _ReaderPinch(QObject):
             tool.ScalePicture2(percent)
         except Exception as es:
             Log.Error(es)
+        self._liveRatio = 1.0
         return
 
     # -- 合成鼠标 ----------------------------------------------------------
