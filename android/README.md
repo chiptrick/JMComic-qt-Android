@@ -1410,9 +1410,34 @@ user_handler.py[line:243] - WARNING: 登陆失败！！！, code:401, text:
 说明 x86_64 包里的 HTTPS 请求 → AES 解密 → JSON 解析 → UI 提示整条链路是通的
 （`android/shims/curl_cffi` 垫片在没有原生 curl_cffi 的情况下能正常发请求）。
 
-未验证的部分（诚实说明）：**没有用真实账号登录、没有跑超分推理、没有测下载/看图**。
-超分在模拟器上只能走 CPU EP，速度远低于真机 NPU，用它评估性能没有意义；
-TLS 指纹相关的线上问题也只能在真机上验证（见 §10.1）。
+界面侧（`adb shell input -d <display> tap …` 逐个点，模拟器是多 display 的，
+`input`/`screencap` 都要带 display id）：
+
+| 操作 | 结果 |
+| --- | --- |
+| 点"菜单" | 抽屉正常展开：头像 / 登录 / 打卡 / J Coins / 等级 / 收藏数 / 分流 / 屏蔽词 / 用户区 / 导航区 |
+| 抽屉里点"设置" | 设置页渲染完整（通用 / 代理 / WAIFU2X / 下载与缓存 四个 tab、主题、语言、字体、缩放比例） |
+| 切到 "WAIFU2X" tab | `CPU/GPU 选择` 下拉显示 **CPU (ONNX Runtime)**（x86_64 没有 NPU，`getGpuInfo()` 只列 CPU），模型名 `MODEL_WAIFU2X_*` 正常填充 |
+
+超分真实推理（`touch files/sr_selftest` 触发 `main.py` 的一次性自检，`files/sr_report.txt`）：
+
+```
+引擎模式: 进程内 ctypes
+进程模式失败: 没有 QNN 运行库(libQnnHtp.so)，跳过进程模式，直接用 ctypes + CPU EP
+192x192 -> 384x384, 1.731s, 4 块, 432.7ms/块
+480x640 -> 960x1280, 6.577s, 20 块, 328.9ms/块
+实际后端: CPU (ONNX Runtime)
+profile providers: {'CPUExecutionProvider': 1275, 'XnnpackExecutionProvider': 750}
+SELFTEST_SUMMARY backend=CPU (ONNX Runtime) htp=False tile_ms=329
+```
+
+即超分链路（分块 → 推理 → 拼接 → 编码）在 x86_64 + CPU EP 上是真的能跑的，
+只是慢（真机 NPU 约 1/10 的耗时）。
+
+**仍然没验证的部分**：用真实账号登录、登录后的漫游/搜索/下载/看图。这些都需要账号
+（401 那类结果只能证明请求链路通，不能证明登录成功后的业务流程）。
+模拟器上也不该拿来评估性能 —— 超分只走 CPU，和真机 NPU 没有可比性。
+
 
 
 
