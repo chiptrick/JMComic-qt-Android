@@ -25,6 +25,9 @@ import stat
 import sys
 import tempfile
 
+# 整份测试挂死多久就把栈打出来并退出(见下方 faulthandler)
+FdWatchdogSeconds = 120
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.normpath(os.path.join(HERE, "..", ".."))
 SRC = os.path.join(REPO, "src")
@@ -37,6 +40,12 @@ import logging
 
 # Log.Error 在没 Init 的情况下会报 "No handlers could be found"，这里补一个空的
 logging.getLogger().addHandler(logging.NullHandler())
+
+# 看门狗：这一步真的挂死时(CI 上出现过：卡在 TestNavigation 里，日志什么都不剩)
+# 直接把 Python 栈打到 stdout 再退出，而不是把整条 job 拖到超时。
+import faulthandler
+
+faulthandler.dump_traceback_later(FdWatchdogSeconds, exit=True)
 
 from PySide6.QtCore import QEvent, QEventLoop, Qt, QTimer
 from PySide6.QtGui import QKeyEvent
