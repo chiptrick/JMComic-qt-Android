@@ -394,7 +394,13 @@ check("num<=1 正常落盘并返回 True", r2 is True and os.path.exists(okPath)
       "r={!r}".format(r2))
 
 # --------------------------------------------------------------------------
-# 4. TaskQImage worker：空数据跳过、异常不打死线程、不发上一页的图
+# 4. TaskQImage worker：空数据跳过、异常不打死线程、失败回调"空图"(不是上一页的图)
+#
+# 注意"失败要回调"这点**不能**改成"失败就静默跳过"：看图页是靠任务号判断"正在转换"
+# 的(p.cacheImageTaskId / p.cacheWaifu2xImageTaskId 只在回调里复位)，失败不回调 ->
+# 那一页永远停在"转换中"，超分图也再也不会被换上(真机上就是"超分跑完了界面还是原图")。
+# 所以这里的契约是：失败**必须**回调，且回调到的一定是"空图"(None/null QImage)，
+# 绝不是上一页的图、也不会被当成有效图。
 # --------------------------------------------------------------------------
 print("--- 4. TaskQImage worker ---")
 received = {}
@@ -404,13 +410,20 @@ def recv(img, param):
     received[param] = img
 
 
+def _IsEmpty(img):
+    """ 失败回调到的"空图"：None，或 Qt 信号把 None 转成出来的 null QImage """
+    return img is None or (isinstance(img, QImage) and img.isNull())
+
+
 tq = TaskQImage()
 tq.AddQImageTask(b"", 1.0, 0, 0, 0, None, recv, 9001)
 tq.AddQImageTask(PNG, 1.0, 0, 0, 0, None, recv, 9002)
 got = waitUntil(lambda: 9002 in received, timeout=15.0)
 check("空数据之后 worker 还活着，有效任务仍能回调", got,
       "received keys={}".format(sorted(received.keys())))
-check("空数据任务没有回调(只是跳过，不是发空图)", 9001 not in received)
+check("空数据任务回调的是空图(不是上一页的图, 也不是有效图)",
+      9001 in received and _IsEmpty(received.get(9001)),
+      "9001 -> {!r}".format(received.get(9001)))
 img = received.get(9002)
 check("回调拿到有效 QImage", isinstance(img, QImage) and not img.isNull()
       and (img.width(), img.height()) == (W, H), "img={!r}".format(img))
@@ -444,7 +457,8 @@ finally:
 check("异常任务之后的下一张仍能解码(线程没死)",
       got2 and isinstance(received.get(9004), QImage) and not received[9004].isNull(),
       "received keys={}".format(sorted(received.keys())))
-check("异常任务没有回调(NOT 上一页的图)", 9003 not in received,
+check("异常任务回调的是空图(NOT 上一页的图)",
+      9003 in received and _IsEmpty(received.get(9003)),
       "9003 -> {!r}".format(received.get(9003)))
 check("异常任务计入 fail", QImageStats().get("fail", 0) >= 1, "stats={}".format(QImageStats()))
 
