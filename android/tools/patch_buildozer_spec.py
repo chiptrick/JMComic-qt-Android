@@ -74,7 +74,7 @@ SkipRequirements = ["curl-cffi"]
 # 所以**只能往上改**：versionCode 变小会让 `adb install -r` 报
 # INSTALL_FAILED_VERSION_DOWNGRADE，手机上必须先卸载才能装。
 # 注意这是 Android 包版本，跟桌面端的 config.RealVersion(上游版本号，用于检查更新)无关。
-AppVersion = "0.38"
+AppVersion = "0.40"
 
 # p4a 只把 source.include_exts 放行的文件复制进应用目录(再打成 private.tar)。
 # buildozer/工具生成的默认值是 "py,png,jpg,kv,atlas,qml,js"，**不含 onnx/txt**，

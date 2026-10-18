@@ -227,6 +227,12 @@ DIST="$ANDROID/.buildozer/android/platform/build-$JM_ABI/dists/JMComic"
     "$DIST/AndroidManifest.xml" || \
     echo "[warn] SAF 组件/Java 源补丁有缺失项(首次构建还没有 dists 目录时属正常)"
 
+echo "===== [$(date +%T)] 3.7 Gradle 堆上限(2500m 不够，:packageDebug 会 OOM) ====="
+# 现象只有一句 "Execution failed for task ':packageDebug'"，真凶是 dist 目录里同时
+# 出现的 java_pid*.hprof(400MB 堆转储)。改 p4a 模板才不会被下次构建覆盖回去。
+bash "$JM_REPO/android/tools/wsl_patch_gradle_mem.sh" || {
+    echo "[FATAL] Gradle 内存补丁失败，:packageDebug 大概率 OOM"; exit 1; }
+
 echo "===== [$(date +%T)] 4. 阶段3：buildozer android debug(首次会编译 python3/openssl/libffi 等) ====="
 # buildozer 1.6.0 的 add_libs 映射表里没有 x86_64（只有 arm64-v8a），不补的话
 # android.add_libs_x86_64 会被完全忽略 -> APK 里没有我们自己的 .so，且无任何报错。
