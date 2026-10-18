@@ -2,13 +2,100 @@
 """ 竖屏排版重排（并排改上下、拆行、折行、压扁、封面尺寸） """
 from functools import partial
 
-from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QIcon
-from PySide6.QtWidgets import QAbstractScrollArea, QBoxLayout, QComboBox, QCommandLinkButton, QSizePolicy, QTabWidget, QToolButton, QWidget
+from PySide6.QtCore import QEvent, QObject, Qt, QTimer
+from PySide6.QtGui import QFontMetrics, QIcon
+from PySide6.QtWidgets import (QAbstractScrollArea, QBoxLayout, QComboBox, QCommandLinkButton,
+                               QGridLayout, QLabel, QSizePolicy, QTabWidget, QToolButton, QWidget)
 from tools.log import Log
 from tools.mobile_ui_base import *  # noqa: F401,F403
 from tools.mobile_ui_base import (_SelfAndChildren)
 from tools import mobile_ui
+
+
+# ---------------------------------------------------------------------------
+# 长文本标签：按宽度中间省略(否则整行最小宽度会把页面撑到屏幕外)
+# ---------------------------------------------------------------------------
+
+class _ElideOnResize(QObject):
+    """ 标签尺寸变化时重算省略文本(见 ElideText) """
+
+    def __init__(self, label, parent=None):
+        super().__init__(parent)
+        self._label = label
+
+    def eventFilter(self, obj, event):
+        try:
+            if event.type() == QEvent.Type.Resize:
+                self.Apply()
+        except Exception:
+            pass
+        return False
+
+    def Apply(self):
+        label = self._label
+        if label is None:
+            return
+        text = getattr(label, "_jmFullText", "")
+        try:
+            width = label.width()
+            if width <= 8:
+                # 还没跑过布局：宽度不可信，先原样放(策略是 Ignored，撑不宽页面)
+                QLabel.setText(label, text)
+                return
+            metrics = QFontMetrics(label.font())
+            QLabel.setText(label, metrics.elidedText(
+                text, Qt.TextElideMode.ElideMiddle, max(0, width - 2)))
+        except Exception:
+            try:
+                QLabel.setText(label, text)
+            except Exception:
+                pass
+        return
+
+
+def ElideText(label, text):
+    """ 让标签只画"放得下"的那一段(中间省略)，完整值进 tooltip 与 _jmFullText
+
+    真机现象："设置页/漫画详情页宽度超出范围"。QLabel 的 sizeHint 就是整段文本宽度，
+    路径(`/storage/emulated/0/Android/data/.../commies`)或书名一长，那一行的
+    **最小宽度**就超过屏幕，Qt 只能把整页撑宽(用户看到右边被切掉、页面还能横向拖)。
+
+    水平策略必须是 Ignored：qSmartMinSize 对 Preferred/Expanding 都会取 sizeHint，
+    光把 minimumWidth 设成 0 没用。
+    """
+    if label is None:
+        return
+    if not IsEnabled():
+        # 桌面端保持原样(整条路径直接显示，放得下就放得下)
+        try:
+            QLabel.setText(label, str(text or ""))
+        except Exception:
+            pass
+        return
+    try:
+        label._jmFullText = str(text or "")
+        policy = label.sizePolicy()
+        label.setSizePolicy(QSizePolicy.Policy.Ignored, policy.verticalPolicy())
+        label.setMinimumWidth(0)
+        label.setToolTip(label._jmFullText)
+    except Exception as es:
+        Log.Error(es)
+        return
+    filter = getattr(label, "_jmElideFilter", None)
+    if filter is None:
+        filter = _ElideOnResize(label, label)
+        label._jmElideFilter = filter
+        label.installEventFilter(filter)
+    filter.Apply()
+    # 布局跑完后的真实宽度要再算一次(第一次调用时控件还没被布局)
+    QTimer.singleShot(0, filter.Apply)
+    return
+
+
+def FullText(label):
+    """ 标签的完整文本(被 ElideText 处理过时返回原文) """
+    return getattr(label, "_jmFullText", "") or (label.text() if label is not None else "")
+
 
 
 
@@ -124,6 +211,108 @@ def _CompressNavButtons(buttons):
     return
 
 
+def StackSettingNav(view):
+    """ 设置页专用收尾(方向已经由 StackSideNavs 改好)
+
+    这里只补设置页自己的细节：目录行里的路径标签最小宽 150px，竖屏下会把"打开目录"
+    按钮挤出去；而且路径本身很长，QLabel 的 sizeHint 是整段路径宽度 —— 整行的最小
+    宽度因此远超屏幕，页面被撑宽(真机现象："设置页宽度超出范围")。
+    做法：路径标签改成按宽度中间省略(tooltip 里保留完整路径)。
+    """
+    try:
+        if view is None:
+            return
+        FitSettingRows(view)
+    except Exception as es:
+        Log.Error(es)
+    return
+
+
+def FitSettingRows(view):
+    """ 设置页四行"目录路径 + 打开目录"：路径中间省略 + 整页禁止横向滚动
+
+    原来这里是 `label.setMinimumWidth(100)`，但 100px 根本不够显示路径，Qt 会按
+    整段文本的 sizeHint 撑；`_jmElide` 之后行宽由屏幕决定，路径显示不下的部分用
+    "…" 省略。
+    """
+    for name in ("downloadDir", "cacheDir", "chatDir", "waifu2xDir"):
+        label = getattr(view, name, None)
+        if label is not None:
+            ElideText(label, FullText(label))
+    # 路径行已经能自适应，剩下的横向溢出(某些语言/字号下)宁可裁掉也不要让整页
+    # 可以横向拖动 —— 用户感知的"宽度超出范围"就是这种横向可拖动
+    area = getattr(view, "scrollArea", None)
+    if area is not None:
+        try:
+            area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        except Exception:
+            pass
+    return
+
+
+def WrapBookInfoButtons(view):
+    """ 漫画详情页的操作按钮行：一行放不下就自动折成多行
+
+    真机现象："漫画详情页宽度超出范围"。`horizontalLayout_2` 里并排放了
+    收藏/本地/评论/下载/上传/清理 6 个图标按钮 + "购买(Jcoin)" + "上次看到第N章第M页"
+    两个文字按钮，最小宽度加起来 549px —— 竖屏 384px 下整页被撑宽。
+    折行后：6 个图标按钮一行(约 270px)，两个文字按钮下一行(约 230px)，都放得下。
+    """
+    try:
+        if view is None or getattr(view, "_jmButtonsWrapped", False):
+            return
+        layout = getattr(view, "horizontalLayout_2", None)
+        parent = getattr(view, "verticalLayout_4", None)
+        if layout is None or parent is None:
+            return
+        index = parent.indexOf(layout)
+        if index < 0:
+            return
+        widgets = []
+        for i in range(layout.count()):
+            item = layout.itemAt(i)
+            widget = item.widget() if item is not None else None
+            if widget is not None:
+                widgets.append(widget)
+        if len(widgets) < 3:
+            return
+        box = QWidget(view)
+        grid = QGridLayout(box)
+        grid.setContentsMargins(0, 0, 0, 0)
+        grid.setSpacing(4)
+        avail = max(200, mobile_ui.CurrentLimit())
+        row = 0
+        col = 0
+        used = 0
+        for widget in widgets:
+            widget.setMinimumWidth(0)
+            try:
+                width = max(24, widget.sizeHint().width())
+            except Exception:
+                width = 40
+            if used > 0 and used + width > avail:
+                row += 1
+                col = 0
+                used = 0
+            grid.addWidget(widget, row, col)
+            col += 1
+            used += width + 4
+        for c in range(col):
+            grid.setColumnStretch(c, 0)
+        parent.removeItem(layout)
+        layout.setParent(None)
+        parent.insertWidget(index, box)
+        view._jmButtonsWrapped = True
+        # 详情页同样不需要横向滚动
+        area = getattr(view, "scrollArea", None)
+        if area is not None:
+            area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        Log.Warn("portrait: 详情页操作按钮折成 {} 行".format(row + 1))
+    except Exception as es:
+        Log.Error(es)
+    return
+
+
 def StackSideNavs(root=None):
     """ 竖屏："左侧导航列 + 右侧滚动内容" 的左右并排 -> 上下堆叠
 
@@ -187,24 +376,6 @@ def StackSideNavs(root=None):
     if count:
         Log.Warn("portrait: {} 个[左导航+右内容]页面改为上下堆叠".format(count))
     return count
-
-
-def StackSettingNav(view):
-    """ 设置页专用收尾(方向已经由 StackSideNavs 改好)
-
-    这里只补设置页自己的细节：目录行里的路径标签最小宽 150px，竖屏下会把"打开目录"
-    按钮挤出去。
-    """
-    try:
-        if view is None:
-            return
-        for name in ("downloadDir", "cacheDir", "chatDir", "waifu2xDir"):
-            label = getattr(view, name, None)
-            if label is not None:
-                label.setMinimumWidth(100)
-    except Exception as es:
-        Log.Error(es)
-    return
 
 
 def StackSrTool(view, mainView=None):
@@ -553,6 +724,56 @@ def ShrinkToFit(root, available):
     return count
 
 
+def ClampPageWidth(root, available):
+    """ 最后一道保险：页面内容不允许比视口宽
+
+    拆行/压扁/折行都跑完还放不下的时候(某些语言、某些字号、运行时才填进去的超长
+    文本)，Qt 会把整页撑得比屏幕宽 —— 用户看到的就是"页面宽度超出范围"、右边被切掉、
+    而且整页还能横向拖。这里把 QScrollArea 的内容宽度夹在视口宽度上：
+    横向滚动条直接关掉，多出来的部分宁可裁掉，也不要一个能拖出屏幕的页面。
+
+    只处理 QScrollArea(它的 widget() 才是"内容");QAbstractItemView/QPlainTextEdit 的
+    widget() 是视口本身，绝不能改它的最大宽度。
+    """
+    from PySide6.QtWidgets import QScrollArea
+    if root is None or available <= 0:
+        return 0
+    count = 0
+    for area in _SelfAndChildren(root, QScrollArea):
+        try:
+            if not isinstance(area, QScrollArea):
+                continue
+            viewport = area.viewport()
+            width = viewport.width() if viewport is not None else 0
+            if width <= 8:
+                width = available
+            area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+            content = area.widget()
+            if content is None:
+                continue
+            if content.minimumWidth() > width:
+                content.setMinimumWidth(0)
+            need = content.minimumSizeHint().width() > width
+            clamped = bool(getattr(content, "_jmWidthClamped", False))
+            if need and not clamped:
+                content.setMaximumWidth(width)
+                content._jmWidthClamped = True
+                count += 1
+            elif need and clamped:
+                # 视口变宽/变窄(旋转屏幕)后跟着改
+                if content.maximumWidth() != width:
+                    content.setMaximumWidth(width)
+            elif clamped:
+                # 已经不溢出了：把最大宽度还给布局
+                content.setMaximumWidth(16777215)
+                content._jmWidthClamped = False
+        except Exception as es:
+            Log.Error(es)
+    if count:
+        Log.Warn("portrait: {} 个页面内容被夹到视口宽度(不再横向溢出)".format(count))
+    return count
+
+
 def ReflowPortrait(root=None, available=None):
     """ 按当前宽度重排一次(幂等，可反复调用)
 
@@ -574,6 +795,7 @@ def ReflowPortrait(root=None, available=None):
     count += WrapWideRows(root, available)
     count += FlattenWideGrids(root, available)
     count += ShrinkToFit(root, available)
+    count += ClampPageWidth(root, available)
     return count
 
 
@@ -599,6 +821,10 @@ def InstallReflowHook(mainView):
             except Exception as es:
                 Log.Error(es)
         QTimer.singleShot(150, ReflowPage)
+        # 详情页的标题/标签/按钮文字、设置页的路径都是**网络/配置回来之后**才 setText
+        # 的，150ms 那一次量到的还是空文本。再补两次(总耗时 < 1s，页面已经静止)。
+        QTimer.singleShot(650, ReflowPage)
+        QTimer.singleShot(1500, ReflowPage)
 
     try:
         stack.currentChanged.connect(OnPageChanged)

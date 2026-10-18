@@ -191,6 +191,10 @@ getSaveFileName`：Qt 在 Android 上没有原生对话框，会新建一个**�
 需要「所有文件访问权限」")，快捷入口(应用目录/私有目录/存储/下载/图片)里**读不了的
 直接置灰**，而不是点进去报错。
 
+> **2026-10-18 更新**：这个应用内选择器现在是**降级通道**。手机上选文件/选目录
+> 默认走 SAF（系统选择器，不需要任何存储权限），只有桥不可用时才回落到这里，
+> 而且存储权限已经从 manifest 删掉 —— 详见 §3.11。
+
 改了这些调用点：`local_read_view`(3 处，导入本地漫画)、`waifu2x_tool_view`(2 处)、
 `setting_view`、`download_dir_view`、`nas_add_view`、`batch_sr_tool_view`、
 `read_view`(2 处)。
@@ -678,8 +682,92 @@ site-packages 打成 `lib/arm64-v8a/libpybundle.so`（一个 tar.gz 伪装成 .s
 | 宿主装了真 curl_cffi | `host_test_net_fallback.py` A 段"垫片语义"误命中真包 | shims 从 `sys.path.append` 改 `insert(0)` |
 | 旧 Qt wheel 混在 wheels/ 目录 | 构建脚本 `ls \| head -1` 按字符串序选中 6.11.2（cp311） | fetch 脚本把非目标版本归档进 `wheels/archive/`，build 脚本再加 abi3 断言 |
 
+### 3.11 第八轮真机反馈（2026-10-18，5 条）：SAF 选择器 / 双指缩放 / 页面宽度
+
+| # | 现象 | 根因（实证） | 修法 |
+| --- | --- | --- | --- |
+| 1 | 设置页、漫画详情页"宽度超出范围" | ①目录行里的路径 `QLabel` 的 `sizeHint` 就是**整段路径**宽度（`/storage/emulated/0/Android/data/<包名>/files/JMComic/commies` 60+ 字符），整行最小宽度远超屏幕；②详情页操作按钮行（6 个图标按钮 + 购买 + "上次看到第N章第M页"）最小宽度 549px | ①路径标签改成按宽度**中间省略**（`mobile_ui_layout.ElideText`，完整路径进 tooltip）；②按钮行折成多行（`WrapBookInfoButtons`）；③兜底 `ClampPageWidth`：拆行/压扁之后仍放不下的页面，把 `QScrollArea` 内容宽度夹到视口宽并关掉横向滚动条（宁可裁掉也不让整页能横向拖）；④换页后的重排在 150/650/1500ms 各跑一次（页面文字是网络回来后 `setText` 的，早先那一次量到的还是空文本） |
+| 2 | 看图菜单里"翻页模式"默认缩放不是 100% | `read_tool.ChangeReadMode2` 对 `UpDown/Samewight` 硬编码 `ScalePicture2(80)` | 手机上所有阅读模式都设 100%（桌面端保留 80%，窗口宽留白是刻意的） |
+| 3 | 看图页面**无法双指缩放** | 整条看图链路都建在鼠标事件上（`_ReaderDrag` 的 press/move/release、`read_graphics.eventFilter` 的三分区点按），而 Qt 只有在控件**不**接受触摸事件时才把触摸合成为鼠标事件 —— 想收 `QTouchEvent` 就必然丢掉鼠标，两者不能同时白拿 | `mobile_ui_reader._ReaderPinch`：视口 `WA_AcceptTouchEvents` + 自己把**单指**序列合成成鼠标事件（拖动/点按语义零变化），**双指**按两指距离比例走和菜单同一个入口 `ScalePicture2`。1→2 指时先合成 25px 移动再松手，避免那次 press 被场景当成"点按"误翻页 |
+| 4 | 选文件/选目录"索要过多权限" | 之前为了让 Qt 直接 `fopen("/storage/emulated/0/…")`，manifest 索要了 `READ_EXTERNAL_STORAGE`/`READ_MEDIA_IMAGES`/`MANAGE_EXTERNAL_STORAGE`（最后那个要用户去系统设置手动开"所有文件访问权限"），而且 scoped storage 下仍然读不到 | 全部改走 **SAF**（见下方"SAF 桥"），三个存储权限从 manifest 里删掉，一个都不留 |
+| 5 | 设置页"打开目录"点了没反应 | `QDesktopServices.openUrl(QUrl.fromLocalFile(path))` —— Android 上没有任何应用处理 `file://`（7.0 起系统就禁了） | 走 `Intent.ACTION_VIEW`（`DocumentsUI` 认 `vnd.android.document/directory`）：配了 SAF 导出目录的直接打开那个目录，否则打开本地路径；应用专属目录（系统对其它应用完全不可见）返回 `sandbox` 由界面给可操作提示 |
+
+#### SAF 桥：为什么绕这么一圈
+
+SAF（存储访问框架）是 Android 官方"不需要任何权限"的方案，但它的入口是
+`startActivityForResult` + `onActivityResult`，**Python 侧完全够不着**：
+
+* `pyjnius` 在 `bootstrap=qt` 下 dlopen 失败（`libjnius.so` 需要
+  `WebView_AndroidGetJNIEnv`，Qt bootstrap 没有这个符号，见 §3.4 #9）
+* PySide6 没有绑定 `QJniObject`
+* `am start` **不能**用来启自己的 Activity：Android 14+ 上
+  `ActivityManagerShellCommand` 把调用方包名写死成 `com.android.shell`，
+  被 `assertPackageMatchesCallingUid` 判为"包名不属于调用 uid"直接拒绝（Android 16 实测）
+* `am start-service --user 0` **可以**（实测只差"服务不存在"这一步）——
+  所以桥的入口是 Service，不是 Activity
+
+于是：
+
+```
+src/tools/saf_bridge.py            Python 侧：写请求 / 等结果 / 语义封装
+android/java/org/jmcomic/
+    SafService.java                同进程 Service：轮询信箱，用 ContentResolver 干活
+    SafPickActivity.java           不可见中转 Activity：拉起系统选择器、接 onActivityResult
+    SafStore.java                  SAF 读写实现(整树拷入/拷出、另存、显示名…)
+```
+
+通信是**文件信箱**（两端同 uid，同一个 `filesDir`）：
+
+```
+<filesDir>/saf/inbox/<id>.json    Python 写 {"id","op",...}
+<filesDir>/saf/outbox/<id>.json   Java 写 {"ok":true,...} / {"ok":false,"cancel":true}
+```
+
+* `id` 是定宽数字前缀 + 序号，Java 按文件名排序处理，请求顺序 = 提交顺序
+* 结果文件用 `.json.tmp` → `rename` 原子落地，Python 看到 `.json` 时内容一定完整
+* 等待用嵌套 `QEventLoop` + 60ms 轮询（和 3.3 的应用内选择器同一套办法，界面不冻）
+
+**语义约定**（业务层全是按路径干活的，SAF 给的是 `content://`）：
+
+| 场景 | 做法 |
+| --- | --- |
+| 选单个文件（超分导入图片、导入 zip） | SAF 选完立刻把内容拷进 `<filesDir>/import/`，返回**本地路径**（调用方一行不用改） |
+| 选目录（导入本地漫画、批量超分） | SAF 选目录 → 整棵树拷进 `<filesDir>/import/<目录名>` → 返回本地路径 |
+| 下载/缓存目录 | 本地落盘仍在应用专属目录（Android 10+ 无需权限）；SAF 选的目录记为**导出目标**，整本下完一次性导出（`DownloadItem.ExportToSaf`，Java 后台线程干，只投递不等结果） |
+| 另存为（复制图片、保存超分结果） | SAF `ACTION_CREATE_DOCUMENT` 选位置 → 先写本地暂存 → Java 写到那个 URI（`SafStore.WriteFile`） |
+| 打开目录 | 见上表 #5 |
+
+**降级**：桥没打进 APK / `am` 被拦 / Service 起不来时，`saf_bridge.IsSupported()` 或
+首次 `ping` 失败，`mobile_file_dialog` 自动回落到 3.3 那个应用内选择器（桌面端逻辑
+一个字没改）。代价是"取消"与"不可用"必须分清，否则会连弹两次选择器 ——
+`PickFile/PickTree` 取消返回 `False`、不可用返回 `None`。
+
+**构建挂钩**（`wsl_build_apk.sh` 步骤 3.6）：
+
+```bash
+python3 android/tools/patch_android_manifest.py \
+    --template <p4a>/pythonforandroid/bootstraps/qt/build/templates/AndroidManifest.tmpl.xml \
+    --java android/java --dist <dists>/JMComic <manifest...>
+```
+
+* 组件必须写进 p4a 的 **manifest 模板**（`{{ args.extra_manifest_application_xml }}`
+  那一行之前）：p4a 每次构建都按模板重新渲染 `src/main/AndroidManifest.xml`，
+  只补渲染产物下次就被覆盖
+* Java 源同理要在 gradle 编译**之前**就位，所以直接拷进 `dist/src/main/java/org`
+  （`android.add_src` 在这个 p4a 版本里只对 ant 生效，gradle 分支不读它）
+* `buildozer.spec` 的 `android.permissions` 现在只留
+  `INTERNET/ACCESS_NETWORK_STATE/WAKE_LOCK`
+
+**主机自检**（不需要手机）：`android/tools/host_test_saf_bridge.py`，用一个假 Service
+线程把协议的每条路径跑一遍（ping / 选文件 / 选目录 / 整树拷入 / 导出 / 另存 /
+sandbox 判定 / 取消语义）：
+
+```bash
+python android/tools/host_test_saf_bridge.py
+```
 
 ---
+
 
 ## 4. Waifu2x on 高通 NPU
 
@@ -830,16 +918,19 @@ adb shell dumpsys package <包名> | grep -E "minSdk|targetSdk"
 | --- | --- | --- |
 | 配置/数据/缓存/日志 | `/data/data/<包名>/files/{config,data,cache,state}` | 无需申请 |
 | 下载目录 | `/storage/emulated/0/Android/data/<包名>/files/JMComic` | 无需申请(Android 10+) |
+| 导入落地（SAF 选中的文件/目录拷到这里） | `/data/data/<包名>/files/import/<名字>` | 无需申请 |
 | 模型 | `/data/data/<包名>/files/waifu2x-models` | 无需申请 |
 
-需要申请的权限只有网络：`android.permission.INTERNET`（p4a 默认已加）。
-因为**不考虑 Android 14 以下**，所以不需要 `READ/WRITE_EXTERNAL_STORAGE`、
-不需要 `MANAGE_EXTERNAL_STORAGE`，也不用 `requestLegacyExternalStorage`。
+**APK 只申请网络权限**：`INTERNET` / `ACCESS_NETWORK_STATE` / `WAKE_LOCK`。
+`READ_EXTERNAL_STORAGE`、`READ_MEDIA_IMAGES`、`MANAGE_EXTERNAL_STORAGE`
+("所有文件访问权限") **全部删除** —— 应用私有目录之外的东西一律通过 SAF 由用户
+授权（见 3.11），系统选择器给的是 per-URI 授权，不需要任何权限声明，
+也不再需要引导用户去系统设置里手动开权限。
 
-**注意**：应用私有目录之外(即手机存储的 `Download`/`Pictures`/`DCIM` 等)在这个权限
-配置下是**读不到**的(`os.scandir` 抛 `PermissionError`)。要导入手机里已有的漫画/图片，
-需要在清单里加 `MANAGE_EXTERNAL_STORAGE` 并引导用户到系统设置里授权；在此之前，
-应用内文件选择器(见 3.3)会把这些入口置灰并给出"需要「所有文件访问权限」"的提示。
+代价（刻意的取舍）：SAF 授权的是 `content://` URI，Python 的 `open()` 打不开，
+所以"导入"= **拷贝一份**到 `files/import/`（占双份空间）；下载目录同理，本地落盘
+在应用专属目录，用户选的目录作为导出目标，整本下完才拷过去（同样占双份空间，
+换来的是一页一张图的连续写入不必逐文件走一次 IPC）。
 
 ---
 

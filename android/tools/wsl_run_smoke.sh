@@ -29,6 +29,7 @@ echo "===== 1. 语法编译(目标版本语法) ====="
     src/tools/mobile_ui_touch.py \
     src/tools/mobile_ui_diag.py \
     src/tools/mobile_file_dialog.py \
+    src/tools/saf_bridge.py \
     src/component/widget/comic_item_widget.py \
     src/component/list/comic_list_widget.py \
     src/component/label/msg_label.py \
@@ -38,6 +39,8 @@ echo "===== 1. 语法编译(目标版本语法) ====="
     src/view/main/main_view.py \
     src/view/tool/local_read_view.py \
     src/view/tool/waifu2x_tool_view.py \
+    src/view/download/download_item.py \
+    src/view/download/download_dir_view.py \
     src/view/setting/setting_view.py \
     src/view/read/read_view.py \
     android/main.py \
@@ -50,6 +53,7 @@ echo "===== 1. 语法编译(目标版本语法) ====="
     android/tools/host_test_crypto_android.py \
     android/tools/host_test_image_pipeline.py \
     android/tools/host_test_file_dialog.py \
+    android/tools/host_test_saf_bridge.py \
     android/tools/host_test_net_fallback.py \
     && echo "[ok] 语法编译通过" || echo "[FAIL] 语法编译失败"
 
@@ -75,7 +79,10 @@ run "6. 应用内文件选择器回归" android/tools/host_test_file_dialog.py
 picker=$?
 run "7. HTTP/3、ECH 失败降级回归" android/tools/host_test_net_fallback.py
 netfb=$?
+run "8. SAF 桥信箱协议回归" android/tools/host_test_saf_bridge.py
+saf=$?
 
 echo
-echo "结果: smoke=$smoke interfaces=$iface crypto=$crypto image=$image picker=$picker netfb=$netfb"
-[ "$smoke" -eq 0 ] && [ "$iface" -eq 0 ] && [ "$crypto" -eq 0 ] && [ "$image" -eq 0 ] && [ "$picker" -eq 0 ] && [ "$netfb" -eq 0 ]
+echo "结果: smoke=$smoke interfaces=$iface crypto=$crypto image=$image picker=$picker netfb=$netfb saf=$saf"
+[ "$smoke" -eq 0 ] && [ "$iface" -eq 0 ] && [ "$crypto" -eq 0 ] && [ "$image" -eq 0 ] \
+    && [ "$picker" -eq 0 ] && [ "$netfb" -eq 0 ] && [ "$saf" -eq 0 ]

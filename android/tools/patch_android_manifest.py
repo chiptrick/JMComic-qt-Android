@@ -1,91 +1,215 @@
 # coding:utf-8
-""" 给 p4a 生成的 AndroidManifest.xml 补上"读取手机存储"所需的权限
+""" 给 p4a 的 AndroidManifest(qt bootstrap)注入 SAF 桥组件，并去掉多余的存储权限
 
-背景(真机问题："导入本地漫画 / 图片超分导入本地图片会导致应用卡死")：
-    p4a 的 manifest 模板只按 buildozer.spec 的 android.permissions 生成权限，而
-    默认值只有 INTERNET / ACCESS_NETWORK_STATE / WAKE_LOCK / WRITE_EXTERNAL_STORAGE。
-    Android 11+ 起 WRITE_EXTERNAL_STORAGE 已经完全失效，于是 targetSdk=34 的包在
-    Android 14/15/16 上**读不到** /storage/emulated/0 下的 Download / Pictures /
-    DCIM（scoped storage）。用户点"导入本地漫画"选目录时满屏 PermissionError，
-    表现就是"选不到文件/卡死"。
+背景
+----
+Android 11+ 起 `WRITE_EXTERNAL_STORAGE` 已失效，为了读 /storage/emulated/0，之前
+索要了 `READ_EXTERNAL_STORAGE` / `READ_MEDIA_IMAGES` / `MANAGE_EXTERNAL_STORAGE`
+(最后一个还要用户去系统设置里手动开"所有文件访问权限")。现在改成 SAF：
 
-这里补三条：
-    READ_EXTERNAL_STORAGE   Android 12 及以下的读取权限(留着兼容老设备)
-    READ_MEDIA_IMAGES       Android 13+ 的图片读取权限
-    MANAGE_EXTERNAL_STORAGE "所有文件访问权限"(Android 11+)，需要在系统设置里手动授予：
-                           设置 -> 应用 -> 本应用 -> 权限 -> 所有文件访问权限。
-                           没有 pyjnius 就没法在应用里弹权限申请框(APK 里没有
-                           libjnius.so，PySide6 也没绑定 QJniObject)，所以只能引导用户手动开。
+    * 选文件 / 选目录 / 另存为 全部走系统选择器(ACTION_OPEN_DOCUMENT[_TREE])，
+      **不需要任何存储权限**，授权是 per-URI 的
+    * Python 侧调不到 Java API，所以有一个同进程的 SafService + 一个不可见的
+      SafPickActivity 做桥(见 tools/saf_bridge.py 与 android/java/org/jmcomic/*)
+
+这两个组件必须声明在 manifest 里，而 p4a 每次构建都会用模板**重新渲染**
+src/main/AndroidManifest.xml，所以光补 dists 里的文件不够 —— 得补模板
+(bootstraps/qt/build/templates/AndroidManifest.tmpl.xml) 里
+`{{ args.extra_manifest_application_xml }}` 那一行。
 
 用法：
-    python3 android/tools/patch_android_manifest.py <manifest...>
-    (manifest 不存在时直接跳过；全部成功返回 0，出现"该补的没补上"返回 1)
+    python3 patch_android_manifest.py <manifest...>                    # 渲染出来的 manifest
+    python3 patch_android_manifest.py --template <tmpl.xml>            # p4a 模板
+    python3 patch_android_manifest.py --java <src> --dist <dist_dir>   # 拷 Java 源
 """
 import os
+import shutil
 import sys
 
-# 必须补上的权限(缺一不可，缺了就是"选不到手机里的文件")
-NeedPermissions = (
+# 必须从 manifest 里**移除**的权限(SAF 之后一个都不需要)
+DropPermissions = (
     "android.permission.READ_EXTERNAL_STORAGE",
+    "android.permission.WRITE_EXTERNAL_STORAGE",
     "android.permission.READ_MEDIA_IMAGES",
+    "android.permission.READ_MEDIA_VIDEO",
     "android.permission.MANAGE_EXTERNAL_STORAGE",
 )
 
+# SAF 桥的两个组件
+#
+# exported=false：只能被同 uid(本应用)启动。Python 用
+# `am start-service --user 0 -n <pkg>/org.jmcomic.SafService` 拉起，调用方就是本应用。
+# Activity 用透明主题 + noHistory + excludeFromRecents + taskAffinity=""：用户完全看不到
+# 这一层，屏幕上只有"主界面 -> 系统文件选择器 -> 主界面"。
+ComponentsXml = """        <service android:name="org.jmcomic.SafService"
+                 android:exported="false"
+                 android:stopWithTask="false" />
+        <activity android:name="org.jmcomic.SafPickActivity"
+                  android:exported="false"
+                  android:theme="@android:style/Theme.Translucent.NoTitleBar"
+                  android:excludeFromRecents="true"
+                  android:noHistory="true"
+                  android:taskAffinity=""
+                  android:configChanges="orientation|screenSize|keyboardHidden|uiMode" />
+"""
 
-def Patch(path):
-    """ 返回 (是否改动, 缺失权限列表) """
+Marker = "org.jmcomic.SafService"
+
+
+def _Read(path):
     with open(path, "r", encoding="utf-8") as f:
-        text = f.read()
-    missing = [p for p in NeedPermissions
-               if 'android:name="{}"'.format(p) not in text]
-    if not missing:
-        return False, []
-    # 缩进跟现有 uses-permission 对齐(真实文件是 4 空格)
+        return f.read()
+
+
+def _Write(path, text):
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(text)
+
+
+def DropStoragePermissions(text):
+    """ 删除多余的存储权限声明；返回 (新文本, 删掉的条数) """
     lines = text.splitlines()
-    indent = "    "
+    kept = []
+    removed = 0
+    for line in lines:
+        if "<uses-permission" in line and any(p in line for p in DropPermissions):
+            removed += 1
+            continue
+        kept.append(line)
+    return "\n".join(kept) + ("\n" if text.endswith("\n") else ""), removed
+
+
+def InsertComponents(text, anchor=None):
+    """ 在 anchor 之前(默认 </application> 之前)插入组件声明；已存在则跳过 """
+    if Marker in text:
+        return text, False
+    lines = text.splitlines()
     insertAt = None
-    for index, line in enumerate(lines):
-        if "<uses-permission" in line:
-            indent = line[:len(line) - len(line.lstrip())]
-            insertAt = index + 1
-    if insertAt is None:
-        # 没有现成的 uses-permission：插到 <application 之前
+    if anchor:
         for index, line in enumerate(lines):
-            if "<application" in line:
+            if anchor in line:
                 insertAt = index
                 break
     if insertAt is None:
-        return False, missing
-    for permission in missing:
-        lines.insert(insertAt, '{}<uses-permission android:name="{}" />'.format(indent, permission))
-        insertAt += 1
-    with open(path, "w", encoding="utf-8") as f:
-        f.write("\n".join(lines) + "\n")
-    return True, []
+        for index, line in enumerate(lines):
+            if "</application>" in line:
+                insertAt = index
+                break
+    if insertAt is None:
+        return text, False
+    block = ComponentsXml.rstrip("\n").splitlines()
+    for offset, line in enumerate(block):
+        lines.insert(insertAt + offset, line)
+    return "\n".join(lines) + ("\n" if text.endswith("\n") else ""), True
+
+
+def PatchManifest(path):
+    """ 渲染出来的 manifest：加组件 + 去权限 """
+    text = _Read(path)
+    text, inserted = InsertComponents(text)
+    text, removed = DropStoragePermissions(text)
+    _Write(path, text)
+    return inserted, removed
+
+
+def PatchTemplate(path):
+    """ p4a 模板：只在 extra_manifest_application_xml 那行之前插组件 """
+    text = _Read(path)
+    text, inserted = InsertComponents(text, "{{ args.extra_manifest_application_xml }}")
+    if inserted:
+        _Write(path, text)
+    return inserted
+
+
+def CopyJava(sourceDir, destDirs):
+    """ 把 android/java 下的包拷进若干目标目录(每个都是 .../src/main/java) """
+    if not sourceDir:
+        return 0
+    source = os.path.join(sourceDir, "org")
+    if not os.path.isdir(source):
+        return 0
+    total = 0
+    for dest in destDirs:
+        if not dest:
+            continue
+        target = os.path.join(dest, "org")
+        os.makedirs(target, exist_ok=True)
+        for root, _, files in os.walk(source):
+            rel = os.path.relpath(root, source)
+            outDir = target if rel == "." else os.path.join(target, rel)
+            os.makedirs(outDir, exist_ok=True)
+            for name in files:
+                if not name.endswith(".java"):
+                    continue
+                shutil.copyfile(os.path.join(root, name), os.path.join(outDir, name))
+                total += 1
+    return total
 
 
 def Main(argv):
-    if len(argv) < 2:
-        print("用法: patch_android_manifest.py <AndroidManifest.xml> [...]")
-        return 2
+    args = argv[1:]
+    template = ""
+    javaDir = ""
+    javaDests = []
+    manifests = []
+    index = 0
+    while index < len(args):
+        arg = args[index]
+        if arg == "--template" and index + 1 < len(args):
+            template = args[index + 1]
+            index += 2
+            continue
+        if arg == "--java" and index + 1 < len(args):
+            javaDir = args[index + 1]
+            index += 2
+            continue
+        if arg == "--java-dest" and index + 1 < len(args):
+            javaDests.append(args[index + 1])
+            index += 2
+            continue
+        if arg == "--dist" and index + 1 < len(args):
+            # 兼容老用法：--dist <dist> 等价于 --java-dest <dist>/src/main/java
+            javaDests.append(os.path.join(args[index + 1], "src", "main", "java"))
+            index += 2
+            continue
+        manifests.append(arg)
+        index += 1
+
     failed = []
-    for path in argv[1:]:
+    if template:
+        if os.path.exists(template):
+            if PatchTemplate(template):
+                print("  ~ 已给 p4a 模板加上 SAF 组件: {}".format(template))
+            else:
+                print("  = 模板已包含 SAF 组件: {}".format(template))
+        else:
+            print("  ! 模板不存在: {}".format(template))
+            failed.append(template)
+
+    for path in manifests:
         if not os.path.exists(path):
             print("  - 跳过(不存在): {}".format(path))
             continue
         try:
-            changed, missing = Patch(path)
+            inserted, removed = PatchManifest(path)
+            print("  ~ {}: 组件{} / 去掉 {} 条存储权限".format(
+                path, "已加" if inserted else "已有", removed))
         except Exception as es:
             print("  ! 补丁失败 {}: {}".format(path, es))
             failed.append(path)
-            continue
-        if changed:
-            print("  ~ 已补权限 {}: {}".format(path, ", ".join(NeedPermissions)))
+
+    if javaDir and javaDests:
+        # 注意：**必须**同时放进 p4a 的 build 模板树。p4a 每次构建都会把
+        # bootstraps/common/build/ 下的 src 重新铺到 dist 里，
+        # 只拷进 dist 的 java 会在下一次构建时消失(上次就踩了：manifest 里有组件，
+        # 但 dex 里没有类 —— 运行期 am start-service 直接 "Not found")。
+        count = CopyJava(javaDir, javaDests)
+        if count:
+            print("  ~ 已拷入 {} 个文件 -> {}".format(count, " , ".join(javaDests)))
         else:
-            print("  = 权限已齐: {}".format(path))
-        if missing:
-            print("  ! {} 仍缺少: {}".format(path, ", ".join(missing)))
-            failed.append(path)
+            print("  ! 没有找到可拷入的 Java 源: {}".format(javaDir))
+            failed.append(javaDir)
+
     return 1 if failed else 0
 
 

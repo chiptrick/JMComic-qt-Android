@@ -63,7 +63,7 @@ SkipRequirements = ["curl-cffi"]
 # 所以**只能往上改**：versionCode 变小会让 `adb install -r` 报
 # INSTALL_FAILED_VERSION_DOWNGRADE，手机上必须先卸载才能装。
 # 注意这是 Android 包版本，跟桌面端的 config.RealVersion(上游版本号，用于检查更新)无关。
-AppVersion = "0.2"
+AppVersion = "0.25"
 
 # p4a 只把 source.include_exts 放行的文件复制进应用目录(再打成 private.tar)。
 # buildozer/工具生成的默认值是 "py,png,jpg,kv,atlas,qml,js"，**不含 onnx/txt**，
@@ -294,14 +294,20 @@ def Main():
 
     permissions = spec.GetKey("app", "android.permissions") or ""
     perms = [p.strip() for p in permissions.split(",") if p.strip()]
-    # 读取手机存储：Android 11+ 起 WRITE_EXTERNAL_STORAGE 失效，缺这几条的话
-    # "导入本地漫画/导入本地图片"选目录时全是 PermissionError(真机上表现为选不到文件/卡死)。
-    # MANAGE_EXTERNAL_STORAGE 需要用户去系统设置里手动授予"所有文件访问权限"。
-    for need in ("android.permission.INTERNET", "android.permission.ACCESS_NETWORK_STATE",
-                 "android.permission.WAKE_LOCK",
-                 "android.permission.READ_EXTERNAL_STORAGE",
+    # **不再索要任何存储权限**：选文件/选目录/另存为改成 SAF(ACTION_OPEN_DOCUMENT[_TREE])
+    # 之后，授权是 per-URI 的，一个权限都不需要。
+    # 以前为了让 Qt 直接读 /storage/emulated/0 索要了
+    # READ_EXTERNAL_STORAGE / READ_MEDIA_IMAGES / MANAGE_EXTERNAL_STORAGE，其中
+    # MANAGE_EXTERNAL_STORAGE("所有文件访问权限")还要用户去系统设置里手动打开 ——
+    # 既过度授权，又不可靠(scoped storage 下 connot 直接 fopen)。
+    for drop in ("android.permission.READ_EXTERNAL_STORAGE",
+                 "android.permission.WRITE_EXTERNAL_STORAGE",
                  "android.permission.READ_MEDIA_IMAGES",
+                 "android.permission.READ_MEDIA_VIDEO",
                  "android.permission.MANAGE_EXTERNAL_STORAGE"):
+        perms = [p for p in perms if p != drop]
+    for need in ("android.permission.INTERNET", "android.permission.ACCESS_NETWORK_STATE",
+                 "android.permission.WAKE_LOCK"):
         if need not in perms:
             perms.append(need)
     spec.SetKey("app", "android.permissions", ",".join(perms))

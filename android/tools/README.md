@@ -74,7 +74,7 @@ Android 移植用的脚本集合。**所有脚本都不写死本机路径**，�
 | 脚本 | 作用 |
 | --- | --- |
 | `patch_buildozer_spec.py` | 注入 requirements / minSdk 34 / 自有 `.so` / 模型 assets / 应用图标 |
-| `patch_android_manifest.py` | 直接补 `AndroidManifest.xml`（存储权限等，幂等） |
+| `patch_android_manifest.py` | 注入 SAF 桥组件（Service + 透明 Activity）到 p4a **模板**与渲染产物、删掉多余的存储权限、把 `android/java` 拷进 dist（幂等） |
 | `pin_min_sdk.sh` | 把 deploy 生成的工程钉到 Android 14(API 34) 并加入 NPU 模型资产 |
 | `fill_deploy_spec.py` | 把 wheel / NDK / SDK 的绝对路径写进 `pysidedeploy.spec` |
 | `fix_ps_bom.ps1` | 给 `android/tools` 下的 `.ps1` 补 UTF-8 BOM |
@@ -92,6 +92,7 @@ Android 移植用的脚本集合。**所有脚本都不写死本机路径**，�
 | `wsl_prebuild_check.sh` | 构建前核对：`libsr_qnn.so` 是不是新的、Qt 插件齐不齐、模型在不在 |
 | `inspect_pybundle.py` | 检查 p4a 打出的 `stdlib.zip` / `_python_bundle` 的字节码命名方式 |
 | `scan_ui_width.py` | 扫描所有 `.ui`，找出竖屏宽度下**放不下**的横向布局行 |
+| `host_test_saf_bridge.py` | 宿主自检 SAF 信箱协议（假 Service 线程跑 ping/选文件/选目录/导目录/另存/sandbox/取消） |
 
 ### 6. 宿主回归（在自己电脑上跑，不需要手机）
 

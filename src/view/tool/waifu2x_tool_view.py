@@ -404,14 +404,10 @@ class Waifu2xToolView(QtWidgets.QWidget, Ui_Waifu2xTool, QtTaskBase):
             return
         try:
             today = time.strftime("%Y%m%d%H%M%S", time.localtime(time.time()))
-            filepath = mobile_file_dialog.GetSaveFileName(self, Str.GetStr(Str.Save), "{}.{}".format(today, self.format.text()))
-            if filepath and len(filepath) >= 1:
-                name = filepath[0]
-                if not name:
-                    return
-                f = open(name, "wb")
-                f.write(data)
-                f.close()
+            # 手机上走 SAF 另存为(选位置 -> Java 写过去)；桌面端还是老对话框
+            mobile_file_dialog.SaveBytes(
+                self, Str.GetStr(Str.Save), "{}.{}".format(today, self.format.text()),
+                "Image Files(*.jpg *.png)", data)
         except Exception as es:
             Log.Error(es)
         return

@@ -140,6 +140,11 @@ class Setting:
 
     # 下载与缓存
     SavePath = SettingValue("DownloadSetting", "", False)
+    # SAF 导出目录(Android)：用户在系统文件管理器里选的目录。
+    # 本地落盘仍然在 SavePath(应用专属目录，Android 10+ 不需要任何权限)，
+    # 每章下载完成后把章节目录导出到这个 SAF 目录，用户才能在文件管理器里看到。
+    SavePathTree = SettingValue("DownloadSetting", "", False)
+    SavePathTreeName = SettingValue("DownloadSetting", "", False)
     SaveNameType = SettingValue("DownloadSetting", 0, False)
 
     # Waifu2x设置

@@ -573,7 +573,12 @@ class ReadTool(QtWidgets.QWidget, Ui_ReadImg):
 
         self.ScalePicture2(100)
         if self.stripModel in [ReadMode.UpDown, ReadMode.Samewight]:
-            self.ScalePicture2(80)
+            # 手机上一切阅读模式的默认缩放都必须是 100%：80% 会让图片比屏幕窄、
+            # 两侧留黑边，用户看到的就是"图没铺满、字号也偏小"。
+            # 桌面端保持原来的 80%(窗口宽、留白是刻意的)。
+            from tools import platform_mobile
+            if not platform_mobile.IsMobile():
+                self.ScalePicture2(80)
         elif self.stripModel == ReadMode.LeftRight:
             pass
             # self.zoomSlider.setValue(100)

@@ -26,6 +26,21 @@ class DownloadDirView(BaseMaskDialog, Ui_DownloadDir, QtTaskBase):
         self.saveDir.clicked.connect(self.SavePath)
 
     def SelectSavePath(self):
+        from tools import platform_mobile
+        if platform_mobile.IsAndroid():
+            # 手机上目录只能由 SAF 授予，而 SAF 给的是 URI(ContentResolver 才能写)：
+            # 这里选中的目录记为"导出目录"，本地落盘仍在应用专属目录。
+            picked = mobile_file_dialog.PickExportTree(Str.GetStr(Str.SelectFold))
+            if not picked:
+                return
+            Setting.SavePathTree.SetValue(picked.get("uri") or "")
+            Setting.SavePathTreeName.SetValue(picked.get("name") or "")
+            self.lineEdit.setText(picked.get("name") or picked.get("uri") or "")
+            self.lineEdit.setReadOnly(True)
+            self.downloadDir.setText(os.path.join(Setting.SavePath.value or "./", config.SavePathDir))
+            self.cacheDir.setText(Setting.GetCachePath())
+            self.waifu2xDir.setText(os.path.join(Setting.GetCachePath(), config.Waifu2xPath))
+            return
         url = mobile_file_dialog.GetExistingDirectory(self, Str.GetStr(Str.SelectFold))
         if url:
             self.lineEdit.setText(url)
@@ -34,6 +49,11 @@ class DownloadDirView(BaseMaskDialog, Ui_DownloadDir, QtTaskBase):
             self.waifu2xDir.setText(os.path.join(Setting.GetCachePath(), config.Waifu2xPath))
 
     def SavePath(self):
+        from tools import platform_mobile
+        if platform_mobile.IsAndroid():
+            if Setting.SavePathTree.value:
+                self.close()
+                return
         path = self.lineEdit.text()
         if not path:
             QtOwner().ShowMsg(Str.GetStr(Str.SetDir))

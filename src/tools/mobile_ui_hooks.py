@@ -17,6 +17,10 @@ def Apply(mainView):
         mobile_ui.RelaxMinSizes(mainView, mobile_ui._limit)
         mobile_ui.StackBookInfo(mainView.bookInfoView)
         mobile_ui.StackBookInfo(mainView.bookInfoView2)
+        # 详情页操作按钮行(收藏/本地/评论/下载/上传/清理 + 购买 + 上次看到…)一行放不下，
+        # 先折成多行，剩下的溢出交给 ReflowPortrait 的最后一道保险
+        mobile_ui.WrapBookInfoButtons(mainView.bookInfoView)
+        mobile_ui.WrapBookInfoButtons(mainView.bookInfoView2)
         mobile_ui.StackSideNavs(mainView)
         mobile_ui.StackSrTool(getattr(mainView, "waifu2xToolView", None), mainView)
         mobile_ui.CompactTabBar(mainView)

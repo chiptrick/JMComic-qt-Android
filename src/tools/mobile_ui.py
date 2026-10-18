@@ -83,6 +83,8 @@ def UpdateLimit(mainView):
 # 原来的三分区点按逻辑一点不变。
 
 _readerDrag = None
+# 看图区双指缩放(见 mobile_ui_reader._ReaderPinch)
+_readerPinch = None
 
 
 # ---------------------------------------------------------------------------

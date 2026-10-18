@@ -185,6 +185,22 @@ def GetAndroidSavePath():
     return GetExternalDir()
 
 
+def GetAndroidPackage():
+    """ 本应用包名(用于 am 启动自带组件) —— 不依赖 pyjnius
+
+    `/data/user/0/<pkg>/files` 或 `/data/data/<pkg>/files` 里倒数第二段就是包名。
+    取不到时返回空串，调用方据此判定"桥不可用"。
+    """
+    private = os.environ.get(EnvPrivate) or GetAppDataDir() or ""
+    parts = [p for p in str(private).replace("\\", "/").split("/") if p]
+    if len(parts) >= 2:
+        for index in range(len(parts) - 1, 0, -1):
+            name = parts[index]
+            if "." in name and not name.endswith(".files"):
+                return name
+    return ""
+
+
 def InitAndroidEnv(app=None):
     """ Android 环境初始化，必须在导入 config/setting 之前调用（桌面端直接返回） """
     global _androidInited, _appDataDir, _saveDir, _externalDir

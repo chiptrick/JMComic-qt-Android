@@ -227,12 +227,44 @@ class DownloadItem(QtTaskBase):
             if self.curDownloadEpsInfo.isDownloadComplete():
                 index = self.epsIds.index(self.curDownloadEpsId)
                 if index + 1 >= len(self.epsIds):
+                    self.ExportToSaf()
                     return self.Success
                 self.curDownloadEpsId = self.epsIds[index + 1]
             else:
                 break
         self.curDownloadEpsInfo.dirty = True
         return self.Downloading
+
+    def ExportToSaf(self):
+        """ 这本书下载完了：把它导出到用户用 SAF 选的目录
+
+        为什么要导出：SAF 授权的是 content:// URI，Python 拿它写不了文件；而下载是
+        "每页一个文件"的持续写入，只能落在应用专属目录(Android 10+ 无需权限)。
+        用户选的那个目录因此作为**导出目标**：整本下完一次性拷过去(Java 侧后台线程
+        干，这里只投递请求、不等结果，不卡界面)。
+        """
+        try:
+            from tools import platform_mobile
+            if not platform_mobile.IsAndroid():
+                return
+            tree = Setting.SavePathTree.value
+            if not tree or not self.savePath:
+                return
+            bookDir = os.path.dirname(self.savePath)
+            if not os.path.isdir(bookDir):
+                return
+            from tools import saf_bridge
+            sub = os.path.basename(bookDir)
+            if saf_bridge.CopyTreeOut(bookDir, tree, sub, wait=False):
+                from tools.log import Log
+                Log.Warn("saf export: 投递导出 {} -> {}".format(bookDir, tree[:60]))
+        except Exception as es:
+            try:
+                from tools.log import Log
+                Log.Error(es)
+            except Exception:
+                pass
+        return
 
     # 下载失败回调
     def DownloadFailCallBack(self):

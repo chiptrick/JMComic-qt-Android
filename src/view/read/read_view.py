@@ -973,15 +973,14 @@ class ReadView(QtWidgets.QWidget, QtTaskBase):
         try:
             if self.lastPath:
                 path = os.path.join(self.lastPath, path)
-            filepath = mobile_file_dialog.GetSaveFileName(self, Str.GetStr(Str.Save), path, "Image Files(*.jpg *.png)")
-            if filepath and len(filepath) >= 1:
-                name = filepath[0]
-                if not name:
-                    return
-                self.lastPath = os.path.dirname(name)
-                f = open(name, "wb")
-                f.write(data)
-                f.close()
+            # 手机上"另存为"走 SAF(先选保存位置再由 Java 写过去)；桌面端还是老对话框。
+            # 注意不能先拿 GetSaveFileName 的返回值再去 open()：手机拿回来的是
+            # content:// URI，Python 打不开。
+            saved = mobile_file_dialog.SaveBytes(
+                self, Str.GetStr(Str.Save), path, "Image Files(*.jpg *.png)", data)
+            if saved:
+                if saved.startswith("/") or saved.startswith("\\"):
+                    self.lastPath = os.path.dirname(saved)
                 QtOwner().ShowMsg(Str.GetStr(Str.SaveSuc))
         except Exception as es:
             Log.Error(es)
@@ -1004,24 +1003,19 @@ class ReadView(QtWidgets.QWidget, QtTaskBase):
             return
         try:
             if self.lastPath:
+                # 已经选过目录：直接写进去(与桌面端原来的行为一致，不再弹框)
                 name = os.path.join(self.lastPath, path)
-            else:
-                if self.lastPath:
-                    path = os.path.join(self.lastPath, path)
-                filepath = mobile_file_dialog.GetSaveFileName(self, Str.GetStr(Str.Save), path, "Image Files(*.jpg *.png)")
-                if filepath and len(filepath) >= 1:
-                    name = filepath[0]
-                    if not name:
-                        return
-                    self.lastPath = os.path.dirname(name)
-                else:
-                    return
-
-            # self.lastPath = os.path.dirname(name)
-            f = open(name, "wb")
-            f.write(data)
-            f.close()
-            QtOwner().ShowMsg(Str.GetStr(Str.SaveSuc))
+                with open(name, "wb") as f:
+                    f.write(data)
+                QtOwner().ShowMsg(Str.GetStr(Str.SaveSuc))
+                return
+            saved = mobile_file_dialog.SaveBytes(
+                self, Str.GetStr(Str.Save), path, "Image Files(*.jpg *.png)", data)
+            if saved:
+                # 手机上 SaveBytes 返回的是 content:// URI，不能当本地目录记住
+                if saved.startswith("/") or saved.startswith("\\"):
+                    self.lastPath = os.path.dirname(saved)
+                QtOwner().ShowMsg(Str.GetStr(Str.SaveSuc))
         except Exception as es:
             Log.Error(es)
 

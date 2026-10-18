@@ -667,18 +667,207 @@ def _LogError(es):
 
 
 def GetExistingDirectory(parent=None, caption="", dir=""):
-    """ 选择目录；取消返回 ""(与 QFileDialog.getExistingDirectory 一致) """
+    """ 选择目录；取消返回 ""(与 QFileDialog.getExistingDirectory 一致)
+
+    Android 上走 SAF(ACTION_OPEN_DOCUMENT_TREE)：选完把整棵树**拷进应用目录**，
+    返回拷贝后的本地路径 —— 因为业务层全是按路径干活的(解码/超分/上传)，
+    而 SAF 给的 content:// URI 只有 Java 侧能读。
+    没有桥可用(桥没打进 APK / am 被拦)时回落到应用内选择器。
+    """
     if not platform_mobile.IsAndroid():
         from PySide6.QtWidgets import QFileDialog
         return QFileDialog.getExistingDirectory(parent, caption, dir)
+    path = SafImportFolder(caption, parent)
+    if path is not None:
+        return path
     return _Launch(parent, caption, dir, ModeDir, "")
 
 
+def SafImportFolder(caption="", parent=None):
+    """ SAF 选目录 -> 拷进应用目录 -> 返回本地路径
+
+    返回 "" 表示用户取消(不要再弹应用内选择器)，None 表示桥不可用(调用方回落)。
+    """
+    try:
+        from tools import saf_bridge
+        if not saf_bridge.IsSupported():
+            return None
+    except Exception:
+        return None
+    picked = saf_bridge.PickTree(caption or "")
+    if picked is None:
+        return None
+    if not picked:
+        return ""
+    # 选完只拿到 URI：拷进 import 根目录下的同名子目录
+    name = _SafeName(picked.get("name") or "folder")
+    target = _UniqueDir(os.path.join(_ImportRoot(), name))
+    # 整棵树拷贝可能要几秒到几十秒：先把提示打出来(嵌套事件循环里仍会绘制)
+    try:
+        from qt_owner import QtOwner
+        QtOwner().ShowMsg("正在导入，请稍候…")
+    except Exception:
+        pass
+    copied = saf_bridge.CopyTreeIn(picked.get("uri") or "", target)
+    if not copied:
+        return ""
+    return copied.get("path") or target
+
+
+def _ImportRoot():
+    """ 导入内容的落地目录(SF 授权拿到的东西必须先拷进来) """
+    try:
+        from tools import platform_mobile
+        root = os.path.join(platform_mobile.GetAppDataDir(), "import")
+    except Exception:
+        root = os.path.join(os.path.expanduser("~"), "jmcomic-import")
+    try:
+        os.makedirs(root, exist_ok=True)
+    except Exception:
+        pass
+    return root
+
+
+def _SafeName(name):
+    text = "".join(("_" if (ch in "/\\:" or ord(ch) < 32) else ch) for ch in str(name or ""))
+    text = text.strip().strip(".")
+    return text or "import"
+
+
+def _UniqueDir(path):
+    """ 同名的导入目录不覆盖，加后缀 """
+    if not os.path.exists(path):
+        return path
+    for index in range(1, 10000):
+        candidate = "{} ({})".format(path, index)
+        if not os.path.exists(candidate):
+            return candidate
+    return "{}-{}".format(path, int(__import__("time").time()))
+
+
+def PickExportTree(caption=""):
+    """ 选"导出目录"(下载/缓存目录的 SAF 目标)：返回 {"uri","name"} / "" 取消 / None 不可用
+
+    为什么不返回本地路径：SAF 授权的是 URI，Python 拿它写不了文件；而这几个目录
+    是要**持续写入**的(每本漫画每一页)，只能由 Java 侧写。所以这里只登记授权，
+    真正的落盘仍然在应用专属目录(Android 10+ 无需任何权限)，下载完成后再导出
+    到用户选的目录(见 saf_export)。
+    """
+    try:
+        from tools import saf_bridge
+        if not saf_bridge.IsSupported():
+            return None
+    except Exception:
+        return None
+    picked = saf_bridge.PickTree(caption or "")
+    if picked is None:
+        return None
+    if not picked:
+        return ""
+    return {"uri": picked.get("uri") or "", "name": picked.get("name") or ""}
+
+
+def OpenUri(uri):
+    """ 请系统文件管理器打开一个 SAF 目录/文件 URI；返回 (ok, reason) """
+    if not platform_mobile.IsAndroid():
+        return False, "unsupported"
+    try:
+        from tools import saf_bridge
+        return saf_bridge.OpenUri(uri)
+    except Exception as es:
+        _LogError(es)
+        return False, "error"
+
+
+def OpenDir(path):
+    """ 请系统文件管理器打开目录；返回 True 表示已经交给系统
+
+    手机上 `QDesktopServices.openUrl(file://…)` 既没有处理者、file:// 也被系统禁了 ——
+    这就是"点了打开目录没反应"的原因。这里改走 SAF/Intent。
+    """
+    if not platform_mobile.IsAndroid():
+        return False
+    try:
+        from tools import saf_bridge
+        ok, reason = saf_bridge.OpenPath(path)
+        if ok:
+            return True
+        if reason == "sandbox":
+            try:
+                from qt_owner import QtOwner
+                QtOwner().ShowMsg("该目录在应用专属存储里，系统文件管理器无法浏览；"
+                                  "请先在设置里选择一个导出目录（SAF）")
+            except Exception:
+                pass
+        elif reason == "no_handler":
+            try:
+                from qt_owner import QtOwner
+                QtOwner().ShowMsg("没有可打开该目录的文件管理器")
+            except Exception:
+                pass
+        return True
+    except Exception as es:
+        _LogError(es)
+        return False
+
+
+def SaveBytes(parent, caption, defaultPath, filter, data):
+    """ 另存为：手机上走 SAF(先选保存位置，再把 data 写进去)
+
+    桌面端保持原来的 QFileDialog 行为(selected path 直接写)。
+    返回落地后的路径(桌面端是用户选的路径，手机上是 SAF URI)；失败返回 ""。
+    """
+    if not data:
+        return ""
+    if not platform_mobile.IsAndroid():
+        filepath = GetSaveFileName(parent, caption, defaultPath, filter)
+        if not filepath or not filepath[0]:
+            return ""
+        with open(filepath[0], "wb") as f:
+            f.write(data)
+        return filepath[0]
+    try:
+        from tools import saf_bridge
+        if not saf_bridge.IsSupported():
+            return ""
+        name = os.path.basename(str(defaultPath or "")) or "image.jpg"
+        uri = saf_bridge.PickSave(caption or "", name, filter)
+        if not uri:
+            return ""
+        staging = os.path.join(_ImportRoot(), "saf-save")
+        try:
+            os.makedirs(staging, exist_ok=True)
+        except Exception:
+            staging = _ImportRoot()
+        tmp = os.path.join(staging, _SafeName(name))
+        with open(tmp, "wb") as f:
+            f.write(data)
+        return uri if saf_bridge.WriteFile(uri, tmp) else ""
+    except Exception as es:
+        _LogError(es)
+        return ""
+
+
 def GetOpenFileName(parent=None, caption="", dir="", filter=""):
-    """ 选择文件；返回 (文件名, 选中过滤器)，取消返回 () —— 与 QFileDialog 一致 """
+    """ 选择文件；返回 (文件名, 选中过滤器)，取消返回 () —— 与 QFileDialog 一致
+
+    Android 上走 SAF(ACTION_OPEN_DOCUMENT)：选完把内容拷进应用缓存目录，返回
+    **本地路径**(与桌面语义一致，调用方一行都不用改)。
+    """
     if not platform_mobile.IsAndroid():
         from PySide6.QtWidgets import QFileDialog
         return QFileDialog.getOpenFileName(parent, caption, dir, filter)
+    try:
+        from tools import saf_bridge
+        if saf_bridge.IsSupported():
+            picked = saf_bridge.PickFile(caption or "", filter)
+            if picked is None:
+                return _Launch(parent, caption, dir, ModeOpen, filter)
+            if not picked:
+                return CancelResult
+            return picked
+    except Exception as es:
+        _LogError(es)
     return _Launch(parent, caption, dir, ModeOpen, filter)
 
 

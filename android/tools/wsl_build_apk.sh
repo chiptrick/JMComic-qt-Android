@@ -164,13 +164,21 @@ echo "===== [$(date +%T)] 3.5 修正 p4a bootstrap 的 PYTHONOPTIMIZE ==="
 bash "$JM_REPO/android/tools/wsl_patch_optimize.sh" || {
     echo "[FATAL] PYTHONOPTIMIZE 补丁失败，接口解密仍会失败"; exit 1; }
 
-echo "===== [$(date +%T)] 3.6 补 AndroidManifest 存储权限 ====="
-# buildozer.spec 里已经带了权限，但 dists/ 下的 manifest 可能是从构建缓存恢复的旧文件
-# (p4a 不一定会重渲染)，所以这里再直接补一遍(幂等)：缺了就读不到手机存储里的漫画。
+echo "===== [$(date +%T)] 3.6 SAF 桥：Java 源 + manifest 组件 ====="
+# 选文件/选目录改成 SAF(系统选择器)之后不再需要任何存储权限；
+# 桥本身是本进程的 Service + 一个透明 Activity，必须：
+#   1) 把 android/java/org/jmcomic/*.java 拷进 dist 的 src/main/java(编译前就位)
+#   2) 组件写进 p4a 的 manifest **模板**(p4a 每次构建都按模板重新渲染，
+#      只补 dists 里渲染出来的文件下次就被覆盖了)
+DIST="$ANDROID/.buildozer/android/platform/build-arm64-v8a/dists/JMComic"
 "$VPY" "$JM_REPO/android/tools/patch_android_manifest.py" \
-    "$ANDROID/.buildozer/android/platform/build-arm64-v8a/dists/JMComic/src/main/AndroidManifest.xml" \
-    "$ANDROID/.buildozer/android/platform/build-arm64-v8a/dists/JMComic/AndroidManifest.xml" || \
-    echo "[warn] manifest 补丁有缺失项(首次构建还没有 dists 目录时 buildozer 会用 spec 生成)"
+    --template "$P4A/pythonforandroid/bootstraps/qt/build/templates/AndroidManifest.tmpl.xml" \
+    --java "$ANDROID/java" \
+    --java-dest "$P4A/pythonforandroid/bootstraps/common/build/src/main/java" \
+    --java-dest "$DIST/src/main/java" \
+    "$DIST/src/main/AndroidManifest.xml" \
+    "$DIST/AndroidManifest.xml" || \
+    echo "[warn] SAF 组件/Java 源补丁有缺失项(首次构建还没有 dists 目录时属正常)"
 
 echo "===== [$(date +%T)] 4. 阶段3：buildozer android debug(首次会编译 python3/openssl/libffi 等) ====="
 # 每次构建前修正 p4a recipe 里本机不可用的下载地址(openssl.org 证书问题 / github 被墙)

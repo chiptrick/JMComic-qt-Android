@@ -17,6 +17,7 @@ from tools.log import Log
 from tools.str import Str
 from tools.tool import ToolUtil
 from tools import mobile_file_dialog
+from tools import platform_mobile
 from view.tool.doh_dns_view import DohDnsView
 
 
@@ -478,6 +479,31 @@ class SettingView(QtWidgets.QWidget, Ui_SettingNew):
         return
 
     def SelectSavePath(self):
+        """ 选择下载目录
+
+        手机上走 SAF(ACTION_OPEN_DOCUMENT_TREE)：系统的目录选择器，不需要任何存储
+        权限。选中的目录记为"导出目录"(ContentResolver 才能写)，本地落盘仍在应用
+        专属目录 —— 下载完成后自动导出过去。
+        桌面端保持原样(直接选一个可写目录)。
+        """
+        from tools import platform_mobile
+        if platform_mobile.IsAndroid():
+            picked = mobile_file_dialog.PickExportTree(Str.GetStr(Str.SelectFold))
+            if not picked:
+                # "" = 用户取消；None = SAF 桥不可用(退回应用内选择器)
+                if picked is None:
+                    url = mobile_file_dialog.GetExistingDirectory(self, Str.GetStr(Str.SelectFold))
+                    if url:
+                        Setting.SavePath.SetValue(url)
+                self.SetDownloadLabel()
+                return
+            Setting.SavePathTree.SetValue(picked.get("uri") or "")
+            Setting.SavePathTreeName.SetValue(picked.get("name") or "")
+            if not Setting.SavePath.value:
+                from tools import platform_mobile as pm
+                Setting.SavePath.SetValue(pm.GetAndroidSavePath())
+            self.SetDownloadLabel()
+            return
         url = mobile_file_dialog.GetExistingDirectory(self, Str.GetStr(Str.SelectFold))
         if url:
             Setting.SavePath.SetValue(url)
@@ -487,12 +513,39 @@ class SettingView(QtWidgets.QWidget, Ui_SettingNew):
         url = Setting.SavePath.value
         if not url:
             url = "./"
-        self.downloadDir.setText(os.path.join(url, config.SavePathDir))
-        self.cacheDir.setText(Setting.GetCachePath())
-        self.waifu2xDir.setText(os.path.join(Setting.GetCachePath(), config.Waifu2xPath))
+        # 手机上目录行放不下整条路径("/storage/emulated/0/Android/data/<包名>/files/…"
+        # 有 60 多个字符)，QLabel 的 sizeHint 就是整段文本宽度 -> 整行最小宽度超过屏幕
+        # -> 整页被撑宽(真机现象："设置页宽度超出范围")。
+        # ElideText 在手机上改成按宽度中间省略(完整路径进 tooltip)，桌面端是空操作。
+        from tools import mobile_ui
+        mobile_ui.ElideText(self.downloadDir, os.path.join(url, config.SavePathDir))
+        mobile_ui.ElideText(self.cacheDir, Setting.GetCachePath())
+        mobile_ui.ElideText(self.waifu2xDir, os.path.join(Setting.GetCachePath(), config.Waifu2xPath))
+        # 配了 SAF 导出目录时，把目录名也放进 tooltip(路径行本身只放得下本地路径)
+        treeName = Setting.SavePathTreeName.value
+        if treeName and platform_mobile.IsAndroid():
+            full = mobile_ui.FullText(self.downloadDir)
+            self.downloadDir.setToolTip("{}\n导出到: {}".format(full, treeName))
 
     def OpenDir(self, label):
-        QDesktopServices.openUrl(QUrl.fromLocalFile(label.text()))
+        """ 打开目录：手机上要交给系统文件管理器
+
+        原来无条件 `QDesktopServices.openUrl(file://…)` —— Android 上既没有应用
+        处理 file://(系统从 7.0 起禁用它)，页面也没人接，点了完全没反应。
+        """
+        from tools import mobile_ui, mobile_file_dialog, platform_mobile
+        path = mobile_ui.FullText(label) if label is not None else ""
+        if platform_mobile.IsAndroid():
+            # 下载目录配了 SAF 导出目录时，直接打开那个目录(DocumentsUI 认 tree uri)
+            tree = Setting.SavePathTree.value
+            if tree and label is self.downloadDir:
+                ok, reason = mobile_file_dialog.OpenUri(tree)
+                if ok:
+                    return
+            if mobile_file_dialog.OpenDir(path):
+                return
+            return
+        QDesktopServices.openUrl(QUrl.fromLocalFile(path))
         return
 
     def SetGpuInfos(self, gpuInfo, cpuNum):
