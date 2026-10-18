@@ -47,6 +47,7 @@ targetSdk 34 + Android 16 下 /storage/emulated/0 的绝大多数目录(Download
 """
 import os
 import re
+import stat
 
 from PySide6.QtCore import QEvent, QEventLoop, Qt, QTimer
 from PySide6.QtGui import QFontMetrics
@@ -121,7 +122,20 @@ def _IsReadableDir(path):
 
 
 def _IsReadableFile(path):
-    """ 文件是否可读(用于跳过列不出来的条目，不抛异常) """
+    """ 文件是否可读(用于跳过列不出来的条目，不抛异常)
+
+    **先 stat、只对普通文件 os.open**：命名管道(FIFO)在没有写端时 `os.open` 会一直
+    阻塞到有人写进来为止 —— /tmp 里就藏着这种东西(GitHub runner 的 socket/管道)，
+    主机上列一次 /tmp 整个进程直接挂死(CI 上正是这么卡的，栈停在
+    `_GoUp -> _GoTo -> _FillList -> os.open`)。管道/套接字/设备节点直接按"能列出来"
+    处理，绝不碰 os.open。
+    """
+    try:
+        mode = os.stat(path).st_mode
+    except OSError:
+        return False
+    if not stat.S_ISREG(mode):
+        return True
     try:
         fd = os.open(path, os.O_RDONLY)
     except OSError:

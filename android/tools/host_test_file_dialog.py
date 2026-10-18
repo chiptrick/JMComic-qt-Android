@@ -24,6 +24,7 @@ import shutil
 import stat
 import sys
 import tempfile
+import time
 
 # 整份测试挂死多久就把栈打出来并退出(见下方 faulthandler)
 FdWatchdogSeconds = 120
@@ -194,6 +195,29 @@ def TestListing(tempRoot):
 
     allFiles = Names(MakePicker(tempRoot, mfd.ModeOpen, "").entries)
     Check("c.txt" in allFiles and "b.zip" in allFiles, "无过滤器时显示所有文件")
+
+
+def TestSpecialFiles(tempRoot):
+    """ 目录里的命名管道(FIFO)必须能列出来，绝不能把进程卡死
+
+    没有写端时 `os.open(fifo, O_RDONLY)` 会一直阻塞 —— /tmp 里就藏着这种东西
+    (GitHub runner 的 socket/管道)，主机上"上级"退到 /tmp 那一步直接把整条 CI 挂住
+    (栈停在 `_GoUp -> _GoTo -> _FillList -> os.open`)。列目录只能 stat，不能开文件。
+    """
+    print("\n===== B. Android 路径：目录里的 FIFO 不卡死 =====")
+    if not hasattr(os, "mkfifo"):
+        print("ok   (Windows 没有 mkfifo，跳过)")
+        return
+    fifo = os.path.join(tempRoot, "a_pipe")
+    os.mkfifo(fifo)
+    start = time.time()
+    picker = MakePicker(tempRoot, mfd.ModeOpen)
+    Check(time.time() - start < 10, "列含 FIFO 的目录没有卡死(耗时 {:.2f}s)".format(
+        time.time() - start))
+    Check("a_pipe" in Names(picker.entries), "FIFO 也能被列出来: {}".format(
+        Names(picker.entries)))
+    Check(mfd._IsReadableFile(fifo) is True, "FIFO 按'能列出来'处理(不 os.open)")
+    os.remove(fifo)
 
 
 def TestNavigation(tempRoot):
@@ -476,6 +500,7 @@ def Main():
         print("临时目录树: {}".format(tempRoot))
         TestFilterParse()
         TestListing(tempRoot)
+        TestSpecialFiles(tempRoot)
         TestNavigation(tempRoot)
         TestDirAccept(tempRoot)
         TestOpenAccept(tempRoot)
