@@ -85,8 +85,11 @@ run "9. 双指缩放状态机回归" android/tools/host_test_pinch.py
 pinch=$?
 run "10. vfs 路径层回归" android/tools/host_test_vfs.py
 vfs=$?
+run "11. 缓存目录重定向/旧缓存搬迁回归" android/tools/host_test_cache_dir.py
+cache=$?
 
 echo
-echo "结果: smoke=$smoke interfaces=$iface crypto=$crypto image=$image picker=$picker netfb=$netfb saf=$saf pinch=$pinch vfs=$vfs"
+echo "结果: smoke=$smoke interfaces=$iface crypto=$crypto image=$image picker=$picker netfb=$netfb saf=$saf pinch=$pinch vfs=$vfs cache=$cache"
 [ "$smoke" -eq 0 ] && [ "$iface" -eq 0 ] && [ "$crypto" -eq 0 ] && [ "$image" -eq 0 ] \
-    && [ "$picker" -eq 0 ] && [ "$netfb" -eq 0 ] && [ "$saf" -eq 0 ] && [ "$pinch" -eq 0 ] && [ "$vfs" -eq 0 ]
+    && [ "$picker" -eq 0 ] && [ "$netfb" -eq 0 ] && [ "$saf" -eq 0 ] && [ "$pinch" -eq 0 ] && [ "$vfs" -eq 0 ] \
+    && [ "$cache" -eq 0 ]

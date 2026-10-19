@@ -53,8 +53,15 @@ class DownloadDirView(BaseMaskDialog, Ui_DownloadDir, QtTaskBase):
         self.lineEdit.setText(display)
         self.lineEdit.setReadOnly(True)
         self.downloadDir.setText(display)
-        self.cacheDir.setText(Setting.GetCachePath())
-        self.waifu2xDir.setText(os.path.join(Setting.GetCachePath(), config.Waifu2xPath))
+        cachePath = Setting.GetCachePath()
+        self.cacheDir.setText(cachePath)
+        self.waifu2xDir.setText(os.path.join(cachePath, config.Waifu2xPath))
+        from tools import platform_mobile
+        if platform_mobile.IsAndroid():
+            # 缓存在应用外部缓存目录(Android 11+ 第三方文件管理器大多进不去
+            # Android/data)，tooltip 里把清理途径讲清楚
+            self.cacheDir.setToolTip("{}（应用缓存，可在系统存储设置或文件管理器中手动清理）".format(cachePath))
+            self.waifu2xDir.setToolTip(os.path.join(cachePath, config.Waifu2xPath))
 
     def SavePath(self):
         from tools import platform_mobile

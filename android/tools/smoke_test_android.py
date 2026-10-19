@@ -53,6 +53,18 @@ QtOwner().SetApp(app)
 assert Setting.SavePath.value == platform_mobile.GetAndroidSavePath()
 print("[ok] android 下载目录默认值生效: %s" % Setting.SavePath.value)
 
+# 缓存目录必须指向外部缓存(真机上是 /storage/emulated/0/Android/data/<包名>/cache)，
+# 不能留在内部私有目录 —— 否则用户在系统存储设置/文件管理器里清理不到它
+# (见 platform_mobile.InitAndroidEnv 与 setting.GetCachePath)
+cacheBase = os.environ.get("XDG_CACHE_HOME", "")
+internalCache = os.path.join(platform_mobile.GetAppDataDir(), "cache")
+assert cacheBase, "XDG_CACHE_HOME 没被重定向"
+assert os.path.abspath(cacheBase) != os.path.abspath(internalCache), \
+    "缓存目录还指在内部私有目录: {}".format(cacheBase)
+assert os.path.abspath(Setting.GetCachePath()).startswith(os.path.abspath(cacheBase)), \
+    "缓存目录不在外部缓存目录下: {}".format(Setting.GetCachePath())
+print("[ok] android 缓存目录指向外部: %s" % Setting.GetCachePath())
+
 # 防止测试把配置写到仓库里(Windows 上 _xdgDir 会退化成相对 "data")
 configPath = os.path.abspath(Setting.GetConfigPath())
 assert configPath.startswith(os.path.abspath(TMP)), \

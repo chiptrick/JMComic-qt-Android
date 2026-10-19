@@ -537,21 +537,24 @@ class SettingView(QtWidgets.QWidget, Ui_SettingNew):
         mobile_ui.ElideText(self.downloadDir, display)
         self.downloadDir.setToolTip(display)
 
-        # 缓存(封面/图片缓存/超分模型)固定在应用私有目录：它是应用的临时数据，
-        # 放进用户选的目录既慢又会在文件管理器里堆一堆看不懂的文件
+        # 缓存(封面/图片缓存/超分临时图)在 Android 上落在应用外部缓存目录
+        # (/storage/emulated/0/Android/data/<包名>/cache/jmcomic-qt)：
+        # 可再生数据不放用户选的下载目录(免得文件管理器里堆一堆看不懂的文件)，
+        # 但也不藏在内置私有目录 —— 放外部，系统"清理缓存"/文件管理器清得掉
         cachePath = Setting.GetCachePath()
         mobile_ui.ElideText(self.cacheDir, cachePath)
         mobile_ui.ElideText(self.waifu2xDir, os.path.join(cachePath, config.Waifu2xPath))
         if platform_mobile.IsAndroid():
-            self.cacheDir.setToolTip("{}（应用私有缓存，不占用下载目录）".format(cachePath))
+            self.cacheDir.setToolTip("{}（应用缓存，可在系统存储设置或文件管理器中手动清理）".format(cachePath))
             self.waifu2xDir.setToolTip(os.path.join(cachePath, config.Waifu2xPath))
 
     def OpenDir(self, label):
         """ 打开目录
 
         * 下载目录：配了 SAF 就直接用文件管理器打开那个目录(DocumentsUI)
-        * 应用私有目录(缓存/超分模型)：Android 11+ 其它应用根本看不到，
-          只能告诉用户这个位置没法在外面浏览
+        * 缓存目录：在应用外部缓存目录里，Android 11+ 第三方文件管理器大多也进不了
+          Android/data，应用内跳转多半失败 —— 那就把真实路径告诉用户，让他在
+          系统存储设置/文件管理器里手动清理
         """
         from tools import mobile_ui, platform_mobile, vfs
         text = mobile_ui.FullText(label) if label is not None else ""
@@ -565,8 +568,12 @@ class SettingView(QtWidgets.QWidget, Ui_SettingNew):
                     Log.Warn("open dir: {} -> {}".format(text, reason))
                 return
             ok, reason = vfs.OpenInFileManager(text)
-            if not ok and reason == "sandbox":
-                QtOwner().ShowMsg(Str.GetStr(Str.SetDir))
+            if not ok:
+                from tools.log import Log
+                Log.Warn("open dir: {} -> {}".format(text, reason))
+                # Android 11+ 第三方文件管理器基本进不了 Android/data：把路径讲清楚，
+                # 用户自己在系统存储设置(或支持的文件管理器)里清理
+                QtOwner().ShowMsg("目录：{}".format(text))
             return
         QDesktopServices.openUrl(QUrl.fromLocalFile(text))
         return

@@ -5,7 +5,11 @@
 
 Android 端由 android/main.py 在创建 QApplication 之后、导入业务模块之前调用
 InitAndroidEnv()，作用：
-    1. 把配置/数据/缓存/日志目录重定向到应用私有目录(Android 14 无需任何存储权限)
+    1. 把配置/数据/日志目录重定向到应用私有目录(/data/user/0/<包名>/files，
+       Android 14 无需任何存储权限)，把**缓存**目录指向应用外部缓存目录
+       (/storage/emulated/0/Android/data/<包名>/cache) —— 封面/图片缓存/超分
+       临时图都是可再生数据，放外部用户才清理得掉(系统"清理缓存"、设置-存储、
+       文件管理器都能看到它)，内部私有目录留给配置/数据库/模型这些删了会出事的
     2. 把下载目录默认指向应用外部私有目录(/storage/emulated/0/Android/data/<包名>/files)
     3. 标记触摸设备、禁用桌面端专有特性(系统托盘/单实例/无边框窗口)
 """
@@ -31,6 +35,7 @@ _appDataDir = ""
 _saveDir = ""
 _externalDir = ""
 _nativeLibDirs = None
+_cacheMigrateThread = None
 
 
 def IsAndroid():
@@ -69,6 +74,8 @@ def _JniDir(name):
                     d = act.getFilesDir()
                 elif name == "external":
                     d = act.getExternalFilesDir(None)
+                elif name == "external_cache":
+                    d = act.getExternalCacheDir()
                 else:
                     d = act.getCacheDir()
                 if d is not None:
@@ -150,15 +157,29 @@ def GetNativeLibDirs():
     return dirs
 
 
-def _PkgExternalDir():
-    """ 不依赖 pyjnius 推出外部私有目录 /storage/emulated/0/Android/data/<包名>/files """
+def GetExternalDir():
+    """ 应用外部私有目录(Android 10+ 无需权限，用户可通过文件管理器访问) """
+    if _externalDir:
+        return _externalDir
+    return _JniDir("external") or _PkgExternalDir() or GetAppDataDir()
+
+
+def _PkgFromPrivate():
+    """ 从 /data/user/0/<pkg>/files(或 /data/data/<pkg>/files)里取包名 """
     private = os.environ.get(EnvPrivate) or ""
     parts = [p for p in private.split("/") if p]
-    # /data/user/0/<pkg>/files 或 /data/data/<pkg>/files
     if len(parts) < 4 or parts[-1] != "files":
         return ""
     pkg = parts[-2]
     if not pkg or "." not in pkg:
+        return ""
+    return pkg
+
+
+def _PkgExternalDir():
+    """ 不依赖 pyjnius 推出外部私有目录 /storage/emulated/0/Android/data/<包名>/files """
+    pkg = _PkgFromPrivate()
+    if not pkg:
         return ""
     for root in ("/storage/emulated/0/Android/data", "/sdcard/Android/data"):
         path = os.path.join(root, pkg, "files")
@@ -171,11 +192,31 @@ def _PkgExternalDir():
     return ""
 
 
-def GetExternalDir():
-    """ 应用外部私有目录(Android 10+ 无需权限，用户可通过文件管理器访问) """
-    if _externalDir:
-        return _externalDir
-    return _JniDir("external") or _PkgExternalDir() or GetAppDataDir()
+def _PkgExternalCacheDir():
+    """ 不依赖 pyjnius 推出外部缓存目录 /storage/emulated/0/Android/data/<包名>/cache
+
+    和 _PkgExternalDir 一个套路：Android 10+ 应用读写自己的外部缓存目录不需要
+    任何权限；它是系统公认的"缓存"(设置-存储里能看到、系统"清理缓存"会清)，
+    也是用户手里文件管理器/root 能进去手动删的位置 —— 默认缓存就放这。
+    """
+    pkg = _PkgFromPrivate()
+    if not pkg:
+        return ""
+    for root in ("/storage/emulated/0/Android/data", "/sdcard/Android/data"):
+        path = os.path.join(root, pkg, "cache")
+        try:
+            os.makedirs(path, exist_ok=True)
+        except Exception:
+            continue
+        if os.path.isdir(path):
+            return path
+    return ""
+
+
+def GetExternalCacheDir():
+    """ 应用外部缓存目录(取不到时退回外部私有目录下的 cache) """
+    return _JniDir("external_cache") or _PkgExternalCacheDir() or os.path.join(
+        _JniDir("external") or _PkgExternalDir() or GetAppDataDir(), "cache")
 
 
 def GetAndroidSavePath():
@@ -199,6 +240,81 @@ def GetAndroidPackage():
             if "." in name and not name.endswith(".files"):
                 return name
     return ""
+
+
+def _MigrateCacheToExternal(root, cacheBase):
+    """ 把老版本放在内部私有目录的缓存搬到外部缓存目录(见 InitAndroidEnv)
+
+    只搬 `<root>/cache/jmcomic-qt`(也就是 Setting.GetCachePath() 的实际内容：
+    封面/图片缓存/超分临时图/zip 临时文件)，模型(waifu2x-models)和 QNN 编译
+    缓存(waifu2x-cache)不搬 —— 它们不是用户可清理的缓存，重新下载/编译代价大。
+    同分区 rename 是瞬时的；内部→外部跨分区只能拷贝+删除，所以放后台线程。
+    """
+    import shutil
+
+    oldDir = os.path.join(root, "cache", "jmcomic-qt")
+    newDir = os.path.join(cacheBase, "jmcomic-qt")
+    try:
+        if not os.path.isdir(oldDir):
+            return
+        if os.path.realpath(oldDir) == os.path.realpath(newDir):
+            return
+    except Exception:
+        return
+
+    def _Log(msg):
+        # 注意别用 Log.Warn/Info/Error 那组静态方法：它们一律 exc_info=True，
+        # 不在 except 块里调用会往日志里喷一段 "NoneType: None" 的假堆栈
+        try:
+            from tools.log import Log
+            Log.logger.warning(msg)
+        except Exception:
+            try:
+                print(msg, flush=True)
+            except Exception:
+                pass
+
+    def _Work():
+        try:
+            if not os.path.isdir(newDir) or not os.listdir(newDir):
+                # 新目录不存在或还是空的：整体搬过去
+                os.makedirs(os.path.dirname(newDir), exist_ok=True)
+                if os.path.isdir(newDir):
+                    shutil.rmtree(newDir, ignore_errors=True)
+                shutil.move(oldDir, newDir)
+            else:
+                # 新目录已经有内容(新版本已经跑过)：递归合并，**文件级**不覆盖
+                # (只按顶层条目跳过会把"同一本书的新旧页"整个跳过，白丢一批缓存)
+                def _Merge(src, dst):
+                    os.makedirs(dst, exist_ok=True)
+                    for name in os.listdir(src):
+                        source = os.path.join(src, name)
+                        target = os.path.join(dst, name)
+                        if os.path.isdir(source):
+                            _Merge(source, target)
+                        elif not os.path.exists(target):
+                            shutil.move(source, target)
+
+                _Merge(oldDir, newDir)
+                shutil.rmtree(oldDir, ignore_errors=True)
+            _Log("cache: 旧缓存已迁到外部缓存目录 -> {}".format(newDir))
+        except Exception as es:
+            _Log("cache: 旧缓存搬迁失败(保留原目录): {} ({})".format(es, oldDir))
+
+    import threading
+    global _cacheMigrateThread
+    _cacheMigrateThread = threading.Thread(target=_Work, name="cache-migrate", daemon=True)
+    _cacheMigrateThread.start()
+    return
+
+
+def WaitCacheMigrate(timeout=30.0):
+    """ 等旧缓存搬迁线程结束(测试/退出前用)；没启动过就直接返回 True """
+    thread = _cacheMigrateThread
+    if thread is None:
+        return True
+    thread.join(timeout)
+    return not thread.is_alive()
 
 
 def InitAndroidEnv(app=None):
@@ -232,21 +348,35 @@ def InitAndroidEnv(app=None):
     except Exception:
         pass
 
-    extern = _JniDir("external") or _PkgExternalDir()
+    extern = _JniDir("external") or _PkgExternalDir() or os.environ.get(EnvSaveDir) or ""
     _externalDir = extern or root
 
-    # XDG 目录重定向：setting._xdgDir 在 linux 平台走 XDG_*，这里全部指到应用私有目录
+    # 缓存放应用外部缓存目录(/storage/emulated/0/Android/data/<包名>/cache)：
+    # 封面/图片缓存/超分临时图都是可再生数据，放外部用户才清理得掉 —— 系统
+    # "清理缓存"、设置-存储、文件管理器/root 都能看到并删掉它。
+    # 外部目录不可用时退到外部私有目录下的 cache，再不行才退回内部私有目录。
+    cacheBase = _JniDir("external_cache") or _PkgExternalCacheDir()
+    if not cacheBase:
+        cacheBase = os.path.join(extern or root, "cache")
+
+    # XDG 目录重定向：setting._xdgDir 在 linux 平台走 XDG_*，这里全部指到应用目录
+    # (配置/数据/日志留在内部私有目录；cacheBase 本身就是缓存目录，不再拼 "cache")
     os.environ.setdefault("HOME", root)
-    for envName, sub in (("XDG_CONFIG_HOME", "config"),
-                         ("XDG_DATA_HOME", "data"),
-                         ("XDG_CACHE_HOME", "cache"),
-                         ("XDG_STATE_HOME", "state")):
-        path = os.path.join(root, sub)
+    for envName, sub, base in (("XDG_CONFIG_HOME", "config", root),
+                               ("XDG_DATA_HOME", "data", root),
+                               ("XDG_CACHE_HOME", "", cacheBase),
+                               ("XDG_STATE_HOME", "state", root)):
+        path = os.path.join(base, sub) if sub else base
         try:
             os.makedirs(path, exist_ok=True)
         except Exception:
             pass
         os.environ[envName] = path
+
+    # 老版本的缓存在内部私有目录(<root>/cache/jmcomic-qt)，搬到外部缓存目录，
+    # 否则同一个缓存存两份、旧的那份用户还清理不到。跨文件系统只能拷贝+删除，
+    # 放后台线程做，不拖慢启动。
+    _MigrateCacheToExternal(root, cacheBase)
 
     # Android 上 OpenGL 走 GLES，禁用桌面端才需要的特性
     global SupportSystemTray, SupportFrameless, SupportSingleInstance, SupportSubProcessProbe
@@ -255,11 +385,14 @@ def InitAndroidEnv(app=None):
     SupportSingleInstance = False
     SupportSubProcessProbe = False
 
-    # waifu2x 模型/后端库目录，供 sr_qnn 查找
+    # waifu2x 模型/后端库目录，供 sr_qnn 查找。模型是用户显式下载的，算数据不算
+    # 缓存，留在内部私有目录(删了要重新下载，还可能打断正在跑的超分)
     os.environ.setdefault("JM_SR_MODELS", os.path.join(root, "waifu2x-models"))
     # QNN context binary 缓存(QNN 图编译产物，第二次启动快很多)。
     # C++ 侧默认是 <模型目录>/context，而模型目录可能是 private.tar 解包出来的位置，
-    # 所以显式指到确定可写的私有目录，避免缓存写不进去
+    # 所以显式指到确定可写的私有目录，避免缓存写不进去。
+    # 这个刻意**不跟缓存目录走外部**：context binary 要被反复 mmap，放 FUSE 挂载的
+    # 外部存储上又慢又容易出怪问题；它由模型版本决定、体积有限，重新编译即可。
     os.environ.setdefault("JM_SR_CACHE", os.path.join(root, "waifu2x-cache"))
 
     # Android(p4a) 的 OpenSSL 没有系统 CA 目录：把随包 certifi 的 CA 指给它，

@@ -302,6 +302,13 @@ class Setting:
 
     @staticmethod
     def GetCachePath():
+        """ 缓存目录(封面/图片缓存/超分临时图/zip 临时文件等可再生数据)
+
+        桌面端：<SavePath>/cache
+        Android：platform_mobile.InitAndroidEnv 把 XDG_CACHE_HOME 指到应用外部
+        缓存目录(/storage/emulated/0/Android/data/<包名>/cache)，最终落在
+        …/cache/jmcomic-qt —— 系统"清理缓存"/设置-存储/文件管理器都能手动清理
+        """
         if sys.platform == "win32":
             return os.path.join(Setting.SavePath.value, config.CachePathDir)
         return Setting._xdgDir("XDG_CACHE_HOME", ".cache")

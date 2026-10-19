@@ -81,11 +81,21 @@ class QEventStub(_Any):
 
 class QPointStub:
     def __init__(self, x=0, y=0):
-        self.x = int(x)
-        self.y = int(y)
+        # 和真 QPoint 一样：x()/y() 是方法。曾经写成 self.x = int(x)，
+        # 实例属性把方法盖住，生产代码里的 local.x() 全部抛
+        # TypeError('int' object is not callable) 又被 _Tap 的 except 吞掉，
+        # 表现就是"点按被识别成点按、但三个区的动作一个都不触发"
+        self._x = int(x)
+        self._y = int(y)
+
+    def x(self):
+        return self._x
+
+    def y(self):
+        return self._y
 
     def __repr__(self):
-        return "QPoint({}, {})".format(self.x, self.y)
+        return "QPoint({}, {})".format(self._x, self._y)
 
 
 class QPointFStub:

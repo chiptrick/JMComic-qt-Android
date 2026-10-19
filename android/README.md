@@ -16,7 +16,7 @@
 | 竖屏界面 | 运行时适配层（导航抽屉 / 最小尺寸放宽 / 详情页上下堆叠 / 触摸滚动） | 不复制一套 UI，也不影响桌面端 |
 | 超分(waifu2x) | `sr_qnn`：ONNX Runtime **QNN Execution Provider** → Hexagon NPU (HTP) | 微软官方 Android QNN 包(`onnxruntime-android-qnn`)，头文件/库都现成；模型可量化 |
 | 与现有代码接合 | `sr_qnn` 提供与 `sr_vulkan` **同构**的 API，并在 `sys.modules` 里注册成 `sr_vulkan` | `task_waifu2x.py` / `main_view.py` / `tool.py` 等原有调用点一行都不用改 |
-| 存储 | 应用私有目录（内部）+ 应用外部私有目录（下载） | Android 14 上**不需要任何存储权限**，也不用处理分区存储 |
+| 存储 | 应用私有目录（内部：配置/数据/日志）+ 应用外部私有目录（下载）+ 应用外部缓存目录（缓存） | Android 14 上**不需要任何存储权限**，也不用处理分区存储；缓存放外部是为了用户能手动清理 |
 | 网络 | 原生 `curl_cffi`（官方 android wheel，解包进 site-packages）；缺失时退回纯 python 垫片 | 保留桌面端的 Cloudflare 绕过能力（TLS 指纹伪装 + HTTP/3 + ECH），同时保证没编原生库也能跑 |
 
 不支持/不需要：Android 14 以下兼容（`minSdk 34`）、系统托盘、无边框窗口、单实例 socket、子进程崩溃探测。
@@ -926,8 +926,9 @@ saf://t1/commies/作者/书名/original/第01话/0001.jpg
 
 **界面**：设置页"下载"一行显示还原后的真实路径（树 URI 里的
 `primary:Download/JMComic` 能还原成 `/storage/emulated/0/Download/JMComic`），
-"打开目录"直接定位到 `…/commies`；缓存(封面/图片缓存/超分模型)固定在应用私有目录，
-tooltip 里写明"不占用下载目录"。
+"打开目录"直接定位到 `…/commies`；缓存(封面/图片缓存/超分临时图)指向应用外部
+缓存目录 `/storage/emulated/0/Android/data/<包名>/cache/jmcomic-qt`，tooltip 里
+写明"可在系统存储设置或文件管理器中手动清理"（见 6 运行时目录）。
 
 **删除**：文件一定删掉（用户在意的是"漫画没了"）；**目录删不掉不算失败** ——
 ExternalStorageProvider 对目录的 `deleteDocument` 经常直接回
@@ -1114,10 +1115,22 @@ adb shell dumpsys package <包名> | grep -E "minSdk|targetSdk"
 
 | 用途 | 路径 | 权限 |
 | --- | --- | --- |
-| 配置/数据/缓存/日志 | `/data/data/<包名>/files/{config,data,cache,state}` | 无需申请 |
+| 配置/数据/日志 | `/data/data/<包名>/files/{config,data,state}` | 无需申请 |
+| 缓存(封面/图片缓存/超分临时图/zip 临时文件) | `/storage/emulated/0/Android/data/<包名>/cache/jmcomic-qt` | 无需申请(Android 10+) |
 | 下载目录 | `/storage/emulated/0/Android/data/<包名>/files/JMComic` | 无需申请(Android 10+) |
 | 导入落地（SAF 选中的文件/目录拷到这里） | `/data/data/<包名>/files/import/<名字>` | 无需申请 |
 | 模型 | `/data/data/<包名>/files/waifu2x-models` | 无需申请 |
+
+**为什么缓存单独放外部缓存目录**：缓存全是可再生数据(封面、看图图片缓存、超分临时
+图、zip 临时文件)，删了顶多重新下载；放在内部私有目录里用户没有任何手段清理
+(只能"设置-应用-清除数据"，连设置一起没)。放到
+`/storage/emulated/0/Android/data/<包名>/cache` 之后，系统"清理缓存"、设置-存储里
+的应用缓存、以及支持访问 `Android/data` 的文件管理器/root 都能看到并删掉它。
+启动时 `platform_mobile._MigrateCacheToExternal` 会把老版本留在内部私有目录的缓存
+(`<files>/cache/jmcomic-qt`)后台搬到新位置，不重复占两份。刻意的例外：QNN 的
+context binary 编译缓存(`waifu2x-cache`)和模型(`waifu2x-models`)仍留在内部私有
+目录 —— 前者要被反复 mmap，放 FUSE 挂载的外部存储上又慢又容易出怪问题；后者是
+用户显式下载的数据，删了要重新下载、还可能打断正在跑的超分。
 
 **APK 只申请网络权限**：`INTERNET` / `ACCESS_NETWORK_STATE` / `WAKE_LOCK`。
 `READ_EXTERNAL_STORAGE`、`READ_MEDIA_IMAGES`、`MANAGE_EXTERNAL_STORAGE`

@@ -468,7 +468,14 @@ public final class SafStore {
             String external = context.getExternalFilesDir(null) == null
                     ? root : context.getExternalFilesDir(null).getAbsolutePath();
             String cache = context.getCacheDir().getAbsolutePath();
-            return path.startsWith(root) || path.startsWith(external) || path.startsWith(cache);
+            String externalCache = context.getExternalCacheDir() == null
+                    ? "" : context.getExternalCacheDir().getAbsolutePath();
+            // 默认缓存目录现在就在外部缓存目录(/storage/emulated/0/Android/data/<包名>/cache)：
+            // Android 11+ 第三方文件管理器同样进不了 Android/data，file:// 跳过去只会
+            // 跳到对方报错/没反应，所以这里和内部私有目录一样按"打不开"处理，让 Python
+            // 侧把真实路径提示给用户手动清理
+            return path.startsWith(root) || path.startsWith(external) || path.startsWith(cache)
+                    || (externalCache.length() > 0 && path.startsWith(externalCache));
         } catch (Exception es) {
             return false;
         }

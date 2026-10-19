@@ -7,7 +7,9 @@ assets 根目录，业务代码在 app_src/(构建脚本从 ../src 复制)或 ..
 启动顺序很关键：
     1. 调整 sys.path(业务源码 + sr_qnn 后端 + 可选的依赖垫片)
     2. 创建 QApplication(QStandardPaths 需要)
-    3. platform_mobile.InitAndroidEnv()：把配置/数据/缓存/日志重定向到应用私有目录
+    3. platform_mobile.InitAndroidEnv()：把配置/数据/日志重定向到应用私有目录，
+       缓存重定向到应用外部缓存目录(/storage/emulated/0/Android/data/<包名>/cache，
+       用户清理得到)，下载目录默认指向应用外部私有目录
     4. sr_backend.InstallQnnCompat()：把 sr_qnn 注册为 sr_vulkan 兼容模块
     5. start.Run(app)：走与桌面端相同的主流程(自动跳过单实例/系统托盘等桌面特性)
 """
@@ -611,6 +613,8 @@ def DumpDiagnostics(reason=""):
         lines.append("JM_SR_MODELS: {}".format(os.environ.get("JM_SR_MODELS", "")))
         lines.append("app data dir: {}".format(platform_mobile.GetAppDataDir()))
         lines.append("external dir: {}".format(platform_mobile.GetExternalDir()))
+        lines.append("external cache dir: {}".format(platform_mobile.GetExternalCacheDir()))
+        lines.append("XDG_CACHE_HOME: {}".format(os.environ.get("XDG_CACHE_HOME", "")))
         nativeDirs = platform_mobile.GetNativeLibDirs()
         lines.append("native lib dirs: {}".format(nativeDirs))
         for lib in ("libsr_qnn.so", "libonnxruntime.so", "libQnnHtp.so", "libQnnHtpV79Skel.so"):
