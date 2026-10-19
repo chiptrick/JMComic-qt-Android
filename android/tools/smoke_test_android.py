@@ -995,6 +995,122 @@ assert not [a for a in mobile_ui.TouchScrollAreas(main) if not getattr(a, "_jmTo
 print("[ok] 全量清点: %d 个滚动区域里只剩看图控件(QGraphicsView 自己拖动翻页)没接管"
       % len(mobile_ui.TouchScrollAreas(main)))
 
+# ③.8 "QScroller 重制后所有页面无法滑动"的回归 —— 自发触控先投递给 QWindow 那一层
+#   真机链路：QPA 把整条触控序列先投给 QWindow(QWidgetWindow)，控件级分发
+#   (translateRawTouchEvent)是 QWidgetWindow::event 之后的事，而应用事件过滤器
+#   跑在 QWidgetWindow::event **之前** —— 触控路由在 QWindow 级把 TouchUpdate/End
+#   吞掉(return True)的话，QWidgetWindow 就收不到事件、不再分发给控件，QScroller
+#   的手势识别器只在控件级 notify 里进食 -> 永远等不到 TouchUpdate，页面一动不动。
+#   而且 QWindow 没有 childAt/isEnabled，_DeepAt 在这一级必炸(炸完还 Reset 清表)。
+#   ③.7 的合成触控直接 sendEvent 到控件，量不到 QWindow 这一层 —— 冒烟全绿、
+#   真机全挂就是这么来的。这里按真机次序走两跳：先 QWindow 级(必须穿透)，再
+#   控件级(真机分发的落点)。单跳只发 QWindow 在宿主上复现不了真机的抓取簿记
+#   (触点 target 在 QPointingDevicePrivate::activePoints，只有 QPA 自发链路填)。
+from tools import mobile_ui_touch  # noqa: E402
+
+chainHost = QWidget()
+chainList = ComicListWidget(chainHost)
+chainLayout = QVBoxLayout(chainHost)
+chainLayout.setContentsMargins(0, 0, 0, 0)
+chainLayout.addWidget(chainList)
+chainHost.resize(avail, 480)
+chainHost.show()
+deadline = time.time() + 2.0
+while time.time() < deadline and not chainHost.isVisible():
+    app.processEvents()
+    time.sleep(0.02)
+fillList(chainList)
+assert getattr(chainList, "_jmTouchScroll", False), "链路测试的列表应被接管手指滚动"
+chainWin = chainHost.windowHandle()
+assert chainWin is not None, "顶层控件应有 QWindow(自发触控的第一站)"
+
+
+def windowPoint(state, localPos):
+    return QEventPoint(0, state, QPointF(localPos),
+                       QPointF(chainWin.mapToGlobal(localPos.toPoint())))
+
+
+# 8a: QWindow 级只旁观 —— _DeepAt 不许炸，路由不许认领/吞掉
+qwinPos = QPointF(20, 20)
+assert mobile_ui_touch._TouchRouter._DeepAt(
+    chainWin, windowPoint(QEventPoint.State.Pressed, qwinPos)) is None, \
+    "QWindow 上的 _DeepAt 应直接返回 None(它没有 childAt/isEnabled)"
+
+
+def guardConsumesAtWindow(kind, state):
+    qwinEvent = QTouchEvent(kind, TOUCH_DEVICE, Qt.KeyboardModifier.NoModifier,
+                            [windowPoint(state, qwinPos)])
+    return guard.eventFilter(chainWin, qwinEvent)
+
+
+for qwinKind, qwinState in ((QEvent.Type.TouchBegin, QEventPoint.State.Pressed),
+                            (QEvent.Type.TouchUpdate, QEventPoint.State.Updated),
+                            (QEvent.Type.TouchEnd, QEventPoint.State.Released)):
+    assert guardConsumesAtWindow(qwinKind, qwinState) is False, \
+        "QWindow 级的 %s 绝不许被路由认领/吞掉(会挡住 QWidgetWindow 的控件分发)" % qwinKind
+
+# 带活跃序列时更要放行：这正是"重制后所有页面无法滑动"的现场 —— 序列在控件级
+# 被认领后，QWindow 级的 TouchUpdate/End 若被吞掉，QScroller 就再也吃不到口粮
+sendTouch(QEvent.Type.TouchBegin, QEventPoint.State.Pressed,
+          chainList.viewport(),
+          QPointF(chainList.viewport().width() / 2.0, chainList.viewport().height() / 2.0))
+assert len(guard._seqs) > 0, "控件级 TouchBegin 应先入表(活跃序列)"
+for qwinKind, qwinState in ((QEvent.Type.TouchUpdate, QEventPoint.State.Updated),
+                            (QEvent.Type.TouchEnd, QEventPoint.State.Released)):
+    assert guardConsumesAtWindow(qwinKind, qwinState) is False, \
+        "活跃序列期间 QWindow 级 %s 也必须放行(旧实现在这里吞掉 -> 真机全页面滑不动)" % qwinKind
+sendTouch(QEvent.Type.TouchEnd, QEventPoint.State.Released,
+          chainList.viewport(),
+          QPointF(chainList.viewport().width() / 2.0, chainList.viewport().height() / 2.0))
+assert len(guard._seqs) == 0, "结算后不应残留序列"
+print("[ok] QWindow 级只旁观: _DeepAt 不炸, 空表/带序列时 Begin/Update/End 都不认领不吞")
+
+
+# 8b: 两跳链路端到端 —— 每条触控先过 QWindow 级(必须穿透)，再到控件级(真机分发
+#     的落点)，QScroller 必须跟手。单跳(只发 QWindow)在宿主上复现不了真机的
+#     抓取簿记：触点 target 存在 QPointingDevicePrivate::activePoints，只有 QPA
+#     自发事件链会填它，合成的独立 QEventPoint 跨事件丢 target -> update 分发不出去
+#     (真机模拟器上验证过单跳自发链路正常滚动)。
+def sendTouchWindow(kind, state, localPos):
+    """ 合成触控发给 **QWindow**(真机自发触控的第一站)，控件分发交给 Qt 自己做 """
+    app.sendEvent(chainWin, QTouchEvent(kind, TOUCH_DEVICE,
+                                       Qt.KeyboardModifier.NoModifier,
+                                       [windowPoint(state, localPos)]))
+
+
+bar = chainList.verticalScrollBar()
+before = bar.value()
+x = max(4, chainWin.width() // 2)
+y0 = chainWin.height() - 30
+
+
+def twoHop(kind, state, localPos):
+    sendTouchWindow(kind, state, localPos)
+    vpLocal = QPointF(chainList.viewport().mapFromGlobal(
+        chainWin.mapToGlobal(localPos.toPoint())))
+    sendTouch(kind, state, chainList.viewport(), vpLocal)
+
+
+twoHop(QEvent.Type.TouchBegin, QEventPoint.State.Pressed, QPointF(x, y0))
+for step in range(1, 9):
+    app.processEvents()
+    time.sleep(0.01)
+    twoHop(QEvent.Type.TouchUpdate, QEventPoint.State.Updated,
+           QPointF(x, y0 - 150 * step / 8.0))
+hold = time.time() + 0.4               # 手指不动(纯跟手，还没惯性)
+while time.time() < hold:
+    app.processEvents()
+    time.sleep(0.01)
+followed = bar.value() - before
+twoHop(QEvent.Type.TouchEnd, QEventPoint.State.Released, QPointF(x, y0 - 150))
+app.processEvents()
+assert followed >= 150 * 0.9, \
+    "两跳链路滑 150px 只跟了 %dpx(QScroller 手势识别/跟手断了)" % followed
+print("[ok] 两跳触控链路(QWindow 穿透+控件级投递): 划 150px -> 跟手 %dpx" % followed)
+chainHost.hide()
+chainHost.deleteLater()
+app.processEvents()
+
 # ④ "在下拉框/数值框附近滑动会误触它们"
 #    下拉框/数值框在 **press** 时就生效，所以触控路由认领整个序列，点按才激活。
 main.SwitchWidgetAndClear(main.subStackWidget.indexOf(main.settingView))

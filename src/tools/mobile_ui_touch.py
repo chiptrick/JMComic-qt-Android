@@ -471,6 +471,9 @@ class _TouchRouter(QObject):
         坐标一律用 globalPosition() 换算：position() 只在 Qt 自己投递时才是
         "接收控件本地坐标"，测试合成的 QEventPoint 未必填了它。
         """
+        if not isinstance(obj, QWidget):
+            # QWindow 没有 childAt/isEnabled/parentWidget(兜底，正常在 OnTouch 就拦了)
+            return None
         try:
             glob = point.globalPosition()
             pos = obj.mapFromGlobal(QPoint(int(glob.x()), int(glob.y())))
@@ -535,6 +538,14 @@ class _TouchRouter(QObject):
         if eventType == QEvent.Type.TouchCancel:
             self._tabSwipe.Stop()
             self.Reset()
+            return False
+        if not isinstance(obj, QWidget):
+            # 自发触控每一趟都先投递给 QWindow(QWidgetWindow)，控件级分发
+            # (translateRawTouchEvent)在它之后才跑。这一级只旁观、不认领不吞掉：
+            # 在 QWindow 级吞掉 TouchUpdate/End 会挡住 QWidgetWindow 的控件分发，
+            # QScroller 的手势识别器只在控件级 notify 里进食 —— 真机"QScroller
+            # 重制后所有页面无法滑动"就是这么来的(QWindow 也没有 childAt/isEnabled，
+            # _DeepAt 在这一级必炸)。认领/激活一律在控件级那一趟做。
             return False
         try:
             points = list(event.points())
