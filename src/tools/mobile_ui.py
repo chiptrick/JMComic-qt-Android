@@ -21,6 +21,9 @@
    12. 后建出来的滚动区域(首页分区页、详情页/设置页里的滚动区、看图工具菜单等)自动接管手指滚动：
        这些页面是网络回来后/进详情页时才建的，Apply/OnShown 那一次全量扫描够不着它们，
        真机现象就是"首页只有最新上传能滑"(见 mobile_ui_touch._ScrollWatcher)
+   13. 下拉框弹窗按内容加宽(拆行压窄 combo 之后弹窗仍装得下最宽的选项，webp/apng 不再被切)；
+       批量超分页的参数行在窄屏下改成"放大倍数/转换格式各占一行、整组居中"的表单
+       (见 mobile_ui_layout.FitComboPopups / LayoutBatchSrTool)
 
 实现按关注点拆到同目录的 `mobile_ui_*.py`(base/hooks/window/drawer/layout/
 reader/grid/touch/diag)；本模块只持有会话级可变状态，并对外保持
@@ -117,9 +120,16 @@ _readerPinch = None
 #      信号)，点按不再重放鼠标
 #   这样滑动永远不会触发控件，点按走的是控件自己的激活链。
 #
-# 例外(完全不插手，Qt 原生"未消费触控->鼠标"合成照常工作)：
+# 例外(不插手或另有通道，Qt 原生"未消费触控->鼠标"合成照常工作)：
 #   * QSlider / QScrollBar 需要真正的 press-drag(拖把手/滑块)
-#   * QLineEdit / QTextEdit 需要光标/选择/输入法的鼠标语义
+#   * QLineEdit / QTextEdit / QPlainTextEdit 需要光标/选择/输入法的鼠标语义：
+#     走 "input" 通道 —— 不认领、不吞事件，只在抬手后确认"是否真的聚焦"，
+#     没聚焦就补一次聚焦+落光标+弹输入法(见 mobile_ui_touch._FocusInput)。
+#     这是"点了输入框打不了字"的根因路径：只要事件被吞掉(别的触点还在表里/
+#     残留序列/滚动区手势抢走)，Qt 就不会再合成鼠标，输入框永远拿不到焦点。
+#   * 只读文本框(评论/简介/日志，_jmTextSelect 标记)的选中被改成"触摸长按才允许"
+#     (全选+复制菜单，见 component.label.text_label.TextSelectGate)：滑动不误选、
+#     鼠标拖选保留；链接点按/光标位置靠放行的合成 press/release 保持可用
 #   * Qt::Popup 弹窗(下拉列表、右键菜单)里的点击/滚动不拦
 #   * 已接管滚动区之外的控件(顶栏按钮等)
 

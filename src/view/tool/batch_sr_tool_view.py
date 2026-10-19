@@ -20,6 +20,7 @@ from tools.log import Log
 from tools.str import Str
 from tools.tool import ToolUtil
 from tools import mobile_file_dialog
+from tools import mobile_ui
 from view.read.read_qgraphics_proxy_widget import ReadQGraphicsProxyWidget
 from view.tool.batch_sr_tool_db import BatchSrToolDb
 
@@ -143,6 +144,10 @@ class BatchSrToolView(QtWidgets.QWidget, Ui_BatchSrTool, QtTaskBase):
 
     def Init(self):
         self.isInit = True
+        # 转换格式/线程数 的弹窗宽度默认跟随 combo 自己，combo 被布局压窄时
+        # 选项会被硬切(webp→web、apng→apn)；按内容给弹窗补一个宽度下限。
+        # 桌面端同样适用(combo 的 sizeHint 本来就没算上弹窗里的内边距)。
+        mobile_ui.FitComboPopups(self)
         if Setting.BatchSrState.value:
 
             self.curState = int(Setting.BatchSrState.value)

@@ -845,6 +845,173 @@ def ClampPageWidth(root, available):
     return count
 
 
+# ---------------------------------------------------------------------------
+# 批量超分页：参数行改成居中表单
+# ---------------------------------------------------------------------------
+
+def _CenterBatchSrGroup(line, spacer, label, widget, contentWidth):
+    """ 把"标签+控件"这一组按可见宽度居中(改左侧留白的宽度) """
+    try:
+        spacing = line.spacing() if line.spacing() >= 0 else WrapRowSpacing
+        groupWidth = label.sizeHint().width() + widget.sizeHint().width() + spacing
+        spacer.changeSize(max(0, (contentWidth - groupWidth) // 2), 0,
+                          QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Minimum)
+        # changeSize 不会自己触发布局：不 invalidate 的话旋转/改宽度后还是老缩进
+        line.invalidate()
+        line.activate()
+    except Exception as es:
+        Log.Error(es)
+    return
+
+
+def LayoutBatchSrTool(view, available=None):
+    """ 批量超分页：参数行"一行放不下"时，把 放大倍数/转换格式 各自拆成居中一行
+
+    原来 label_2|线|label_25|模型按钮|线|label_26|放大倍数|线|label_5|转换格式|线|弹簧
+    是完整一行(最小宽 700px 以上)。窄屏放不下时，通用拆行只能按顺序装箱：
+    放大倍数 spin 抱着 .ui 里 150px 的最小宽不放(半行被一个只显示 "2.0" 的框占掉)、
+    转换格式 combo 被压到 60px 宽(弹窗跟着变窄，webp/apng 被硬切)、控件全部左对齐
+    挤在行首。这里按页面语义把这两个控件各自拆成"标签+控件整体居中"的一行，
+    spin 的最小宽收回自然宽度；模型那部分留在原行，通用拆行会把它变成
+    "参数设置：模型："+"模型名"两行，名字照样完整显示。
+    拆完每行都放得下，通用拆行/压扁就不再插手(combo 不被压扁 → 弹窗不裁字)。
+
+    只在"这一行确实放不下"时才拆(桌面宽屏保持原来的一行式布局)；拆是一次性的，
+    居中缩进每次重排都按当前宽度重算(旋转/改窗口大小之后仍然居中)。
+    """
+    try:
+        if view is None:
+            return False
+        if available is None:
+            available = mobile_ui._limit
+        # 页面自身布局的左右边距要扣掉，居中才是相对"可见区域"而不是相对窗口
+        margins = view.verticalLayout.contentsMargins() if hasattr(view, "verticalLayout") else None
+        if margins is not None:
+            contentWidth = max(0, available - margins.left() - margins.right())
+        else:
+            contentWidth = available
+        rows = getattr(view, "_jmBatchSrRows", None)
+        built = False
+        if rows is None:
+            rows = _BuildBatchSrForm(view, available)
+            if rows is None:
+                return False
+            view._jmBatchSrRows = rows
+            built = True
+            Log.Warn("portrait: 批量超分参数行改为居中表单(放大倍数/转换格式各一行)")
+        for line, spacer, label, widget in rows:
+            _CenterBatchSrGroup(line, spacer, label, widget, contentWidth)
+        return built
+    except Exception as es:
+        Log.Error(es)
+        return False
+
+
+def _BuildBatchSrForm(view, available):
+    """ 把参数行里的 放大倍数/转换格式 拆成两行居中表单；返回 [(行, 左留白, 标签, 控件)]
+
+    拆不了(桌面宽屏放得下 / 已经被通用拆行处理过)返回 None。
+    """
+    row = getattr(view, "horizontalLayout_5", None)
+    if row is None or row.count() <= 0:
+        return None
+    # 和通用拆行用同一个预算(可用宽 - 安全余量)：判据不一致会出现"我不管、它去拆"
+    # 的夹缝(实测主题字体下这一行最小宽 992，available=1000 时布局放得下、拆行却够呛)
+    budget = max(200, available - WrapSafetyMargin)
+    if row.minimumSize().width() <= budget:
+        return None                           # 一行放得下(桌面/宽屏)：保持原样
+    names = ("label_26", "coverScale", "line_3", "label_5", "fmtBox")
+    widgets = [getattr(view, name, None) for name in names]
+    if any(widget is None for widget in widgets):
+        return None
+    for widget in widgets:
+        if row.indexOf(widget) < 0:
+            return None                       # 已经被通用拆行处理过：不硬来
+    for widget in widgets:                    # 从原行摘走(控件仍 parent 在页面上)
+        row.takeAt(row.indexOf(widget))
+    # 分组之间的竖线在堆叠表单里没有意义：隐藏即释放布局占位
+    for name in ("line", "line_3", "line_4"):
+        line = getattr(view, name, None)
+        if line is not None:
+            line.setVisible(False)
+    # 放大倍数：150px 是桌面上的随手值，对"2.0 + 上下箭头"太富裕，收回自然宽度
+    coverScale = getattr(view, "coverScale", None)
+    if coverScale is not None:
+        coverScale.setMinimumWidth(0)
+    from PySide6.QtWidgets import QHBoxLayout, QSpacerItem, QVBoxLayout
+    parent = row.parent()
+    if parent is None:
+        return None
+    index = parent.indexOf(row)
+    if index < 0:
+        return None
+    column = QVBoxLayout()
+    column.setContentsMargins(0, 0, 0, 0)
+    column.setSpacing(WrapRowSpacing)
+    spacing = row.spacing() if row.spacing() >= 0 else WrapRowSpacing
+    rows = []
+    for labelName, widgetName in (("label_26", "coverScale"), ("label_5", "fmtBox")):
+        label = getattr(view, labelName)
+        widget = getattr(view, widgetName)
+        line = QHBoxLayout()
+        line.setContentsMargins(0, 0, 0, 0)
+        line.setSpacing(spacing)
+        # 左侧留白用显式 spacer(注意 addSpacing 不返回对象，改不了宽度)
+        spacer = QSpacerItem(0, 0, QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Minimum)
+        line.addItem(spacer)
+        line.addWidget(label)
+        line.addWidget(widget)
+        line.addStretch(1)
+        column.addLayout(line)
+        rows.append((line, spacer, label, widget))
+    parent.insertLayout(index + 1, column)
+    return rows
+
+
+# ---------------------------------------------------------------------------
+# 下拉框弹窗：装得下最宽的选项
+# ---------------------------------------------------------------------------
+
+# 弹窗里每个选项除了文字本身，还占：视图左内边距(主题 QSS 15px) + 项边框(8px*2)
+# + 菜单式弹窗里 QMenu::item 的左右内边距(Android 上实测约 20/25px) + 视图边框(2px*2)。
+# 各平台样式差别很大(真机实测"文字区"只有弹窗宽的 4 成)，统一留 72px ——
+# 宁可让弹窗比 combo 宽一点，也不能再裁字。
+ComboPopupPadding = 72
+
+
+def FitComboPopups(root):
+    """ 让每个下拉框的弹窗至少装得下最宽的选项(不改 combo 自己的宽度)
+
+    QComboBox 的弹窗宽度默认跟随 combo 自己(showPopup 里 listRect 取的是 combo
+    的弹端子控件矩形，按内容加宽那条路只在特定风格下才走)，而竖屏拆行/压扁之后
+    combo 常被压到 40~60px —— 弹窗跟着变窄，"webp/apng" 被硬切掉半个字
+    (真机截图：webp→web、apng→apn)，既没有省略号也弹不出横向滚动条。
+    弹窗容器最后会 expandedTo(container->minimumSize())，所以给**视图**设一个
+    内容宽度下限，弹窗就会跟着放宽，combo 本身仍占原来的格子。
+    """
+    if root is None:
+        return 0
+    count = 0
+    for combo in _SelfAndChildren(root, QComboBox):
+        try:
+            view = combo.view()
+            if view is None:
+                continue
+            metrics = combo.fontMetrics()
+            need = 0
+            for index in range(combo.count()):
+                need = max(need, metrics.horizontalAdvance(combo.itemText(index)))
+            width = need + ComboPopupPadding
+            if width > view.minimumWidth():
+                view.setMinimumWidth(width)
+                count += 1
+        except Exception as es:
+            Log.Error(es)
+    if count:
+        Log.Warn("portrait: {} 个下拉框的弹窗按内容加宽(不再裁字)".format(count))
+    return count
+
+
 def ReflowPortrait(root=None, available=None):
     """ 按当前宽度重排一次(幂等，可反复调用)
 
@@ -861,12 +1028,19 @@ def ReflowPortrait(root=None, available=None):
         return 0
     if available is None:
         available = PortraitWidth(mobile_ui._mainView) if mobile_ui._mainView is not None else mobile_ui._limit
-    count = StackSideNavs(root)
+    # 页面自己的表单布局必须排在通用拆行之前：它按页面语义排好的行都放得下，
+    # 通用拆行/压扁就不再插手(批量超分页的 combo 不被压扁，弹窗不裁字)。
+    mainView = mobile_ui._mainView
+    batchSr = getattr(mainView, "batchSrView", None) if mainView is not None else None
+    count = LayoutBatchSrTool(batchSr, available) if batchSr is not None else 0
+    count += StackSideNavs(root)
     count += EnableLabelWrap(root, available)
     count += WrapWideRows(root, available)
     count += FlattenWideGrids(root, available)
     count += ShrinkToFit(root, available)
     count += ClampPageWidth(root, available)
+    # 弹窗宽度要在所有拆行/压扁之后按最终字体算一次(combo 可能已经被压窄)
+    count += FitComboPopups(root)
     # 设置页的路径行：任何一次重排之后都重新省略一遍(标签文字是运行时才填的)
     FitSettingRows(root)
     return count

@@ -9,6 +9,7 @@ from PySide6.QtCore import Qt, QSize, QEvent, Signal
 from PySide6.QtGui import QColor, QFont, QPixmap, QIcon, QCursor
 from PySide6.QtWidgets import QListWidgetItem, QLabel, QScroller, QPushButton, QMessageBox, QMenu, QListWidget, QFrame
 
+from component.label.text_label import InstallTextSelect
 from component.layout.flow_layout import FlowLayout
 from config.setting import Setting
 from interface.ui_book_info import Ui_BookInfo
@@ -46,6 +47,11 @@ class BookInfoView(QtWidgets.QWidget, Ui_BookInfo, QtTaskBase):
 
         self.idLabel.setTextInteractionFlags(Qt.TextBrowserInteraction)
         self.description.setTextInteractionFlags(Qt.TextBrowserInteraction)
+        # 触摸设备上滑过简介/标题不再误选中文字(鼠标点按/拖选不变)，长按才全选+复制菜单
+        # (description 是只读 QPlainTextEdit，以前滑动时又滚页面又选文字，最明显)
+        InstallTextSelect(self.title)
+        InstallTextSelect(self.idLabel)
+        InstallTextSelect(self.description)
 
         self.downloadButton.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
         self.downloadButton.setIconSize(QSize(50, 50))

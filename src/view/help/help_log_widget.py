@@ -8,6 +8,7 @@ from PySide6.QtCore import QUrl, Signal, QTimer
 from PySide6.QtGui import QDesktopServices, Qt, QTextCursor, QColor
 from PySide6.QtWidgets import QWidget, QMessageBox, QTextEdit, QStyle
 from interface.ui_help_log_widget import Ui_HelpLogWidget
+from component.label.text_label import InstallTextSelect
 from task.qt_task import QtTaskBase
 from tools.log import Log
 from tools.tool import ToolUtil
@@ -25,6 +26,8 @@ class HelpLogWidget(QWidget, Ui_HelpLogWidget):
         self.buttonGroup.setId(self.debugButton, logging.DEBUG)
         self.textBrowser.setReadOnly(True)
         self.textBrowser.setOpenExternalLinks(True)
+        # 触摸设备上滑日志不再误选中文字(鼠标点按/拖选不变)，长按才全选+复制菜单
+        InstallTextSelect(self.textBrowser)
         self.logMsg.connect(self.AddLog)
         Log.InstallFilter(self)
         self.defaultColor = None

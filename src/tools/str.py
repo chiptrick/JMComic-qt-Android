@@ -312,6 +312,7 @@ class Str:
     ActorsName = 199           # 登场人物
     NotSupportFmt = 200            # 不支持该格式
     ReSign = 201            # 补签
+    Cancel = 202            # 取消
 
     @classmethod
     def Reload(cls):
@@ -610,6 +611,7 @@ class Str:
         cls.strDict[cls.ActorsName] = QCoreApplication.translate("cls.obj", "登场人物", None)
         cls.strDict[cls.NotSupportFmt] = QCoreApplication.translate("cls.obj", "不支持该格式", None)
         cls.strDict[cls.ReSign] = QCoreApplication.translate("cls.obj", "补签", None)
+        cls.strDict[cls.Cancel] = QCoreApplication.translate("cls.obj", "取消", None)
 
 
     @classmethod

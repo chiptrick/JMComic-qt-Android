@@ -7,6 +7,7 @@ from PySide6.QtGui import QHelpEvent
 from PySide6.QtWidgets import QWidget
 
 from config.setting import Setting
+from component.label.text_label import InstallTextSelect
 from interface.ui_search import Ui_Search
 from qt_owner import QtOwner
 from server import req, Log, Status, config
@@ -41,6 +42,8 @@ class SearchView(QWidget, Ui_Search, QtTaskBase):
         for year in reversed(range(2012, now.year+1)):
             self.yearBox.addItem(str(year))
         # self.searchLabel.installEventFilter(self)
+        # 触摸设备上滑过搜索提示不再误选中(鼠标点按/拖选不变)，长按才全选+复制菜单
+        InstallTextSelect(self.searchTab)
 
     def InitWord(self):
         self.lineEdit.LoadCacheWord()

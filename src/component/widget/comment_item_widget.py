@@ -5,6 +5,7 @@ from PySide6.QtCore import QEvent, Qt, QSize, Signal
 from PySide6.QtGui import QPixmap, QIcon
 
 from config import config
+from component.label.text_label import InstallTextSelect
 from interface.ui_comment_item import Ui_CommentItem
 from qt_owner import QtOwner
 from tools.log import Log
@@ -44,6 +45,10 @@ class CommentItemWidget(QtWidgets.QWidget, Ui_CommentItem):
         self.titleLabel.setTextInteractionFlags(Qt.TextBrowserInteraction)
         self.commentLabel.setTextInteractionFlags(Qt.TextBrowserInteraction)
         # self.nameLabel.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        # 触摸设备上滑过评论文字不再误选中(鼠标点按/拖选不变)，长按才全选+复制菜单
+        InstallTextSelect(self.nameLabel)
+        InstallTextSelect(self.titleLabel)
+        InstallTextSelect(self.commentLabel)
         self.linkLabel.setWordWrap(True)
         self.linkLabel.setVisible(False)
         self.linkLabel.installEventFilter(self)

@@ -87,9 +87,11 @@ run "10. vfs 路径层回归" android/tools/host_test_vfs.py
 vfs=$?
 run "11. 缓存目录重定向/旧缓存搬迁回归" android/tools/host_test_cache_dir.py
 cache=$?
+run "12. 设置页输入框点按/聚焦链路回归" android/tools/host_test_input_focus.py
+inputfocus=$?
 
 echo
-echo "结果: smoke=$smoke interfaces=$iface crypto=$crypto image=$image picker=$picker netfb=$netfb saf=$saf pinch=$pinch vfs=$vfs cache=$cache"
+echo "结果: smoke=$smoke interfaces=$iface crypto=$crypto image=$image picker=$picker netfb=$netfb saf=$saf pinch=$pinch vfs=$vfs cache=$cache inputfocus=$inputfocus"
 [ "$smoke" -eq 0 ] && [ "$iface" -eq 0 ] && [ "$crypto" -eq 0 ] && [ "$image" -eq 0 ] \
     && [ "$picker" -eq 0 ] && [ "$netfb" -eq 0 ] && [ "$saf" -eq 0 ] && [ "$pinch" -eq 0 ] && [ "$vfs" -eq 0 ] \
-    && [ "$cache" -eq 0 ]
+    && [ "$cache" -eq 0 ] && [ "$inputfocus" -eq 0 ]
