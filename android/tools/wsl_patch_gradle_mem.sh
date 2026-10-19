@@ -23,24 +23,18 @@ NEW_XMX="${NEW_XMX:-4096m}"
 
 echo "=== Gradle 堆上限: -Xmx$OLD_XMX -> -Xmx$NEW_XMX ==="
 changed=0
-# 1) 模板（决定以后每次生成的 gradle.properties）
-for f in "$WORK"/p4a/pythonforandroid/bootstraps/*/build/templates/gradle.tmpl.properties; do
-    [ -f "$f" ] || continue
-    if grep -q "Xmx$OLD_XMX" "$f"; then
-        sed -i "s/Xmx$OLD_XMX/Xmx$NEW_XMX/g" "$f"
-        echo "  已改模板 ${f#$WORK/}"
-        changed=$((changed + 1))
-    fi
-done
-# 2) 已存在的 dist / venv 副本（本轮就会用到）
+# 扫描范围必须和下面的校验一致(p4a 源码 + venv 里 pip 装的 pythonforandroid 副本 +
+# .buildozer 引导/dist 渲染产物)，且一律用 gradle*.properties 兼容 .tmpl ——
+# 0.40 踩过：--init 会把 site-packages 里未打补丁的 gradle.tmpl.properties 复制进
+# build-<abi>/，只扫 p4a 源码就会漏掉它们，校验再按全名扫 -> 必炸在 3.7。
 while IFS= read -r f; do
     if grep -q "Xmx$OLD_XMX" "$f"; then
         sed -i "s/Xmx$OLD_XMX/Xmx$NEW_XMX/g" "$f"
-        echo "  已改副本 ${f#$WORK/}"
+        echo "  已改 ${f#$WORK/}"
         changed=$((changed + 1))
     fi
-done < <(find "$ANDROID/.buildozer" "$WORK/venv311" "$WORK/p4a" \
-         -name 'gradle.properties' 2>/dev/null | sort -u)
+done < <(find "$WORK/p4a" "$WORK/venv311" "$ANDROID/.buildozer" \
+         -name 'gradle*.properties' 2>/dev/null | sort -u)
 
 echo "  改了 $changed 个文件"
 # 顺手清掉上一次 OOM 留下的堆转储(400MB/个，堆几次就吃掉可观空间)
@@ -53,7 +47,7 @@ while IFS= read -r f; do
         echo "  [FAIL] 仍是 $OLD_XMX: ${f#$WORK/}"
         bad=$((bad + 1))
     fi
-done < <(find "$ANDROID/.buildozer" "$WORK/p4a" \
+done < <(find "$ANDROID/.buildozer" "$WORK/p4a" "$WORK/venv311" \
          -name 'gradle*.properties' 2>/dev/null | sort -u)
 if [ "$bad" -gt 0 ]; then
     echo "[FAIL] 还有 $bad 个文件没改过来，:packageDebug 可能再次 OOM"
