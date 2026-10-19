@@ -776,12 +776,12 @@ def _UniqueDir(path):
 
 
 def PickExportTree(caption=""):
-    """ 选"导出目录"(下载/缓存目录的 SAF 目标)：返回 {"uri","name"} / "" 取消 / None 不可用
+    """ 选下载目录：返回 {"uri","name"} / "" 取消 / None 不可用
 
-    为什么不返回本地路径：SAF 授权的是 URI，Python 拿它写不了文件；而这几个目录
-    是要**持续写入**的(每本漫画每一页)，只能由 Java 侧写。所以这里只登记授权，
-    真正的落盘仍然在应用专属目录(Android 10+ 无需任何权限)，下载完成后再导出
-    到用户选的目录(见 saf_export)。
+    为什么不返回本地路径：SAF 授权的是 URI，Python 的 open() 打不开。而这个目录是
+    要**持续写入**的(每本漫画每一页)，所以真正的写入走 `saf_bridge` 的 socket
+    数据面(见 tools/vfs.py)：选中的目录就是下载目录本身，文件直接落在里面，
+    没有"先写私有目录再导出"。
     """
     try:
         from tools import saf_bridge

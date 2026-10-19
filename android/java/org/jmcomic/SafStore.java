@@ -477,4 +477,382 @@ public final class SafStore {
     public static boolean HasSdk(int level) {
         return Build.VERSION.SDK_INT >= level;
     }
+
+    // ------------------------------------------------------------------
+    // 相对路径读写(下载/阅读直接在 SAF 目录里按 "commies/某本/…/0001.jpg" 干活)
+    // ------------------------------------------------------------------
+    //
+    // 为什么要有这一组：下载不能"先落私有目录再整体导出" —— 用户把下载路径改成
+    // 某个目录之后，文件在下载过程中就必须待在那个目录里(取消/崩溃也不会在私有
+    // 目录留残渣)。所以 Python 侧手里的路径是 "saf://<树>/commies/…"，
+    // 由这里把它解析成 document uri 再读写。
+    //
+    // 性能：一页图一次 openOutputStream 是不可避免的，但**每页都重新列一遍父目录**
+    // 是可以避免的 —— 下载一本漫画有几百页，全都在同一个目录下。这里按目录缓存
+    // 一次子项表，新建的文件直接塞进缓存，实测把"每页 2 次 query"降到"每目录 1 次"。
+
+    /** 目录里的一个条目 */
+    public static final class Doc {
+        public final Uri uri;
+        public final String name;
+        public final boolean dir;
+        public final long size;
+
+        Doc(Uri uri, String name, boolean dir, long size) {
+            this.uri = uri;
+            this.name = name;
+            this.dir = dir;
+            this.size = size;
+        }
+    }
+
+    /** relDir -> 目录 document uri */
+    private static final java.util.HashMap<String, Uri> DirCache = new java.util.HashMap<>();
+    /** 目录 document uri -> (名字 -> 条目) */
+    private static final java.util.HashMap<String, java.util.HashMap<String, Doc>> ChildCache =
+            new java.util.HashMap<>();
+
+    /** 目录被外部改过(删除/导出)时整体失效 */
+    public static void InvalidateCache() {
+        synchronized (DirCache) {
+            DirCache.clear();
+            ChildCache.clear();
+        }
+    }
+
+    public static Uri RootDoc(Uri treeUri) {
+        return DocumentsContract.buildDocumentUriUsingTree(
+                treeUri, DocumentsContract.getTreeDocumentId(treeUri));
+    }
+
+    /** "a/b/c" -> ["a","b","c"] */
+    private static List<String> Parts(String rel) {
+        List<String> out = new ArrayList<String>();
+        if (rel == null) {
+            return out;
+        }
+        for (String part : rel.split("/")) {
+            if (part.length() > 0) {
+                out.add(part);
+            }
+        }
+        return out;
+    }
+
+    public static String ParentOf(String rel) {
+        int index = rel == null ? -1 : rel.lastIndexOf('/');
+        return index <= 0 ? "" : rel.substring(0, index);
+    }
+
+    public static String NameOf(String rel) {
+        int index = rel == null ? -1 : rel.lastIndexOf('/');
+        return index < 0 ? (rel == null ? "" : rel) : rel.substring(index + 1);
+    }
+
+    /** 列一个目录的子项(带缓存；reload=true 时强制重列) */
+    public static java.util.HashMap<String, Doc> ChildrenOf(Context context, Uri dirUri, boolean reload) {
+        String key = dirUri.toString();
+        if (!reload) {
+            synchronized (DirCache) {
+                java.util.HashMap<String, Doc> cached = ChildCache.get(key);
+                if (cached != null) {
+                    return cached;
+                }
+            }
+        }
+        java.util.HashMap<String, Doc> map = new java.util.HashMap<String, Doc>();
+        Cursor cursor = null;
+        try {
+            Uri children = DocumentsContract.buildChildDocumentsUriUsingTree(
+                    dirUri, DocumentsContract.getDocumentId(dirUri));
+            cursor = context.getContentResolver().query(children, new String[]{
+                    DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+                    DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+                    DocumentsContract.Document.COLUMN_MIME_TYPE,
+                    DocumentsContract.Document.COLUMN_SIZE}, null, null, null);
+            if (cursor != null) {
+                while (cursor.moveToNext()) {
+                    String id = cursor.getString(0);
+                    String name = cursor.getString(1);
+                    String mime = cursor.getString(2);
+                    long size = cursor.isNull(3) ? -1 : cursor.getLong(3);
+                    if (name == null) {
+                        continue;
+                    }
+                    map.put(name, new Doc(DocumentsContract.buildDocumentUriUsingTree(dirUri, id),
+                            name, DocumentsContract.Document.MIME_TYPE_DIR.equals(mime), size));
+                }
+            }
+        } catch (Exception ignore) {
+        } finally {
+            if (cursor != null) {
+                try {
+                    cursor.close();
+                } catch (Exception ignore) {
+                }
+            }
+        }
+        synchronized (DirCache) {
+            ChildCache.put(key, map);
+        }
+        return map;
+    }
+
+    /** 逐级创建/查找目录，返回目录 uri(失败时返回能到的最后一级) */
+    public static Uri EnsureDirRel(Context context, Uri treeUri, String relDir) {
+        Uri root = RootDoc(treeUri);
+        List<String> parts = Parts(relDir);
+        if (parts.isEmpty()) {
+            return root;
+        }
+        String key = treeUri.toString() + "|" + relDir;
+        synchronized (DirCache) {
+            Uri cached = DirCache.get(key);
+            if (cached != null) {
+                return cached;
+            }
+        }
+        Uri parent = root;
+        StringBuilder built = new StringBuilder();
+        for (String part : parts) {
+            if (built.length() > 0) {
+                built.append('/');
+            }
+            built.append(part);
+            String subKey = treeUri.toString() + "|" + built;
+            Uri sub = null;
+            synchronized (DirCache) {
+                sub = DirCache.get(subKey);
+            }
+            if (sub == null) {
+                sub = EnsureChildDir(context, parent, part);
+                if (sub == null) {
+                    return parent;
+                }
+                synchronized (DirCache) {
+                    DirCache.put(subKey, sub);
+                }
+            }
+            parent = sub;
+        }
+        return parent;
+    }
+
+    /** 找相对路径对应的条目(不存在返回 null) */
+    public static Doc FindRel(Context context, Uri treeUri, String rel) {
+        String parentRel = ParentOf(rel);
+        String name = NameOf(rel);
+        if (name.length() == 0) {
+            return new Doc(RootDoc(treeUri), "", true, -1);
+        }
+        Uri dir = EnsureDirRel(context, treeUri, parentRel);
+        java.util.HashMap<String, Doc> children = ChildrenOf(context, dir, false);
+        Doc doc = children.get(name);
+        if (doc != null) {
+            return doc;
+        }
+        // 可能是外部新增的(比如用户往目录里放了文件)：重列一次
+        children = ChildrenOf(context, dir, true);
+        return children.get(name);
+    }
+
+    /** 找相对路径对应的文件；不存在就创建(父目录自动建) */
+    public static Uri EnsureFileRel(Context context, Uri treeUri, String rel) throws Exception {
+        Doc found = FindRel(context, treeUri, rel);
+        if (found != null && !found.dir) {
+            return found.uri;
+        }
+        String parentRel = ParentOf(rel);
+        String name = Sanitize(NameOf(rel));
+        Uri dir = EnsureDirRel(context, treeUri, parentRel);
+        Uri created = DocumentsContract.createDocument(
+                context.getContentResolver(), dir, MimeOf(name), name);
+        if (created == null) {
+            throw new Exception("createDocument failed: " + rel);
+        }
+        java.util.HashMap<String, Doc> children = ChildrenOf(context, dir, false);
+        children.put(name, new Doc(created, name, false, -1));
+        return created;
+    }
+
+    /** 读一个相对路径的文件；不存在返回 null */
+    public static InputStream OpenRead(Context context, Uri treeUri, String rel) throws Exception {
+        Doc found = FindRel(context, treeUri, rel);
+        if (found == null || found.dir) {
+            return null;
+        }
+        try {
+            return context.getContentResolver().openInputStream(found.uri);
+        } catch (Exception es) {
+            // 缓存的 uri 可能已失效(用户在文件管理器里删了/改名了)：清缓存重找一次
+            InvalidateCache();
+            found = FindRel(context, treeUri, rel);
+            if (found == null || found.dir) {
+                return null;
+            }
+            return context.getContentResolver().openInputStream(found.uri);
+        }
+    }
+
+    /** 写一个相对路径的文件(存在就截断重写)，返回写入字节数 */
+    public static long WriteStream(Context context, Uri treeUri, String rel,
+                                   InputStream source, long size) throws Exception {
+        Uri uri = EnsureFileRel(context, treeUri, rel);
+        OutputStream out;
+        try {
+            out = context.getContentResolver().openOutputStream(uri, "wt");
+        } catch (Exception es) {
+            // 缓存里的 uri 可能已经失效(用户在外面删了)：清缓存重来一次
+            InvalidateCache();
+            uri = EnsureFileRel(context, treeUri, rel);
+            out = context.getContentResolver().openOutputStream(uri, "wt");
+        }
+        if (out == null) {
+            throw new Exception("openOutputStream failed: " + rel);
+        }
+        long written = 0;
+        try {
+            byte[] buffer = new byte[64 * 1024];
+            while (true) {
+                int want = buffer.length;
+                if (size >= 0 && written + want > size) {
+                    want = (int) (size - written);
+                }
+                if (size >= 0 && want <= 0) {
+                    break;
+                }
+                int len = source.read(buffer, 0, want);
+                if (len <= 0) {
+                    break;
+                }
+                out.write(buffer, 0, len);
+                written += len;
+            }
+            out.flush();
+        } finally {
+            try {
+                out.close();
+            } catch (Exception ignore) {
+            }
+        }
+        // 刚 createDocument 出来的条目在缓存里 size 是 -1，写完把真实大小记上
+        // (否则 vfs.Size() 会一直返回 -1)
+        try {
+            String name = NameOf(rel);
+            Uri parent = EnsureDirRel(context, treeUri, ParentOf(rel));
+            ChildrenOf(context, parent, false).put(name, new Doc(uri, name, false, written));
+        } catch (Exception ignore) {
+        }
+        return written;
+    }
+
+    /** 读一个相对路径的文件到输出流，返回字节数；不存在返回 -1 */
+    public static long ReadStream(Context context, Uri treeUri, String rel, OutputStream target)
+            throws Exception {
+        InputStream in = OpenRead(context, treeUri, rel);
+        if (in == null) {
+            return -1;
+        }
+        long total = 0;
+        try {
+            byte[] buffer = new byte[64 * 1024];
+            int len;
+            while ((len = in.read(buffer)) > 0) {
+                target.write(buffer, 0, len);
+                total += len;
+            }
+            target.flush();
+        } finally {
+            try {
+                in.close();
+            } catch (Exception ignore) {
+            }
+        }
+        return total;
+    }
+
+    /** 删除相对路径(目录递归)，返回删掉的条目数 */
+    public static org.json.JSONObject DeleteRel(Context context, Uri treeUri, String rel)
+            throws Exception {
+        Doc found = FindRel(context, treeUri, rel);
+        org.json.JSONObject out = new org.json.JSONObject();
+        org.json.JSONArray errors = new org.json.JSONArray();
+        int[] counter = new int[]{0, 0};   // [文件数, 目录数]
+        if (found != null) {
+            DeleteDoc(context, found, errors, counter);
+        }
+        InvalidateCache();
+        out.put("ok", true);
+        out.put("files", counter[0]);
+        out.put("dirs", counter[1]);
+        out.put("count", counter[0] + counter[1]);
+        if (errors.length() > 0) {
+            // 目录删不掉不算失败(见下面的注释)；把细节带出去方便排查
+            out.put("errors", errors);
+        }
+        return out;
+    }
+
+    /**
+     * 递归删除；文件必须删掉，目录"尽力而为"
+     *
+     * 真机/模拟器实测：ExternalStorageProvider 对**目录**的 deleteDocument 经常直接
+     * 回一句 `IllegalStateException: Failed to delete <path>`（哪怕目录已经空了），
+     * 而 ContentResolver.delete 在 SAF 上是 UnsupportedOperationException。
+     * 用户真正在意的是"漫画文件没了、列表里也没了"，留几个空目录无伤大雅 ——
+     * 所以这里文件删失败才计入 errors，目录删失败只记录不报错。
+     */
+    private static void DeleteDoc(Context context, Doc doc, org.json.JSONArray errors, int[] counter) {
+        try {
+            if (doc.dir) {
+                for (Doc child : ChildrenOf(context, doc.uri, true).values()) {
+                    DeleteDoc(context, child, errors, counter);
+                }
+            }
+            boolean ok = false;
+            Exception last = null;
+            try {
+                ok = DocumentsContract.deleteDocument(context.getContentResolver(), doc.uri);
+            } catch (Exception es) {
+                last = es;
+            }
+            if (!ok) {
+                try {
+                    ok = context.getContentResolver().delete(doc.uri, null, null) > 0;
+                } catch (Exception es) {
+                    if (last == null) {
+                        last = es;
+                    }
+                }
+            }
+            if (ok) {
+                if (doc.dir) {
+                    counter[1] += 1;
+                } else {
+                    counter[0] += 1;
+                }
+            } else if (!doc.dir) {
+                errors.put(doc.name + ": " + (last == null ? "delete returned false"
+                        : last.getClass().getSimpleName() + ":" + last.getMessage()));
+            }
+        } catch (Exception es) {
+            if (!doc.dir) {
+                errors.put(doc.name + " (walk): " + es.getClass().getSimpleName());
+            }
+        }
+    }
+
+    /** 列出相对路径目录的子项 [name, isDir, size] */
+    public static org.json.JSONArray ListRel(Context context, Uri treeUri, String rel) throws Exception {
+        org.json.JSONArray out = new org.json.JSONArray();
+        Uri dir = EnsureDirRel(context, treeUri, rel);
+        for (Doc doc : ChildrenOf(context, dir, true).values()) {
+            org.json.JSONArray item = new org.json.JSONArray();
+            item.put(doc.name);
+            item.put(doc.dir);
+            item.put(doc.size);
+            out.put(item);
+        }
+        return out;
+    }
 }

@@ -870,6 +870,100 @@ reader pinch: 触点 4 在(980,1500) 下面 = QLabel        <- 落在相邻页�
 ---
 
 
+### 3.14 下载目录"直写"：不再先落私有目录再导出
+
+**起因**（用户反馈）：把下载路径改成手机存储里的某个目录之后，文件并没有真的待在那里 ——
+原来的实现是"先写进应用专属目录、整本下完再拷到用户选的目录"，于是：
+
+* 下载到一半取消 / 进程被杀，私有目录里留下一份用户根本不知道的副本；
+* 在文件管理器里看不到正在下载的内容，看起来像"设置没生效"；
+* 几十本漫画占两份空间。
+
+**做法**：给业务层一个统一文件层 `src/tools/vfs.py`，路径写成
+`saf://<树 key>/commies/…`：
+
+```
+saf://t1/commies/作者/书名/original/第01话/0001.jpg
+   │            └── 树里的相对路径(和本地路径段一一对应)
+   └── 目录树登记表的短 key(<filesDir>/saf/trees.json)
+```
+
+`saf://` 开头的交给 SAF 数据面直接读写，其余照旧走 `os`。业务代码(下载、超分、
+删除、看图、本地书架)完全不关心自己在写哪一边。
+
+**数据面**（`android/java/org/jmcomic/SafIoServer.java`）：在 `:saf` 进程里开
+`127.0.0.1:<port>` 的 socket，端口写进 `<filesDir>/saf/io.port`。
+一次请求 = 一行 JSON 头(+ 写入时紧跟 `size` 字节原始数据)，应答一行 JSON
+(读取时后面跟 `size` 字节)。全程**不落地任何临时文件**：
+
+```
+{"op":"write","uri":"content://…","rel":"commies/x/1.jpg","size":123456}\n
+<123456 字节>
+→ {"ok":true,"size":123456}
+```
+
+支持的 op：`ping / write / read / stat / list / mkdirs / delete / doc`。
+一页图一次 `openOutputStream` 是省不掉的，但"每页都重新列一遍父目录"可以避免 ——
+`saf_store` 按目录缓存一次子项表，新建的文件直接塞进缓存（一本漫画几百页，
+从"每页 2 次 query"降到"每目录 1 次"）。
+
+**三个真机坑**（都在 0.40/0.41 实测踩到）：
+
+1. **`:saf` 进程被系统冻结**：空闲一会儿会被放进 cached 状态，内核照样受理 TCP
+   连接（backlog），但进程里的 `accept` 不跑 —— 现象是"连接成功、永远没有应答"。
+   所以每次连接先 `ping`（2.5s 无应答就 `am start-service` 重新拉起再重连）。
+2. **`socket.makefile()` 会连坐关掉 socket**：探活和正式请求共用一个 socket 时，
+   ping 用的 file 对象一旦被 GC，底层 socket 就被关掉 —— 正式请求一 `sendall` 就
+   `BrokenPipeError`。改成自己用 `recv` 缓冲读行/读定长。
+3. **`DocumentsContract.deleteDocument` 对"从树构建的 document uri"比较挑**，
+   失败时只是返回 false/抛异常 → 目录删不掉。现在递归删 + 兜底
+   `ContentResolver.delete`，并把失败原因放进应答的 `errors`。
+
+**换目录时搬旧数据**（`src/tools/download_path.py`）：选中新目录后，内存与数据库里的
+`savePath/convertPath` 立刻做前缀替换（`DownloadView.OnDownloadRootChanged`），
+旧目录的内容在**后台线程**整棵复制过去，**全部成功之后**才删旧目录（中途失败就保留，
+宁可多占一份也不删用户的东西）。
+
+**界面**：设置页"下载"一行显示还原后的真实路径（树 URI 里的
+`primary:Download/JMComic` 能还原成 `/storage/emulated/0/Download/JMComic`），
+"打开目录"直接定位到 `…/commies`；缓存(封面/图片缓存/超分模型)固定在应用私有目录，
+tooltip 里写明"不占用下载目录"。
+
+**删除**：文件一定删掉（用户在意的是"漫画没了"）；**目录删不掉不算失败** ——
+ExternalStorageProvider 对目录的 `deleteDocument` 经常直接回
+`IllegalStateException: Failed to delete <path>`（哪怕目录已经空了），
+`ContentResolver.delete` 在 SAF 上又是 `UnsupportedOperationException`。
+所以 `DeleteRel` 返回 `{files, dirs, errors}`，文件失败才算错，空目录残留在所难免。
+
+**自检**：两层。
+
+* 宿主：`android/tools/host_test_vfs.py`（内存假树覆盖路径拼接/读写/扩展名探测/
+  整树复制/删除），已并入 `wsl_run_smoke.sh`。
+* 真机：`tools/saf_selftest.py`，由文件触发（不需要点 UI，下载按钮在模拟器上
+  注入点击点不准）：
+
+  ```bash
+  adb shell "run-as <包名> sh -c 'echo 1 > files/saf/selftest'"
+  adb shell am start -n <包名>/org.kivy.android.PythonActivity
+  # 4s 后读结果
+  adb shell "run-as <包名> cat files/state/jmcomic-qt/saf_selftest.txt"
+  ```
+
+  它用**和下载完全相同的入口**跑 写/存在/大小/读/无扩展名读/列目录/二次写/删除，
+  输出形如：
+
+  ```
+  下载根目录: saf://t1/commies
+  真实路径: /storage/emulated/0/Download/JMComic/commies
+  write saf://t1/commies/自检/第01话/0001: True
+  size: 4500 (期望 4500)
+  结果: OK
+  ```
+
+
+---
+
+
 ## 4. Waifu2x on 高通 NPU
 
 ### 4.1 调用链

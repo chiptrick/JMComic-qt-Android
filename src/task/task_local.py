@@ -300,7 +300,8 @@ class TaskLocal(TaskBase, QtTaskBase):
         # 判断是否是下一层有文件
         try:
             path = dirName
-            if not os.path.isdir(dirName):
+            from tools import vfs
+            if not vfs.IsDir(dirName):
                 return Str.ErrorPath, ""
             nextPath = ""
             allPictureName = []
@@ -308,23 +309,20 @@ class TaskLocal(TaskBase, QtTaskBase):
                 firstDirName = ""
                 isNotPicture = True
                 allPictureName = []
-                for v in os.scandir(os.path.join(path, nextPath)):
-                    isinstance(v, os.DirEntry)
-
-                    if v.is_dir():
+                # 目录可能在 SAF 里(下载目录)，统一走 vfs 列目录
+                for name, isDir in vfs.ListDir(vfs.Join(path, nextPath)):
+                    if isDir:
                         if not firstDirName:
-                            firstDirName = v.name
+                            firstDirName = name
                         continue
-                    if not v.is_file:
-                        continue
-                    data = v.name.split(".")
+                    data = name.split(".")
                     if len(data) < 2:
                         continue
                     mat = data[-1]
                     if mat not in LocalData.AllPictureFormat:
                         continue
                     isNotPicture = False
-                    allPictureName.append(v.name)
+                    allPictureName.append(name)
                 if not isNotPicture:
                     break
                 else:
@@ -358,7 +356,8 @@ class TaskLocal(TaskBase, QtTaskBase):
         path = dirName
 
         try:
-            if not os.path.isdir(dirName):
+            from tools import vfs
+            if not vfs.IsDir(dirName):
                 return Str.ErrorPath, ""
             nextPath = ""
             allData = self.ParseBookInfoByDirRecursion2(dirName)
@@ -386,23 +385,22 @@ class TaskLocal(TaskBase, QtTaskBase):
     def ParseBookInfoByDirRecursion2(self, dirName):
         allData = []
         try:
-            if not os.path.isdir(dirName):
+            from tools import vfs
+            if not vfs.IsDir(dirName):
                 return []
             allDir = []
             zipFile = []
             picNum = 0
-            for v in os.scandir(dirName):
-                isinstance(v, os.DirEntry)
-
-                if v.is_dir():
-                    allDir.append(v.name)
-                elif v.is_file():
-                    data = v.name.split(".")
+            for name, isDir in vfs.ListDir(dirName):
+                if isDir:
+                    allDir.append(name)
+                else:
+                    data = name.split(".")
                     if len(data) < 2:
                         continue
                     mat = data[-1]
                     if mat == "zip" or mat == "cbz":
-                        zipFile.append(v.name)
+                        zipFile.append(name)
                     if mat in LocalData.AllPictureFormat:
                         picNum += 1
             for zipName in zipFile:
@@ -488,10 +486,11 @@ class TaskLocal(TaskBase, QtTaskBase):
 
     def ParseBookInfoByFileAll(self, fileNames):
         allBooks = []
+        from tools import vfs
         for url in fileNames:
-            if os.path.isfile(url):
+            if vfs.IsFile(url):
                 st, v = self.ParseBookInfoByFile(url)
-            elif os.path.isdir(url):
+            elif vfs.IsDir(url):
                 st, v = self.ParseBookInfoByDirRecursion(url)
             else:
                 st = Status.Error
@@ -534,12 +533,11 @@ class TaskLocal(TaskBase, QtTaskBase):
                     if v.index == -1:
                         f.close()
             else:
-                filePath = os.path.join(v.path, os.path.join(v.filePath, v.fileName))
-                if not os.path.isfile(filePath):
+                from tools import vfs
+                filePath = vfs.Join(v.path, v.filePath, v.fileName)
+                data = vfs.Read(filePath)
+                if data is None:
                     return Str.NotFoundPicture, ""
-                f = open(filePath, "rb")
-                data = f.read()
-                f.close()
         except RuntimeError as es:
             if 'encrypted' in str(es):
                 return Str.FileLock, b""

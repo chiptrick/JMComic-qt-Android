@@ -192,10 +192,8 @@ class TaskWaifu2x(TaskBase):
             info.tick = tick
             try:
                 if not info.noSaveCache:
+                    from tools import vfs
                     for path in [info.cachePath, info.savePath]:
-                        if path and not os.path.isdir(os.path.dirname(path)):
-                            os.makedirs(os.path.dirname(path))
-
                         formatList = [".jpg", ".png", ".gif", ".webp", ".bmp", ".apng"]
                         if path and data:
                             if path[-4:] in formatList:
@@ -204,8 +202,9 @@ class TaskWaifu2x(TaskBase):
                                 pass
                             else:
                                 path = path + "." + format
-                            with open(path, "wb+") as f:
-                                f.write(data)
+                            # 超分结果和原图写同一个目录(SAF 时直接写用户选的目录)
+                            if not vfs.Write(path, data):
+                                raise IOError("convert write failed:{}".format(path))
             except Exception as es:
                 info.status = Status.SaveError
                 Log.Error(es)

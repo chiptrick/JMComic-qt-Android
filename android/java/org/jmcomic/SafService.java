@@ -50,11 +50,14 @@ public class SafService extends Service {
     public void onCreate() {
         super.onCreate();
         main = new Handler(Looper.getMainLooper());
+        // 数据面：Python 通过 127.0.0.1:<port> 直接读写 SAF 文档(见 SafIoServer)
+        SafIoServer.Start(this);
         StartWorker();
     }
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
+        SafIoServer.Start(this);
         StartWorker();
         // 不 STICKY：进程被杀之后 inbox 里的老请求已经没有意义，
         // Python 侧下次要用会自己再 am start-service 一次

@@ -367,6 +367,42 @@ class DownloadView(QtWidgets.QWidget, Ui_Download, DownloadStatus):
         QtOwner().nasView.AddNasUpload2(title, nasId, bookId)
         return
 
+    def OnDownloadRootChanged(self, oldRoot="", newRoot=""):
+        """ 下载根目录变了：内存与数据库里的 savePath/convertPath 一起挪到新根
+
+        不去重算"标题->目录名"是对的：用户可能开着"作者目录"命名，重算要再走一遍
+        Title/Author 状态；直接做前缀替换既准确又不会碰到没下载完的项。
+        """
+        if not newRoot:
+            newRoot = Setting.GetDownloadRoot()
+        if not oldRoot or oldRoot == newRoot:
+            return 0
+        changed = 0
+        try:
+            from tools import vfs
+            for task in self.downloadDict.values():
+                if not isinstance(task, DownloadItem):
+                    continue
+                touched = False
+                for attr in ("savePath", "convertPath"):
+                    value = getattr(task, attr, "") or ""
+                    if not value:
+                        continue
+                    if value == oldRoot or value.startswith(oldRoot + "/"):
+                        setattr(task, attr, newRoot + value[len(oldRoot):])
+                        touched = True
+                if touched:
+                    changed += 1
+                    self.db.AddDownloadDB(task)
+                    try:
+                        self.UpdateTableItem(task)
+                    except Exception:
+                        pass
+        except Exception as es:
+            Log.Error(es)
+        Log.Warn("download path: 重定向 {} 个下载项 {} -> {}".format(changed, oldRoot, newRoot))
+        return changed
+
     def ClickOpenFilePath(self):
         selected = self.tableWidget.selectedIndexes()
         selectRows = set()
@@ -380,7 +416,15 @@ class DownloadView(QtWidgets.QWidget, Ui_Download, DownloadStatus):
         bookId = self.tableWidget.item(row, col).text()
         task = self.downloadDict.get(bookId)
         assert isinstance(task, DownloadItem)
-        QDesktopServices.openUrl(QUrl.fromLocalFile(os.path.dirname(task.savePath)))
+        folder = os.path.dirname(task.savePath)
+        from tools import vfs
+        ok, reason = vfs.OpenInFileManager(folder)
+        if not ok:
+            # 应用专属目录其它应用看不到(也没有 file:// 处理者)：直接告诉用户怎么改
+            if reason == "sandbox":
+                QtOwner().ShowMsg(Str.GetStr(Str.SetDir))
+            else:
+                QDesktopServices.openUrl(QUrl.fromLocalFile(folder))
         return
 
     def ClickPause(self):
@@ -550,8 +594,9 @@ class DownloadView(QtWidgets.QWidget, Ui_Download, DownloadStatus):
                     continue
                 self.RemoveRecord(bookId)
                 path = os.path.dirname(bookInfo.savePath)
-                if os.path.isdir(path):
-                    shutil.rmtree(path, True)
+                # 目录可能在 SAF 里：vfs 会走 ContentResolver 递归删
+                from tools import vfs
+                vfs.RemoveTree(path)
 
         except Exception as es:
             Log.Error(es)

@@ -331,6 +331,7 @@ class ToolUtil(object):
     @staticmethod
     def LoadCachePicture(filePath):
         try:
+            from tools import vfs
             c = CTime()
             formatList = [".jpg", ".png", ".gif", ".webp", ".bmp", ".apng"]
             for mat in formatList:
@@ -340,16 +341,17 @@ class ToolUtil(object):
                     path = filePath
                 else:
                     path = filePath + mat
-                if not os.path.isfile(path):
+                if not vfs.IsFile(path):
                     continue
 
-                with open(path, "rb") as f:
-                    data = f.read()
-                    c.Refresh("LoadCache", path)
-                    if len(data) < 20:
-                        Log.Debug(f"load_fail_picture, {path}")
-                        continue
-                    return data
+                data = vfs.Read(path)
+                if data is None:
+                    continue
+                c.Refresh("LoadCache", path)
+                if len(data) < 20:
+                    Log.Debug("load_fail_picture, {}".format(path))
+                    continue
+                return data
 
         except Exception as es:
             Log.Error(es)
@@ -357,9 +359,7 @@ class ToolUtil(object):
 
     @staticmethod
     def SavePicture(data, path, format):
-        if path and not os.path.isdir(os.path.dirname(path)):
-            os.makedirs(os.path.dirname(path))
-
+        from tools import vfs
         formatList = [".jpg", ".png", ".gif", ".webp", ".bmp", ".apng", "jpeg"]
         if path and data:
             if path[-4:] in formatList:
@@ -368,15 +368,13 @@ class ToolUtil(object):
                 pass
             else:
                 path = path + "." + format
-            with open(path, "wb+") as f:
-                f.write(data)
+            vfs.Write(path, data)
 
     @staticmethod
     def IsHaveFile(filePath):
         try:
-            if os.path.isfile(filePath):
-                return True
-            return False
+            from tools import vfs
+            return vfs.IsFile(filePath)
         except Exception as es:
             Log.Error(es)
         return False
@@ -1137,6 +1135,18 @@ class ToolUtil(object):
         return ""
 
     @staticmethod
+    def _SavePilImage(img, path, toFormat=""):
+        """ PIL Image -> 文件；SAF 路径先编码成字节再写(没有本地路径可用) """
+        from tools import vfs
+        if vfs.IsSaf(path):
+            from io import BytesIO
+            buffer = BytesIO()
+            img.save(buffer, toFormat or "PNG")
+            return vfs.Write(path, buffer.getvalue())
+        img.save(path, toFormat)
+        return True
+
+    @staticmethod
     def _SaveQImage(img, path, toFormat=""):
         """ QImage -> 文件；返回实际写入的格式或空串 """
         formats = []
@@ -1145,6 +1155,13 @@ class ToolUtil(object):
         for fmt in ("PNG", "JPEG"):
             if fmt not in formats:
                 formats.append(fmt)
+        from tools import vfs
+        if vfs.IsSaf(path):
+            # SAF 目录没有可写的本地路径：先编码成字节再走数据面写进去
+            data, fmt = ToolUtil._SaveQImageToBytes(img, toFormat)
+            if data and vfs.Write(path, data):
+                return fmt
+            return ""
         for fmt in formats:
             try:
                 quality = 95 if fmt in ("JPEG", "WEBP") else -1
@@ -1338,8 +1355,7 @@ class ToolUtil(object):
             srcImg = Image.open(src)
             try:
                 if num <= 1:
-                    srcImg.save(path, toFormat)
-                    return True
+                    return ToolUtil._SavePilImage(srcImg, path, toFormat)
 
                 size = (width, height) = srcImg.size
                 desImg = Image.new(srcImg.mode, size)
@@ -1363,8 +1379,7 @@ class ToolUtil(object):
                     desImg.paste(temp_img, (0, h, width, h + coH))
                     h += coH
 
-                desImg.save(path, toFormat)
-                return True
+                return ToolUtil._SavePilImage(desImg, path, toFormat)
             finally:
                 try:
                     srcImg.close()
@@ -1379,11 +1394,9 @@ class ToolUtil(object):
                 Log.Warn("SegmentationPictureToDisk: 已用 Qt 图像栈还原(epsId:{})".format(epsId))
                 return True
             # 分割失败也要把原始字节落盘：至少让这一页能显示出来(返回 False = 没做分割)
-            try:
-                with open(path, "wb") as f:
-                    f.write(imgData)
-            except Exception as es2:
-                Log.Error("SegmentationPictureToDisk write raw failed, path:{} err:{}".format(path, es2))
+            from tools import vfs
+            if not vfs.Write(path, imgData):
+                Log.Error("SegmentationPictureToDisk write raw failed, path:{}".format(path))
             return False
 
     @staticmethod
@@ -1437,14 +1450,8 @@ class ToolUtil(object):
             return
 
         try:
-            fileDir = os.path.dirname(filePath)
-
-            if not os.path.isdir(fileDir):
-                os.makedirs(fileDir)
-
-            with open(filePath, "wb+") as f:
-                f.write(data)
-
+            from tools import vfs
+            vfs.Write(filePath, data)
             Log.Debug("add chat cache, cachePath:{}".format(filePath))
 
         except Exception as es:

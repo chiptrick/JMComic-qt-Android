@@ -31,8 +31,9 @@ SAF 是 Android 官方给的、**不需要任何权限**的方案：用户用系
   因为整个业务层都是按文件路径干活的(解码、超分、WebDAV 上传…)。
   SAF 的 content:// URI 只有 Java 侧能读，Python 的 open() 打不开。
 * 目录选择分两种：
-    - `PickTree(..., copy=True)`：树整棵拷进应用目录(导入本地漫画 / 批量超分)
-    - `PickTree(..., copy=False)`：只登记授权(下载/缓存目录的"导出目标")
+    - `PickTree(..., copyTo=...)`：树整棵拷进本地目录(导入本地漫画 / 批量超分)
+    - `PickTree(copyTo="")`：只登记授权，之后按**相对路径**直接读写
+      (下载目录：`saf://<key>/commies/…`，见 tools/vfs.py)
 * 所有失败都返回 `None` 或 `{"ok": False, ...}`，绝不抛异常给调用点。
 
 没有桥可用时(桌面端 / 桥没打进 APK / am 被拦)所有函数返回 None，
@@ -484,3 +485,360 @@ def OpenPath(path):
     if data.get("ok"):
         return True, ""
     return False, data.get("reason") or data.get("error") or "failed"
+
+
+# ---------------------------------------------------------------------------
+# 目录树登记(把 content:// URI 换成短的 saf:// 前缀)
+# ---------------------------------------------------------------------------
+#
+# 下载/阅读要按路径干活("commies/某本/第1话/0001.jpg")，而 SAF 只给 URI。
+# 所以先用一个短 key 把树登记下来，路径写成 `saf://t1/commies/…`：
+#   * 短、可读、能直接 os.path.join(文件夹名字里不可能有 "//")
+#   * 树换了(用户重选目录)只改登记表，历史路径仍能解析到旧树(便于迁移/清理)
+TreesFileName = "trees.json"
+
+
+def TreesFile():
+    return os.path.join(BridgeDir(), TreesFileName)
+
+
+_treesCache = None
+
+
+def _LoadTrees():
+    """ 读登记表(进程内缓存：一张图一次读写，绝不能每次都读盘解析 JSON) """
+    global _treesCache
+    if _treesCache is not None:
+        return _treesCache
+    data = {}
+    try:
+        with open(TreesFile(), "r", encoding="utf-8") as f:
+            loaded = json.load(f)
+        if isinstance(loaded, dict):
+            data = loaded
+    except Exception:
+        pass
+    _treesCache = data
+    return data
+
+
+def _SaveTrees(trees):
+    global _treesCache
+    path = TreesFile()
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        tmp = path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(trees, f, ensure_ascii=False, indent=1)
+        os.replace(tmp, path)
+        _treesCache = trees
+        return True
+    except Exception as es:
+        _LogError(es)
+        return False
+
+
+def TreeKey(uri, name=""):
+    """ 登记一棵目录树，返回短 key("t1"/"t2"…)；同一个 URI 永远返回同一个 key """
+    uri = str(uri or "")
+    if not uri:
+        return ""
+    trees = _LoadTrees()
+    for key, info in trees.items():
+        if str(info.get("uri") or "") == uri:
+            if name and info.get("name") != name:
+                info["name"] = name
+                _SaveTrees(trees)
+            return key
+    index = 1
+    while "t{}".format(index) in trees:
+        index += 1
+    key = "t{}".format(index)
+    trees[key] = {"uri": uri, "name": name or UriDisplayName(uri)}
+    if not _SaveTrees(trees):
+        return ""
+    return key
+
+
+def TreeUri(key):
+    info = _LoadTrees().get(str(key or "")) or {}
+    return str(info.get("uri") or "")
+
+
+def TreeName(key):
+    info = _LoadTrees().get(str(key or "")) or {}
+    return str(info.get("name") or "")
+
+
+def TreeRealPath(uri):
+    """ 把 SAF 目录树 URI 还原成"看起来是真的"路径(只用于界面显示)
+
+    ExternalStorageProvider 的 tree docId 形如 `primary:Download/JMComic`，
+    对应的真实路径就是 `/storage/emulated/0/Download/JMComic`。取不到时返回空串，
+    界面退回显示目录名。
+    """
+    text = str(uri or "")
+    if not text:
+        return ""
+    try:
+        from urllib.parse import unquote
+        marker = "/tree/"
+        if marker not in text:
+            return ""
+        # 注意顺序：docId 里的 "/" 是编码过的 %2F(primary%3ADownload%2FJMComic)。
+        # 先整体 unquote 再按 "/" 切，会把 JMComic 切掉 —— 必须**先切段再解码**
+        docId = unquote(text.split(marker, 1)[1].split("/", 1)[0])
+        if ":" not in docId:
+            return ""
+        volume, rel = docId.split(":", 1)
+        if volume == "primary":
+            base = "/storage/emulated/0"
+        elif volume == "home":
+            base = "/storage/emulated/0/Documents"
+        elif volume == "downloads":
+            base = "/storage/emulated/0/Download"
+        elif len(volume) > 4 and volume[0].isdigit():
+            base = "/storage/{}".format(volume)
+        else:
+            return ""
+        if rel:
+            return "{}/{}".format(base, rel)
+        return base
+    except Exception:
+        return ""
+
+
+# ---------------------------------------------------------------------------
+# 数据面：直接读写 SAF 文档(不经过任何临时文件)
+# ---------------------------------------------------------------------------
+#
+# 见 android/java/org/jmcomic/SafIoServer.java。下载/阅读的每一次读写都走这条
+# 127.0.0.1 的 socket：请求头一行 JSON(+ 写入时紧跟 size 字节原始数据)，
+# 应答一行 JSON(读取时后面跟 size 字节)。
+#
+# 端口由 SafService 启动时写进 <filesDir>/saf/io.port；连不上就拉起 Service 重连。
+
+IoHeadSize = 64 * 1024
+# 单条应答的上限等待：环回传输 1MB 也就毫秒级，超过这个数就是进程被冻了
+IoReplyTimeout = 20.0
+# 探活超时
+IoPingTimeout = 2.5
+IoError = ""
+
+
+def IoPortFile():
+    return os.path.join(BridgeDir(), "io.port")
+
+
+def IoPort():
+    try:
+        with open(IoPortFile(), "r", encoding="utf-8") as f:
+            lines = f.read().split()
+        if len(lines) >= 2 and lines[0] == "1":
+            return int(lines[1])
+    except Exception:
+        pass
+    return 0
+
+
+class _IoReader(object):
+    """ socket 上的按行/按长度读取
+
+    为什么不用 `sock.makefile()`：真机上踩过 —— makefile 返回的对象**回收时会把
+    底层 socket 关掉**(socketio 的引用计数)，而我们探活和正式请求共用一个 socket，
+    于是 ping 用的那个 file 对象被 GC 之后，正式请求一 sendall 就
+    `BrokenPipeError / ConnectionResetError`，下载全部失败。
+    """
+
+    def __init__(self, sock):
+        self.sock = sock
+        self.buf = b""
+
+    def read_line(self):
+        while b"\n" not in self.buf:
+            chunk = self.sock.recv(4096)
+            if not chunk:
+                return None
+            self.buf += chunk
+        line, _, self.buf = self.buf.partition(b"\n")
+        return line
+
+    def read_exact(self, size):
+        while len(self.buf) < size:
+            chunk = self.sock.recv(min(65536, size - len(self.buf)))
+            if not chunk:
+                break
+            self.buf += chunk
+        data, self.buf = self.buf[:size], self.buf[size:]
+        return data
+
+
+def _IoPing(sock, timeout=IoPingTimeout):
+    """ 探活：连上不等于能用
+
+    真机上踩过：`:saf` 进程空闲时会被系统放进 cached 冻结状态，内核照样受理
+    TCP 连接(backlog)，但进程里的 accept 线程不跑 —— 于是"连接成功、永远没有
+    应答"。所以每次连接都先 ping 一次（2.5s 没回就重新拉起 Service）。
+    """
+    old = sock.gettimeout()
+    try:
+        sock.settimeout(timeout)
+        sock.sendall(b'{"op":"ping"}\n')
+        return bool(_IoReader(sock).read_line())
+    except Exception:
+        return False
+    finally:
+        try:
+            sock.settimeout(old)
+        except Exception:
+            pass
+
+
+def _IoConnect(timeout=8.0):
+    """ 连上本机 IO 服务(必要时拉起 SafService) """
+    import socket
+    deadline = time.time() + max(1.0, timeout)
+    started = False
+    while True:
+        port = IoPort()
+        if port > 0:
+            sock = None
+            try:
+                sock = socket.create_connection(("127.0.0.1", port), timeout=6.0)
+            except Exception:
+                sock = None
+            if sock is not None:
+                # 探活用一条独立连接：Java 侧**一次连接只处理一个请求**，
+                # 处理完就 close —— 拿探活那条连接发正式请求必然是 BrokenPipe
+                alive = _IoPing(sock)
+                try:
+                    sock.close()
+                except Exception:
+                    pass
+                if alive:
+                    try:
+                        sock = socket.create_connection(("127.0.0.1", port), timeout=6.0)
+                        sock.settimeout(IoReplyTimeout)
+                        return sock
+                    except Exception:
+                        pass
+                elif not started and IsSupported():
+                    started = True
+                    _StartService()
+                    time.sleep(0.35)
+                    continue
+        if not started and IsSupported():
+            started = True
+            _StartService()
+            time.sleep(0.4)
+            continue
+        if time.time() > deadline:
+            return None
+        time.sleep(0.08)
+
+
+def _IoCall(op, treeUri, rel="", data=None, timeout=IoTimeout):
+    """ 发一个 IO 请求；返回 dict / None """
+    global IoError
+    if not IsSupported() or not treeUri:
+        return None
+    sock = _IoConnect()
+    if sock is None:
+        IoError = "io 服务连不上"
+        return None
+    try:
+        reader = _IoReader(sock)
+        header = {"op": op, "uri": treeUri, "rel": rel or ""}
+        if data is not None:
+            header["size"] = len(data)
+        sock.sendall((json.dumps(header) + "\n").encode("utf-8"))
+        if data is not None:
+            sock.sendall(data)
+        line = reader.read_line()
+        if not line:
+            IoError = "{}: 没有应答".format(op)
+            return None
+        result = json.loads(line.decode("utf-8"))
+        if op == "read" and result.get("ok"):
+            result["data"] = reader.read_exact(int(result.get("size") or 0))
+        return result
+    except Exception as es:
+        IoError = "{}: {}".format(op, es)
+        _LogError(es)
+        # 冻结/被杀：唤醒 Service 再试一次(只有一次，避免卡在死循环里)
+        if not getattr(_IoCall, "_retried", False) and IsSupported():
+            try:
+                sock.close()
+            except Exception:
+                pass
+            _IoCall._retried = True
+            try:
+                _StartService()
+                time.sleep(0.4)
+                return _IoCall(op, treeUri, rel, data, timeout)
+            finally:
+                _IoCall._retried = False
+        return None
+    finally:
+        try:
+            sock.close()
+        except Exception:
+            pass
+
+
+def IoWrite(treeUri, rel, data):
+    """ 直接把 data 写进树的 rel(存在则覆盖)；不在手机上返回 False """
+    if data is None:
+        return False
+    result = _IoCall("write", treeUri, rel, data=data or b"")
+    if not result or not result.get("ok"):
+        _LogWarn("写入失败 {}: {}".format(rel, (result or {}).get("error") or IoError))
+        return False
+    return True
+
+
+def IoRead(treeUri, rel):
+    """ 读出树的 rel；不存在/失败返回 None """
+    result = _IoCall("read", treeUri, rel)
+    if not result or not result.get("ok"):
+        return None
+    return result.get("data")
+
+
+def IoExists(treeUri, rel):
+    result = _IoCall("stat", treeUri, rel)
+    if not result or not result.get("ok"):
+        return False, False, 0
+    return bool(result.get("exists")), bool(result.get("dir")), int(result.get("size") or 0)
+
+
+def IoList(treeUri, rel):
+    """ 列目录，返回 [(name, isDir)] """
+    result = _IoCall("list", treeUri, rel)
+    if not result or not result.get("ok"):
+        return None
+    out = []
+    for item in result.get("items") or []:
+        try:
+            out.append((item[0], bool(item[1])))
+        except Exception:
+            continue
+    return out
+
+
+def IoMakedirs(treeUri, rel):
+    result = _IoCall("mkdirs", treeUri, rel)
+    return bool(result and result.get("ok"))
+
+
+def IoDelete(treeUri, rel):
+    result = _IoCall("delete", treeUri, rel)
+    return bool(result and result.get("ok"))
+
+
+def IoDocUri(treeUri, rel):
+    """ 相对路径 -> document uri(给"打开目录"用；不存在返回空串) """
+    result = _IoCall("doc", treeUri, rel)
+    if not result or not result.get("ok"):
+        return ""
+    return result.get("uri") or ""

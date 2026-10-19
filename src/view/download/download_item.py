@@ -166,7 +166,7 @@ class DownloadItem(QtTaskBase):
         if not self.epsIds:
             return self.Error
 
-        if not Setting.SavePath.value:
+        if not Setting.SavePath.value and not Setting.IsSafDownload():
             return self.Error
 
         if self.curDownloadEpsId < 0 or self.curDownloadEpsId not in self.epsInfo:
@@ -227,44 +227,12 @@ class DownloadItem(QtTaskBase):
             if self.curDownloadEpsInfo.isDownloadComplete():
                 index = self.epsIds.index(self.curDownloadEpsId)
                 if index + 1 >= len(self.epsIds):
-                    self.ExportToSaf()
                     return self.Success
                 self.curDownloadEpsId = self.epsIds[index + 1]
             else:
                 break
         self.curDownloadEpsInfo.dirty = True
         return self.Downloading
-
-    def ExportToSaf(self):
-        """ 这本书下载完了：把它导出到用户用 SAF 选的目录
-
-        为什么要导出：SAF 授权的是 content:// URI，Python 拿它写不了文件；而下载是
-        "每页一个文件"的持续写入，只能落在应用专属目录(Android 10+ 无需权限)。
-        用户选的那个目录因此作为**导出目标**：整本下完一次性拷过去(Java 侧后台线程
-        干，这里只投递请求、不等结果，不卡界面)。
-        """
-        try:
-            from tools import platform_mobile
-            if not platform_mobile.IsAndroid():
-                return
-            tree = Setting.SavePathTree.value
-            if not tree or not self.savePath:
-                return
-            bookDir = os.path.dirname(self.savePath)
-            if not os.path.isdir(bookDir):
-                return
-            from tools import saf_bridge
-            sub = os.path.basename(bookDir)
-            if saf_bridge.CopyTreeOut(bookDir, tree, sub, wait=False):
-                from tools.log import Log
-                Log.Warn("saf export: 投递导出 {} -> {}".format(bookDir, tree[:60]))
-        except Exception as es:
-            try:
-                from tools.log import Log
-                Log.Error(es)
-            except Exception:
-                pass
-        return
 
     # 下载失败回调
     def DownloadFailCallBack(self):
@@ -288,8 +256,10 @@ class DownloadItem(QtTaskBase):
         if not self.curDownloadEpsInfo.epsTitle:
             return self.curDownloadEpsInfo.epsId, 0, "", True
 
-        if not self.savePath and Setting.SavePath.value:
-            path = os.path.join(Setting.SavePath.value, config.SavePathDir)
+        if not self.savePath and (Setting.SavePath.value or Setting.IsSafDownload()):
+            # 配了 SAF 目录时根是 saf://<树>/commies —— 下面所有 join 出来的都是
+            # SAF 相对路径，写在用户选的目录里(见 tools/vfs.py)
+            path = Setting.GetDownloadRoot()
             path2 = os.path.join(path, ToolUtil.GetCanSaveName(self.title))
             self.savePath = os.path.join(path2, "original")
             if Setting.SaveNameType.value == SaveNameType.AuthorAndTitle:
@@ -303,8 +273,8 @@ class DownloadItem(QtTaskBase):
                     path2 = os.path.join(path, os.path.join("default", ToolUtil.GetCanSaveName(self.title)))
                 self.savePath = os.path.join(path2, "original")
 
-        if not self.convertPath and Setting.SavePath.value:
-            path = os.path.join(Setting.SavePath.value, config.SavePathDir)
+        if not self.convertPath and (Setting.SavePath.value or Setting.IsSafDownload()):
+            path = Setting.GetDownloadRoot()
             path2 = os.path.join(path, ToolUtil.GetCanSaveName(self.title))
             self.convertPath = os.path.join(path2, "waifu2x")
             if Setting.SaveNameType.value == SaveNameType.AuthorAndTitle:
@@ -326,7 +296,7 @@ class DownloadItem(QtTaskBase):
         if not self.epsIds:
             return self.Error
 
-        if not Setting.SavePath.value:
+        if not Setting.SavePath.value and not Setting.IsSafDownload():
             return self.Error
 
         if self.curConvertEpsId < 0 or self.curConvertEpsId not in self.epsIds:

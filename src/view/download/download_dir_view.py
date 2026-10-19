@@ -28,30 +28,39 @@ class DownloadDirView(BaseMaskDialog, Ui_DownloadDir, QtTaskBase):
     def SelectSavePath(self):
         from tools import platform_mobile
         if platform_mobile.IsAndroid():
-            # 手机上目录只能由 SAF 授予，而 SAF 给的是 URI(ContentResolver 才能写)：
-            # 这里选中的目录记为"导出目录"，本地落盘仍在应用专属目录。
+            # 手机上目录只能由 SAF 授予，而 SAF 给的是 URI(只有 ContentResolver 能写)。
+            # 选中的目录就是**下载目录本身**：之后每张图直接写进去(见 tools/vfs.py)。
             picked = mobile_file_dialog.PickExportTree(Str.GetStr(Str.SelectFold))
             if not picked:
                 return
-            Setting.SavePathTree.SetValue(picked.get("uri") or "")
-            Setting.SavePathTreeName.SetValue(picked.get("name") or "")
-            self.lineEdit.setText(picked.get("name") or picked.get("uri") or "")
-            self.lineEdit.setReadOnly(True)
-            self.downloadDir.setText(os.path.join(Setting.SavePath.value or "./", config.SavePathDir))
-            self.cacheDir.setText(Setting.GetCachePath())
-            self.waifu2xDir.setText(os.path.join(Setting.GetCachePath(), config.Waifu2xPath))
+            from tools import download_path
+            download_path.Switch(picked.get("uri") or "", picked.get("name") or "")
+            self.Refresh()
+            try:
+                QtOwner().downloadView.OnDownloadRootChanged()
+            except Exception:
+                pass
             return
         url = mobile_file_dialog.GetExistingDirectory(self, Str.GetStr(Str.SelectFold))
         if url:
             self.lineEdit.setText(url)
-            self.downloadDir.setText(os.path.join(url, config.SavePathDir))
-            self.cacheDir.setText(Setting.GetCachePath())
-            self.waifu2xDir.setText(os.path.join(Setting.GetCachePath(), config.Waifu2xPath))
+            self.Refresh()
+
+    def Refresh(self):
+        from tools import vfs
+        root = Setting.GetDownloadRoot()
+        display = vfs.RealPath(root)
+        self.lineEdit.setText(display)
+        self.lineEdit.setReadOnly(True)
+        self.downloadDir.setText(display)
+        self.cacheDir.setText(Setting.GetCachePath())
+        self.waifu2xDir.setText(os.path.join(Setting.GetCachePath(), config.Waifu2xPath))
 
     def SavePath(self):
         from tools import platform_mobile
         if platform_mobile.IsAndroid():
-            if Setting.SavePathTree.value:
+            # 手机上目录在选的时候就已经生效了(SAF)
+            if Setting.DownloadTreeKey():
                 self.close()
                 return
         path = self.lineEdit.text()
@@ -59,4 +68,8 @@ class DownloadDirView(BaseMaskDialog, Ui_DownloadDir, QtTaskBase):
             QtOwner().ShowMsg(Str.GetStr(Str.SetDir))
             return
         Setting.SavePath.SetValue(path)
+        try:
+            QtOwner().downloadView.OnDownloadRootChanged()
+        except Exception:
+            pass
         self.close()

@@ -140,9 +140,11 @@ class Setting:
 
     # 下载与缓存
     SavePath = SettingValue("DownloadSetting", "", False)
-    # SAF 导出目录(Android)：用户在系统文件管理器里选的目录。
-    # 本地落盘仍然在 SavePath(应用专属目录，Android 10+ 不需要任何权限)，
-    # 每章下载完成后把章节目录导出到这个 SAF 目录，用户才能在文件管理器里看到。
+    # 下载目录(Android 用 SAF 选的目录)
+    #
+    # 语义：**下载/超分的文件直接写在这个目录里**，不存在"先落私有目录再导出"。
+    # 这里只存树 URI 与显示名，真正的路径是 `saf://<key>/commies/…`(见 tools/vfs.py)。
+    # 用户没选过目录时退回应用专属目录(SavePath，Android 10+ 无需任何权限)。
     SavePathTree = SettingValue("DownloadSetting", "", False)
     SavePathTreeName = SettingValue("DownloadSetting", "", False)
     SaveNameType = SettingValue("DownloadSetting", 0, False)
@@ -303,6 +305,46 @@ class Setting:
         if sys.platform == "win32":
             return os.path.join(Setting.SavePath.value, config.CachePathDir)
         return Setting._xdgDir("XDG_CACHE_HOME", ".cache")
+
+    @staticmethod
+    def DownloadTreeKey():
+        """ 用户选的下载目录(SAF 树)的短 key；没选过/不在手机上返回空串 """
+        uri = str(Setting.SavePathTree.value or "")
+        if not uri:
+            return ""
+        try:
+            from tools import platform_mobile
+            if not platform_mobile.IsAndroid():
+                return ""
+        except Exception:
+            return ""
+        try:
+            from tools import saf_bridge
+            return saf_bridge.TreeKey(uri, Setting.SavePathTreeName.value)
+        except Exception:
+            return ""
+
+    @staticmethod
+    def IsSafDownload():
+        return bool(Setting.DownloadTreeKey())
+
+    @staticmethod
+    def GetDownloadRoot():
+        """ 下载根目录
+
+        配了 SAF 目录 -> `saf://<key>/commies`（文件直接写进用户选的目录）
+        否则 -> `<SavePath>/commies`（应用专属目录，Android 10+ 无需权限）
+        """
+        key = Setting.DownloadTreeKey()
+        if key:
+            return "saf://{}/{}".format(key, config.SavePathDir)
+        return os.path.join(Setting.SavePath.value or "", config.SavePathDir)
+
+    @staticmethod
+    def GetDownloadDisplayPath():
+        """ 给人看的下载目录(还原成 /storage/emulated/0/… 那种真实路径) """
+        from tools import vfs
+        return vfs.RealPath(Setting.GetDownloadRoot())
 
     @staticmethod
     def GetStatePath():

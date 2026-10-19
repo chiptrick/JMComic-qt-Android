@@ -1080,27 +1080,24 @@ class DownloadBookHandler(object):
 
                 if config.IsUseCache and len(data) > 0:
                     try:
+                        from tools import vfs
                         for path in [backData.req.cachePath]:
                             filePath = path
                             if not path:
                                 continue
-                            fileDir = os.path.dirname(filePath)
-                            if not os.path.isdir(fileDir):
-                                os.makedirs(fileDir)
-
-                            with open(filePath+"."+mat, "wb+") as f:
-                                f.write(data)
+                            # vfs 会按目标自动选本地文件 / SAF 目录(见 tools/vfs.py)：
+                            # 用户把下载路径改成某个目录后，这里**直接**写进那个目录，
+                            # 不再有"私有目录副本 + 事后导出"
+                            if not vfs.Write(filePath+"."+mat, data):
+                                raise IOError("cache write failed:{}".format(filePath))
                             Log.Debug("add download cache, cachePath:{}".format(filePath))
 
                         for path in [backData.req.savePath]:
                             filePath = path
                             if not path:
                                 continue
-                            fileDir = os.path.dirname(filePath)
-                            if not os.path.isdir(fileDir):
-                                os.makedirs(fileDir)
                             saveParam = backData.req.saveParam
-                            Log.Debug("add download cache, cachePath:{}".format(filePath))
+                            Log.Debug("add download save, savePath:{}".format(filePath))
                             if not isAni:
                                 if mat == "webp" and Setting.WebpToPng.value > 0:
                                     TaskMulti().SaveJmPicResultsResult(data, saveParam[0], saveParam[1], saveParam[2], filePath+".png", "png")
@@ -1110,8 +1107,8 @@ class DownloadBookHandler(object):
                             else:
                                 data2 = data
 
-                            with open(filePath+"."+mat, "wb+") as f:
-                                f.write(data2)
+                            if not vfs.Write(filePath+"."+mat, data2 or b""):
+                                raise IOError("save write failed:{}".format(filePath))
                     except Exception as es:
                         Log.Error(es)
                         # 保存失败了

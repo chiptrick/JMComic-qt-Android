@@ -83,8 +83,10 @@ run "8. SAF 桥信箱协议回归" android/tools/host_test_saf_bridge.py
 saf=$?
 run "9. 双指缩放状态机回归" android/tools/host_test_pinch.py
 pinch=$?
+run "10. vfs 路径层回归" android/tools/host_test_vfs.py
+vfs=$?
 
 echo
-echo "结果: smoke=$smoke interfaces=$iface crypto=$crypto image=$image picker=$picker netfb=$netfb saf=$saf pinch=$pinch"
+echo "结果: smoke=$smoke interfaces=$iface crypto=$crypto image=$image picker=$picker netfb=$netfb saf=$saf pinch=$pinch vfs=$vfs"
 [ "$smoke" -eq 0 ] && [ "$iface" -eq 0 ] && [ "$crypto" -eq 0 ] && [ "$image" -eq 0 ] \
-    && [ "$picker" -eq 0 ] && [ "$netfb" -eq 0 ] && [ "$saf" -eq 0 ] && [ "$pinch" -eq 0 ]
+    && [ "$picker" -eq 0 ] && [ "$netfb" -eq 0 ] && [ "$saf" -eq 0 ] && [ "$pinch" -eq 0 ] && [ "$vfs" -eq 0 ]

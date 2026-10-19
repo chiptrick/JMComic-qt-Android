@@ -729,6 +729,12 @@ def Main():
         start.InitSrEngine()
         # 走一遍图像格式探测，确认 Qt 插件是否齐全(缺 qsvg 会让主题里的 svg 图标/交互框全部消失)
         DumpDiagnostics("startup")
+        # 下载目录(SAF)自检：只有 <filesDir>/saf/selftest 存在时才跑(见 tools/saf_selftest.py)
+        try:
+            from tools import saf_selftest
+            saf_selftest.Install()
+        except Exception:
+            pass
         start.Run(app)
     except SystemExit:
         raise

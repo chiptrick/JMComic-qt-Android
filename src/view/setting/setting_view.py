@@ -481,10 +481,10 @@ class SettingView(QtWidgets.QWidget, Ui_SettingNew):
     def SelectSavePath(self):
         """ 选择下载目录
 
-        手机上走 SAF(ACTION_OPEN_DOCUMENT_TREE)：系统的目录选择器，不需要任何存储
-        权限。选中的目录记为"导出目录"(ContentResolver 才能写)，本地落盘仍在应用
-        专属目录 —— 下载完成后自动导出过去。
-        桌面端保持原样(直接选一个可写目录)。
+        手机上走 SAF(系统文件选择器)。选出来的目录就是**下载目录本身**：之后每一张
+        图都直接写进这个目录(见 tools/vfs.py)，不再有"先落应用私有目录、整本下完再
+        导出"那一套 —— 那样用户改完设置看不到文件真正落在哪，取消/崩溃还会在私有
+        目录留副本。
         """
         from tools import platform_mobile
         if platform_mobile.IsAndroid():
@@ -497,62 +497,78 @@ class SettingView(QtWidgets.QWidget, Ui_SettingNew):
                         Setting.SavePath.SetValue(url)
                 self.SetDownloadLabel()
                 return
-            Setting.SavePathTree.SetValue(picked.get("uri") or "")
-            Setting.SavePathTreeName.SetValue(picked.get("name") or "")
-            if not Setting.SavePath.value:
-                from tools import platform_mobile as pm
-                Setting.SavePath.SetValue(pm.GetAndroidSavePath())
-            self.SetDownloadLabel()
+            from tools import download_path
+            oldRoot, newRoot, moving = download_path.Switch(
+                picked.get("uri") or "", picked.get("name") or "")
+            self.AfterPathChanged(oldRoot, newRoot)
+            if moving:
+                # 旧目录里已经下载的内容正在后台搬过去(搬完自动删旧目录)
+                QtOwner().ShowMsg(Str.GetStr(Str.Waiting))
+                from tools.log import Log
+                Log.Warn("download path: 旧目录内容后台搬运中 {} -> {}".format(oldRoot, newRoot))
             return
         url = mobile_file_dialog.GetExistingDirectory(self, Str.GetStr(Str.SelectFold))
         if url:
+            oldRoot = Setting.GetDownloadRoot()
             Setting.SavePath.SetValue(url)
+            self.AfterPathChanged(oldRoot, Setting.GetDownloadRoot())
         self.SetDownloadLabel()
 
+    def AfterPathChanged(self, oldRoot="", newRoot=""):
+        """ 目录变了：刷新显示 + 把已下载条目的路径挪到新根(不然还在往旧路径写) """
+        self.SetDownloadLabel()
+        try:
+            QtOwner().downloadView.OnDownloadRootChanged(oldRoot, newRoot)
+        except Exception as es:
+            from tools.log import Log
+            Log.Error(es)
+        return
+
     def SetDownloadLabel(self):
-        url = Setting.SavePath.value
-        if not url:
-            url = "./"
-        localPath = os.path.join(url, config.SavePathDir)
-        # 手机上目录行放不下整条路径("/storage/emulated/0/Android/data/<包名>/files/JMComic")
-        # 有 60 多个字符，QLabel 的 sizeHint 就是整段文本宽度 -> 整行最小宽度超过屏幕。
-        # ElideText 在手机上按宽度中间省略(完整路径进 tooltip)，桌面端是空操作。
+        """ 目录行文案
+
+        显示的是**真实会落盘的位置**：SAF 目录会还原成 /storage/emulated/0/…
+        (树 URI 里带着 primary:Download/xxx，能还原)，用户一眼能对上文件管理器。
+        """
         from tools import mobile_ui
-        treeName = Setting.SavePathTreeName.value
-        if not treeName and Setting.SavePathTree.value:
-            from tools import saf_bridge
-            treeName = saf_bridge.UriDisplayName(Setting.SavePathTree.value)
-        if treeName and platform_mobile.IsAndroid():
-            # 配了 SAF 导出目录：这一行显示用户选的那个目录，否则用户会以为"设置没生效"
-            # (本地落盘其实还在应用专属目录，整本下完才导出过去，tooltip 里两个都写清楚)
-            mobile_ui.ElideText(self.downloadDir, treeName)
-            self.downloadDir.setToolTip("导出到: {}\n本地落地: {}".format(treeName, localPath))
-        else:
-            mobile_ui.ElideText(self.downloadDir, localPath)
-            if platform_mobile.IsAndroid():
-                self.downloadDir.setToolTip(localPath)
-        mobile_ui.ElideText(self.cacheDir, Setting.GetCachePath())
-        mobile_ui.ElideText(self.waifu2xDir, os.path.join(Setting.GetCachePath(), config.Waifu2xPath))
+        display = Setting.GetDownloadDisplayPath()
+        if not display:
+            display = "./"
+        mobile_ui.ElideText(self.downloadDir, display)
+        self.downloadDir.setToolTip(display)
+
+        # 缓存(封面/图片缓存/超分模型)固定在应用私有目录：它是应用的临时数据，
+        # 放进用户选的目录既慢又会在文件管理器里堆一堆看不懂的文件
+        cachePath = Setting.GetCachePath()
+        mobile_ui.ElideText(self.cacheDir, cachePath)
+        mobile_ui.ElideText(self.waifu2xDir, os.path.join(cachePath, config.Waifu2xPath))
+        if platform_mobile.IsAndroid():
+            self.cacheDir.setToolTip("{}（应用私有缓存，不占用下载目录）".format(cachePath))
+            self.waifu2xDir.setToolTip(os.path.join(cachePath, config.Waifu2xPath))
 
     def OpenDir(self, label):
-        """ 打开目录：手机上要交给系统文件管理器
+        """ 打开目录
 
-        原来无条件 `QDesktopServices.openUrl(file://…)` —— Android 上既没有应用
-        处理 file://(系统从 7.0 起禁用它)，页面也没人接，点了完全没反应。
+        * 下载目录：配了 SAF 就直接用文件管理器打开那个目录(DocumentsUI)
+        * 应用私有目录(缓存/超分模型)：Android 11+ 其它应用根本看不到，
+          只能告诉用户这个位置没法在外面浏览
         """
-        from tools import mobile_ui, mobile_file_dialog, platform_mobile
-        path = mobile_ui.FullText(label) if label is not None else ""
+        from tools import mobile_ui, platform_mobile, vfs
+        text = mobile_ui.FullText(label) if label is not None else ""
         if platform_mobile.IsAndroid():
-            # 下载目录配了 SAF 导出目录时，直接打开那个目录(DocumentsUI 认 tree uri)
-            tree = Setting.SavePathTree.value
-            if tree and label is self.downloadDir:
-                ok, reason = mobile_file_dialog.OpenUri(tree)
-                if ok:
-                    return
-            if mobile_file_dialog.OpenDir(path):
+            if label is self.downloadDir:
+                ok, reason = vfs.OpenInFileManager(Setting.GetDownloadRoot())
+                if not ok:
+                    if reason == "sandbox":
+                        QtOwner().ShowMsg(Str.GetStr(Str.SetDir))
+                    from tools.log import Log
+                    Log.Warn("open dir: {} -> {}".format(text, reason))
                 return
+            ok, reason = vfs.OpenInFileManager(text)
+            if not ok and reason == "sandbox":
+                QtOwner().ShowMsg(Str.GetStr(Str.SetDir))
             return
-        QDesktopServices.openUrl(QUrl.fromLocalFile(path))
+        QDesktopServices.openUrl(QUrl.fromLocalFile(text))
         return
 
     def SetGpuInfos(self, gpuInfo, cpuNum):
