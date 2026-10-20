@@ -74,7 +74,19 @@ SkipRequirements = ["curl-cffi"]
 # 所以**只能往上改**：versionCode 变小会让 `adb install -r` 报
 # INSTALL_FAILED_VERSION_DOWNGRADE，手机上必须先卸载才能装。
 # 注意这是 Android 包版本，跟桌面端的 config.RealVersion(上游版本号，用于检查更新)无关。
-AppVersion = "0.45"
+AppVersion = "0.48"
+
+# 这些 Qt 模块必须从加载清单里去掉：
+#   pyside6-android-deploy 解析 wheel 的 *-android-dependencies.xml 时会把
+#   libQt6Test_<abi> 也算成"依赖"(PySide6/QtTest.abi3.so 的 NEEDED 指向它)，
+#   于是把它写进 --qt-libs；但 p4a 的 PySide6 recipe 只安装 QtWidgets/QtGui 等
+#   常用绑定库，**不安装 QtTest.abi3.so**。清单里有、产物里没有 ——
+#   QtLoader 启动时 System.loadLibrary("QtTest.abi3") 直接
+#   UnsatisfiedLinkError -> "Loading Qt native libraries failed" -> VM 退出，
+#   表现就是"装完一启动就闪退"，连 Python 都没起来。
+#   应用源码没有任何地方 import QtTest(grep 过)，删掉是安全的；
+#   0.46 及以前能启动是因为 dist 缓存里的 libs.xml 是更早渲染的旧版本(没有 Test)。
+QtModuleBlacklist = ("Test", "QuickTest")
 
 # p4a 只把 source.include_exts 放行的文件复制进应用目录(再打成 private.tar)。
 # buildozer/工具生成的默认值是 "py,png,jpg,kv,atlas,qml,js"，**不含 onnx/txt**，
@@ -188,6 +200,77 @@ def MergeExts(current, wanted):
             items.append(name)
             lower.add(name.lower())
     return ",".join(items)
+
+
+def DropQtModulesFromExtraArgs(spec):
+    """把 p4a.extra_args 里 --qt-libs 的黑名单模块删掉
+
+    pyside6-android-deploy 生成的 buildozer.spec 形如：
+        p4a.extra_args = --qt-libs=Widgets,Svg,...,Test,... --load-local-libs=...
+    p4a 用这个列表渲染 dist 的 res/values/libs.xml(QtLoader 启动时按它逐个
+    System.loadLibrary)。清单里有而 APK 里没有的库就是启动闪退(见
+    QtModuleBlacklist 的注释)。这里从源头删掉，双保险。
+    """
+    raw = spec.GetKey("app", "p4a.extra_args") or ""
+    if not raw.strip():
+        return False
+    tokens = raw.split()
+    changed = False
+    for index, token in enumerate(tokens):
+        if not token.startswith("--qt-libs="):
+            continue
+        modules = [m for m in token.split("=", 1)[1].split(",") if m]
+        kept = [m for m in modules if m not in QtModuleBlacklist]
+        dropped = [m for m in modules if m in QtModuleBlacklist]
+        if not dropped:
+            continue
+        tokens[index] = "--qt-libs=" + ",".join(kept)
+        print("  ~ p4a.extra_args --qt-libs 删除模块 {} (不打包对应绑定库，"
+              "留着会启动即 UnsatisfiedLinkError)".format(",".join(dropped)))
+        changed = True
+    if changed:
+        spec.SetKey("app", "p4a.extra_args", " ".join(tokens))
+    return changed
+
+
+def PatchDistLibsXml(specDir, packageName):
+    """直接改 dist 里已渲染的 res/values/libs.xml
+
+    只过滤 --qt-libs 不够：p4a 只在"创建 dist"时渲染 libs.xml，而我们的构建
+    复用缓存 dist(.buildozer/.../build-<abi>/dists/... 从 keep-<abi>/ 搬回来)，
+    不重新渲染。所以这里按文本把黑名单模块的 <item> 行删掉，缓存与否都生效。
+    libs.xml 是纯文本 XML(p4a 用 jinja 渲染的)，条目形如
+        <item>x86_64;Qt6Test_x86_64</item>  和  <item>x86_64;QtTest.abi3.so</item>
+    """
+    if not os.path.isdir(specDir):
+        return 0
+    pattern = os.path.join(specDir, ".buildozer", "android", "platform", "build-*",
+                           "dists", packageName, "src", "main", "res", "values", "libs.xml")
+    import glob
+    patched = 0
+    for path in sorted(glob.glob(pattern)):
+        with open(path, encoding="utf-8") as f:
+            lines = f.read().splitlines()
+        kept = []
+        removed = []
+        for line in lines:
+            # 精确匹配两类条目：C++ 库 Qt6Test_<abi> 与 绑定库 QtTest.abi3.so。
+            # 不能用 "QtTest" 子串判断(会误伤 QtWidgets 之类)。
+            markers = tuple("Qt6{}_".format(n) for n in QtModuleBlacklist) + \
+                      tuple("Qt{}.abi3.so".format(n) for n in QtModuleBlacklist)
+            if any(m in line for m in markers):
+                removed.append(line.strip())
+                continue
+            kept.append(line)
+        if removed:
+            with open(path, "w", encoding="utf-8") as f:
+                f.write("\n".join(kept) + "\n")
+            print("  ~ libs.xml 删除 {} 条 QtTest 条目: {}".format(
+                len(removed), "; ".join(removed)))
+            patched += 1
+        else:
+            print("  = libs.xml 无需改动: {}".format(path))
+    return patched
 
 
 def CopyRecipes(recipeDir, srcDir):
@@ -325,6 +408,14 @@ def Main():
         print("  已拷贝 {} 个自定义 recipe 到 {}".format(count, recipeDir))
     elif args.recipes:
         print("  [warn] buildozer.spec 里没有 p4a.local_recipes，无法合并自定义 recipe")
+
+    # 0.47 事故：pyside6-android-deploy 把 libQt6Test 算成依赖写进 --qt-libs，
+    # QtLoader 启动时加载 QtTest.abi3.so，但 p4a 从不打包这个绑定库 ->
+    # UnsatisfiedLinkError -> 启动即闪退。从 spec 源头 + 已渲染的 libs.xml
+    # 两处删掉这些模块(见 QtModuleBlacklist 注释)。
+    DropQtModulesFromExtraArgs(spec)
+    packageName = spec.GetKey("app", "package.name") or "JMComic"
+    PatchDistLibsXml(specDir, packageName)
 
     permissions = spec.GetKey("app", "android.permissions") or ""
     perms = [p.strip() for p in permissions.split(",") if p.strip()]

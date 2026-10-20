@@ -266,6 +266,22 @@ yes | "$VPY" -m buildozer android debug 2>&1 | tee "$WORK/logs/buildozer_full.lo
 echo "buildozer exit=${PIPESTATUS[1]}"
 echo "完整日志: $WORK/logs/buildozer_full.log ($(wc -l < "$WORK/logs/buildozer_full.log" 2>/dev/null) 行)"
 
+echo "===== [$(date +%T)] 4.5 校验 APK：Qt 加载清单 vs 包内 .so ====="
+# 0.47 事故复盘：QtLoader 按 libs.xml 的清单逐个 loadLibrary，清单里有而包里没有
+# 的库(QtTest.abi3.so)会让应用"装完即闪退"，且日志里只有一行 E QtLoader，
+# 极容易被误判成环境问题。这里在收集产物前把清单和产物对一遍，不一致就 fail。
+NEW_APK=$(ls -t "$ANDROID"/JMComic-*-"$JM_ABI"-debug.apk 2>/dev/null | head -1)
+AAPT_BIN=$(ls "$SDK"/build-tools/*/aapt 2>/dev/null | sort -V | tail -1)
+if [ -z "$NEW_APK" ]; then
+    echo "[FATAL] 没找到 $JM_ABI 的 APK，构建可能失败了"
+    exit 1
+fi
+"$VPY" "$ANDROID/tools/check_apk_qt_libs.py" "$NEW_APK" --abi "$JM_ABI" --aapt "$AAPT_BIN" || {
+    echo "[FATAL] APK 校验失败：加载清单与包内 .so 不一致，这个包装上去会闪退"
+    echo "        排查：aapt dump --values resources 看 array/qt_libs 与 array/load_local_libs"
+    exit 1
+}
+
 echo "===== [$(date +%T)] 5. 收集产物 ====="
 find "$ANDROID" -maxdepth 4 \( -name '*.apk' -o -name '*.aab' \) 2>/dev/null | head
 ls -sh "$ANDROID/bin" 2>/dev/null || true
