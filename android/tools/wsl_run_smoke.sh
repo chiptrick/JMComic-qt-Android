@@ -89,9 +89,11 @@ run "11. 缓存目录重定向/旧缓存搬迁回归" android/tools/host_test_ca
 cache=$?
 run "12. 设置页输入框点按/聚焦链路回归" android/tools/host_test_input_focus.py
 inputfocus=$?
+run "13. 数值框(缩放比例/封面大小/放大倍数)聚焦键入回归" android/tools/host_test_spin_focus.py
+spinfocus=$?
 
 echo
-echo "结果: smoke=$smoke interfaces=$iface crypto=$crypto image=$image picker=$picker netfb=$netfb saf=$saf pinch=$pinch vfs=$vfs cache=$cache inputfocus=$inputfocus"
+echo "结果: smoke=$smoke interfaces=$iface crypto=$crypto image=$image picker=$picker netfb=$netfb saf=$saf pinch=$pinch vfs=$vfs cache=$cache inputfocus=$inputfocus spinfocus=$spinfocus"
 [ "$smoke" -eq 0 ] && [ "$iface" -eq 0 ] && [ "$crypto" -eq 0 ] && [ "$image" -eq 0 ] \
     && [ "$picker" -eq 0 ] && [ "$netfb" -eq 0 ] && [ "$saf" -eq 0 ] && [ "$pinch" -eq 0 ] && [ "$vfs" -eq 0 ] \
-    && [ "$cache" -eq 0 ] && [ "$inputfocus" -eq 0 ]
+    && [ "$cache" -eq 0 ] && [ "$inputfocus" -eq 0 ] && [ "$spinfocus" -eq 0 ]

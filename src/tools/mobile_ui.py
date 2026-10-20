@@ -127,6 +127,9 @@ _readerPinch = None
 #     没聚焦就补一次聚焦+落光标+弹输入法(见 mobile_ui_touch._FocusInput)。
 #     这是"点了输入框打不了字"的根因路径：只要事件被吞掉(别的触点还在表里/
 #     残留序列/滚动区手势抢走)，Qt 就不会再合成鼠标，输入框永远拿不到焦点。
+#   * 数值框(QAbstractSpinBox：缩放比例/封面大小/解密进程数/Waifu2x 放大倍数等)
+#     走 "spin" 通道：点编辑区=聚焦+全选+弹输入法(可直接键入，值经 valueChanged
+#     回传)，点上下箭头=stepBy 加减。旧实现整框走 activate，只能加减不能打字。
 #   * 只读文本框(评论/简介/日志，_jmTextSelect 标记)的选中被改成"触摸长按才允许"
 #     (全选+复制菜单，见 component.label.text_label.TextSelectGate)：滑动不误选、
 #     鼠标拖选保留；链接点按/光标位置靠放行的合成 press/release 保持可用

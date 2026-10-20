@@ -474,6 +474,92 @@ def _Activate(widget, globalPos):
     return None
 
 
+def _SpinBoxStepAt(spin, localPos):
+    """ localPos 命中的是不是上下箭头：返回 +1/-1，编辑区/判定失败返回 None
+
+    用 QStyle.subControlRect 切出箭头矩形(样式自适配，桌面/真机都准)；
+    取不到矩形就按编辑区处理(走聚焦) —— 聚焦后硬件键盘的上下键同样能加减，
+    比按猜测的几何切更稳。
+    QStyle/QStyleOptionSpinBox 在这里惰性导入：宿主回归里有桩掉整个
+    QtWidgets 的用例(host_test_text_select)，模块级多导一个名字就会炸。
+    """
+    try:
+        from PySide6.QtWidgets import QStyle, QStyleOptionSpinBox
+        style = spin.style()
+        if style is not None:
+            opt = QStyleOptionSpinBox()
+            opt.rect = spin.rect()
+            opt.buttonSymbols = spin.buttonSymbols()
+            opt.subControls = QStyle.SubControl.SC_All
+            for sc, step in ((QStyle.SubControl.SC_SpinBoxUp, 1),
+                             (QStyle.SubControl.SC_SpinBoxDown, -1)):
+                rect = style.subControlRect(QStyle.ComplexControl.CC_SpinBox,
+                                            opt, sc, spin)
+                if rect.isValid() and not rect.isEmpty() and rect.contains(localPos):
+                    return step
+    except Exception:
+        pass
+    return None
+
+
+def _FocusSpinBox(spin, localPos):
+    """ 聚焦数值框并弹输入法，返回描述串；失败返回 ""
+
+    首次聚焦：全选原有文本(触摸上"点一下直接输新值"比逐位改数字好用)；
+    已聚焦再点：光标落到手指位置(要精细改某一位时用)。
+    """
+    if not _WidgetAlive(spin) or not spin.isEnabled():
+        return ""
+    edit = spin.lineEdit() if hasattr(spin, "lineEdit") else None
+    hadFocus = bool(edit is not None and edit.hasFocus())
+    try:
+        spin.setFocus(Qt.FocusReason.MouseFocusReason)
+    except Exception:
+        return ""
+    if edit is not None:
+        try:
+            if hadFocus and localPos is not None:
+                # 已经聚焦：光标落到手指处(先清掉可能存在的选区)
+                edit.deselect()
+                pos = edit.cursorPositionAt(edit.mapFrom(spin, localPos))
+                edit.setCursorPosition(int(pos))
+            else:
+                edit.selectAll()
+        except Exception:
+            pass
+    try:
+        QGuiApplication.inputMethod().show()
+    except Exception:
+        pass
+    return "{} 聚焦(可键入)".format(_DescribeWidget(spin))
+
+
+def _SpinBoxOf(widget):
+    """ 手指下的控件往上找到数值框本体(内部输入行也要归它管) """
+    node = widget
+    while node is not None:
+        if isinstance(node, QAbstractSpinBox):
+            return node
+        node = node.parentWidget()
+    return None
+
+
+def _ActivateSpin(widget, globalPos):
+    """ 数值框点按：点编辑区=聚焦+输入法，点上下箭头=加减(与它自己的鼠标语义一致) """
+    spin = _SpinBoxOf(widget)
+    if spin is None:
+        return ""
+    try:
+        local = spin.mapFromGlobal(QPoint(int(globalPos.x()), int(globalPos.y())))
+    except Exception:
+        local = None
+    step = _SpinBoxStepAt(spin, local) if local is not None else None
+    if step:
+        spin.stepBy(step)
+        return "{} 步进 {:+d}".format(_DescribeWidget(spin), step)
+    return _FocusSpinBox(spin, local)
+
+
 # ---------------------------------------------------------------------------
 # 触控路由：App 级事件过滤器，把每一次手指操作判定一次(点按/滑动/标签条横划)
 # ---------------------------------------------------------------------------
@@ -575,7 +661,8 @@ class _TouchRouter(QObject):
     def _Classify(widget):
         """ 手指下的控件该走哪条通道
 
-        "activate" -> 点按激活(按钮/下拉框/数值框/标签条)
+        "activate" -> 点按激活(按钮/下拉框/标签条)
+        "spin"     -> 数值框：点编辑区聚焦+弹输入法(可键入)，点上下箭头 stepBy 加减
         "tabbar"   -> 同 activate，但滑动改成"横划滚动标签条"(QScroller)
         "view"     -> 项视图/滚动区内容：滑动不许变成点击，点按走信号链
         "reader"   -> 看图控件(有自己的触控处理，这里完全不插手)
@@ -609,7 +696,9 @@ class _TouchRouter(QObject):
             if isinstance(node, QComboBox):
                 return "activate"
             if isinstance(node, QAbstractSpinBox):
-                return "activate"
+                # 数值框单独一条通道：点编辑区=聚焦+输入法(可以键入)，点上下箭头=加减
+                # (旧实现整框都走 activate -> stepBy，表现就是"点得动但打不了字")
+                return "spin"
             if isinstance(node, (QSlider, QScrollBar)):
                 return "native"
             if isinstance(node, (QTextEdit, QPlainTextEdit)):
@@ -897,6 +986,18 @@ class _TouchRouter(QObject):
             # 等这一轮事件循环结束再确认；已经聚焦就什么都不做。
             press = seq["press"]
             QTimer.singleShot(0, lambda w=widget, p=press: _FocusInput(w, p))
+            return
+        if mode == "spin":
+            # 数值框点按：编辑区聚焦+弹输入法(可键入)，上下箭头才走 stepBy
+            self._busy = True
+            try:
+                desc = _ActivateSpin(widget, pos)
+            finally:
+                self._busy = False
+            if desc:
+                self.Replayed += 1
+                self.LastReplayed = desc
+                Log.Warn("touch: 数值框 {}".format(desc))
             return
         # 点按：走控件自己的公开入口
         self._busy = True

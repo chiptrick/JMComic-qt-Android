@@ -170,9 +170,9 @@ def TestClassify(scene):
     Check(router._Classify(scene.edit.viewport() if hasattr(scene.edit, "viewport") else scene.edit)
           == "input", "QLineEdit 自身/内部件 -> input")
     Check(router._Classify(scene.readonly) == "native", "只读 QPlainTextEdit -> native(不弹输入法)")
-    Check(router._Classify(scene.spin) == "activate", "QSpinBox -> activate(仍走 stepBy)")
-    Check(router._Classify(scene.spin.lineEdit()) == "activate",
-          "QSpinBox 内部输入行 -> activate(不算独立输入框)")
+    Check(router._Classify(scene.spin) == "spin", "QSpinBox -> spin(聚焦可键入，见 host_test_spin_focus)")
+    Check(router._Classify(scene.spin.lineEdit()) == "spin",
+          "QSpinBox 内部输入行 -> spin(不算独立输入框)")
     Check(router._Classify(scene.label) == "view", "滚动区里的普通标签 -> view(滑动不点)")
 
 
