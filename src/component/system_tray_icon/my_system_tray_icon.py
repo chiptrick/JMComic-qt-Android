@@ -36,7 +36,6 @@ class MySystemTrayIcon(QSystemTrayIcon):
         pass
 
     def Close(self):
-        QtOwner().closeType = 3
         if QtOwner().owner.isHidden():
             QtOwner().owner.show()
 

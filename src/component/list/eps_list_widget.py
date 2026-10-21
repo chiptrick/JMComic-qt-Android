@@ -1,13 +1,9 @@
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QMouseEvent
-from PySide6.QtWidgets import QListWidget, QAbstractItemView
 
 from component.list.base_list_widget import BaseListWidget
-from component.scroll.smooth_scroll_bar import SmoothScrollBar
-from config.setting import Setting
 from qt_owner import QtOwner
 from task.qt_task import QtTaskBase
-
 
 class EpsListWidget(BaseListWidget, QtTaskBase):
     def __init__(self, parent):
@@ -24,8 +20,4 @@ class EpsListWidget(BaseListWidget, QtTaskBase):
             arg__1.ignore()
             return
 
-        if Setting.IsGrabGesture.value:
-            return QListWidget.wheelEvent(self, arg__1)
-            # self.verticalScrollBar().setValue(-arg__1.angleDelta().y())
-        else:
-            self.vScrollBar.ScrollValue(-arg__1.angleDelta().y())
+        self.vScrollBar.ScrollValue(-arg__1.angleDelta().y())

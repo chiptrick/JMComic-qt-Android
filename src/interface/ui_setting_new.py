@@ -118,27 +118,6 @@ class Ui_SettingNew(object):
 
         self.verticalLayout_4.addWidget(self.frame_1)
 
-        self.frame_16 = QFrame(self.scrollAreaWidgetContents)
-        self.frame_16.setObjectName(u"frame_16")
-        self.frame_16.setFrameShape(QFrame.StyledPanel)
-        self.frame_16.setFrameShadow(QFrame.Raised)
-        self.verticalLayout_20 = QVBoxLayout(self.frame_16)
-        self.verticalLayout_20.setObjectName(u"verticalLayout_20")
-        self.label_37 = QLabel(self.frame_16)
-        self.label_37.setObjectName(u"label_37")
-        self.label_37.setMaximumSize(QSize(16777215, 19))
-        self.label_37.setFont(font1)
-
-        self.verticalLayout_20.addWidget(self.label_37)
-
-        self.grabGestureBox = QCheckBox(self.frame_16)
-        self.grabGestureBox.setObjectName(u"grabGestureBox")
-
-        self.verticalLayout_20.addWidget(self.grabGestureBox)
-
-
-        self.verticalLayout_4.addWidget(self.frame_16)
-
         self.frame_2 = QFrame(self.scrollAreaWidgetContents)
         self.frame_2.setObjectName(u"frame_2")
         self.frame_2.setFont(font1)
@@ -334,74 +313,6 @@ class Ui_SettingNew(object):
 
 
         self.verticalLayout_4.addWidget(self.frame_7)
-
-        self.frame_13 = QFrame(self.scrollAreaWidgetContents)
-        self.frame_13.setObjectName(u"frame_13")
-        self.frame_13.setFont(font1)
-        self.frame_13.setStyleSheet(u"")
-        self.verticalLayout_16 = QVBoxLayout(self.frame_13)
-        self.verticalLayout_16.setObjectName(u"verticalLayout_16")
-        self.label = QLabel(self.frame_13)
-        self.label.setObjectName(u"label")
-        self.label.setFont(font1)
-
-        self.verticalLayout_16.addWidget(self.label)
-
-        self.mainScaleBox = QCheckBox(self.frame_13)
-        self.mainScaleBox.setObjectName(u"mainScaleBox")
-
-        self.verticalLayout_16.addWidget(self.mainScaleBox)
-
-        self.horizontalLayout_4 = QHBoxLayout()
-        self.horizontalLayout_4.setObjectName(u"horizontalLayout_4")
-        self.label_13 = QLabel(self.frame_13)
-        self.label_13.setObjectName(u"label_13")
-        self.label_13.setMaximumSize(QSize(150, 16777215))
-
-        self.horizontalLayout_4.addWidget(self.label_13)
-
-        self.scaleBox = WheelSpinBox(self.frame_13)
-        self.scaleBox.setObjectName(u"scaleBox")
-        self.scaleBox.setMinimum(50)
-        self.scaleBox.setMaximum(300)
-        self.scaleBox.setValue(100)
-
-        self.horizontalLayout_4.addWidget(self.scaleBox)
-
-
-        self.verticalLayout_16.addLayout(self.horizontalLayout_4)
-
-
-        self.verticalLayout_4.addWidget(self.frame_13)
-
-        self.frame_17 = QFrame(self.scrollAreaWidgetContents)
-        self.frame_17.setObjectName(u"frame_17")
-        self.frame_17.setFrameShape(QFrame.StyledPanel)
-        self.frame_17.setFrameShadow(QFrame.Raised)
-        self.verticalLayout_21 = QVBoxLayout(self.frame_17)
-        self.verticalLayout_21.setObjectName(u"verticalLayout_21")
-        self.label_38 = QLabel(self.frame_17)
-        self.label_38.setObjectName(u"label_38")
-        self.label_38.setFont(font1)
-
-        self.verticalLayout_21.addWidget(self.label_38)
-
-        self.showCloseButton0 = QRadioButton(self.frame_17)
-        self.showCloseButtonGroup = QButtonGroup(SettingNew)
-        self.showCloseButtonGroup.setObjectName(u"showCloseButtonGroup")
-        self.showCloseButtonGroup.addButton(self.showCloseButton0)
-        self.showCloseButton0.setObjectName(u"showCloseButton0")
-
-        self.verticalLayout_21.addWidget(self.showCloseButton0)
-
-        self.showCloseButton1 = QRadioButton(self.frame_17)
-        self.showCloseButtonGroup.addButton(self.showCloseButton1)
-        self.showCloseButton1.setObjectName(u"showCloseButton1")
-
-        self.verticalLayout_21.addWidget(self.showCloseButton1)
-
-
-        self.verticalLayout_4.addWidget(self.frame_17)
 
         self.frame_14 = QFrame(self.scrollAreaWidgetContents)
         self.frame_14.setObjectName(u"frame_14")
@@ -1321,8 +1232,6 @@ class Ui_SettingNew(object):
         self.generalLabel.setText(QCoreApplication.translate("SettingNew", u"\u901a\u7528", None))
         self.label_update.setText(QCoreApplication.translate("SettingNew", u"\u66f4\u65b0\uff1a", None))
         self.checkBox_IsUpdate.setText(QCoreApplication.translate("SettingNew", u"\u542f\u52a8\u65f6\u68c0\u67e5\u66f4\u65b0", None))
-        self.label_37.setText(QCoreApplication.translate("SettingNew", u"\u89e6\u63a7\uff08\u91cd\u542f\u751f\u6548\uff09\uff08\u5982\u679c\u51fa\u73b0\u70b9\u51fb\u56fe\u7247\u4f4d\u7f6e\u9519\u4e71\uff0c\u8bf7\u4f7f\u7528100%\u7f29\u653e\uff09\uff1a", None))
-        self.grabGestureBox.setText(QCoreApplication.translate("SettingNew", u"\u542f\u7528\u89e6\u63a7\u4f18\u5316", None))
         self.label_6.setText(QCoreApplication.translate("SettingNew", u"\u4e3b\u9898\uff1a", None))
         self.themeButton0.setText(QCoreApplication.translate("SettingNew", u"\u8ddf\u968f\u7cfb\u7edf", None))
         self.themeButton2.setText(QCoreApplication.translate("SettingNew", u"\u767d", None))
@@ -1362,12 +1271,6 @@ class Ui_SettingNew(object):
         self.fontStyle.setItemText(4, QCoreApplication.translate("SettingNew", u"\u7c97\u4f53", None))
         self.fontStyle.setItemText(5, QCoreApplication.translate("SettingNew", u"\u9ed1\u4f53", None))
 
-        self.label.setText(QCoreApplication.translate("SettingNew", u"\u754c\u9762\u7f29\u653e\u663e\u793a\uff08\u9700\u91cd\u542f\u751f\u6548\uff09\uff1a", None))
-        self.mainScaleBox.setText(QCoreApplication.translate("SettingNew", u"\u662f\u5426\u4f7f\u7528\u81ea\u5b9a\u4e49\u7f29\u653e\u6bd4\u4f8b", None))
-        self.label_13.setText(QCoreApplication.translate("SettingNew", u"\u7f29\u653e\u6bd4\u4f8b\uff1a", None))
-        self.label_38.setText(QCoreApplication.translate("SettingNew", u"\u5173\u95ed\u8bbe\u7f6e", None))
-        self.showCloseButton0.setText(QCoreApplication.translate("SettingNew", u"\u5173\u95ed\u540e\u9000\u51fa", None))
-        self.showCloseButton1.setText(QCoreApplication.translate("SettingNew", u"\u5173\u95ed\u540e\u6700\u5c0f\u5316\u5230\u6258\u76d8", None))
         self.label_2.setText(QCoreApplication.translate("SettingNew", u"\u5c01\u9762\u663e\u793a\u5927\u5c0f\uff08\u9ed8\u8ba4\u4e3a100%\uff09\uff1a", None))
         self.label_29.setText(QCoreApplication.translate("SettingNew", u"\u5206\u7c7b\u5c01\u9762\u5927\u5c0f\uff1a", None))
         self.label_40.setText(QCoreApplication.translate("SettingNew", u"\u6807\u9898\u663e\u793a\u884c\u6570", None))

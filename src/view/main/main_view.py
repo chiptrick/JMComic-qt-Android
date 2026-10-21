@@ -534,25 +534,8 @@ class MainView(Main, QtTaskBase):
             a0.ignore()
             return
 
-        if not self.isHidden():
-            if platform_mobile.SupportSystemTray and Setting.ShowCloseType.value == 1 and QtOwner().closeType == 1:
-                QtOwner().app.setQuitOnLastWindowClosed(False)
-                self.myTrayIcon.show()
-                self.hide()
-                a0.ignore()
-                return
-            # if not Setting.IsNotShowCloseTip.value and QtOwner().closeType == 1:
-                # log = ShowCloseDialog(QtOwner().owner)
-                # log.show()
-                # log.LoadSetting()
-                # a0.ignore()
-                # return
-
-            # if  Setting.ShowCloseType.value == 2:
-            #     self.myTrayIcon.show()
-            #     self.hide()
-            #     a0.ignore()
-            #     return
+        # 关闭行为固定为"直接退出"：原先的"关闭后最小化到托盘"开关
+        # (Setting.ShowCloseType) 连同它的托盘分支一起移除，设置页不再提供该选择。
         QtOwner().app.setQuitOnLastWindowClosed(True)
         super().closeEvent(a0)
         # reply = QtOwner().ShowMsgBox(QMessageBox.Question, self.tr('提示'), self.tr('确定要退出吗？'))

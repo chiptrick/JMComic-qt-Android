@@ -90,17 +90,12 @@ class Setting:
     NotCategoryShow = SettingValue("GeneraSetting", 0, False)  #
     CategorySize = SettingValue("GeneraSetting", 80, False)  #
     # ScaleLevel = SettingValue("GeneraSetting", 0, True, ["Auto", 100, 125, 150, 175, 200])
-    IsUseScaleFactor = SettingValue("GeneraSetting", 0, True)
-    ScaleFactor = SettingValue("GeneraSetting", 100, True)
 
     IsUseTitleBar = SettingValue("GeneraSetting", 1, True)
 
     FontName = SettingValue("GeneraSetting", "", True)
     FontSize = SettingValue("GeneraSetting", "", True)
     FontStyle = SettingValue("GeneraSetting", 0, True)
-
-    IsNotShowCloseTip = SettingValue("GeneraSetting", 0, False)
-    ShowCloseType = SettingValue("GeneraSetting", 0, False)
 
     MultiNum = SettingValue("GeneraSetting", 5, True)
 
@@ -207,7 +202,6 @@ class Setting:
     AutoSign = SettingValue("Other", 1, False)
     SavePassword = SettingValue("Other", 1, False)
     IsShowCmd = SettingValue("Other", 0, False)
-    IsGrabGesture = SettingValue("Other", 0, True)
     IsReDownload = SettingValue("Other", 0, False)
     WebpToPng = SettingValue("Other", 0, False)
     IsPreUpdate = SettingValue("Other", 0, False)

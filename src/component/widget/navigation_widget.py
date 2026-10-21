@@ -4,7 +4,7 @@ from datetime import datetime
 
 from PySide6.QtCore import QPropertyAnimation, QRect, QEasingCurve, QFile, QEvent, QSize, QTimer
 from PySide6.QtGui import QPixmap, Qt, QIcon, QGuiApplication
-from PySide6.QtWidgets import QWidget, QScroller, QScrollerProperties, QCalendarWidget
+from PySide6.QtWidgets import QWidget, QCalendarWidget
 
 from config import config
 from config.global_config import GlobalConfig
@@ -79,13 +79,6 @@ class NavigationWidget(QWidget, Ui_Navigation, QtTaskBase):
         self.resetDailySign = 3
         self.proxyImgName.clicked.connect(self.OpenProxy)
         self.proxyName.clicked.connect(self.OpenProxy)
-        if Setting.IsGrabGesture.value:
-            QScroller.grabGesture(self.scrollArea, QScroller.ScrollerGestureType.LeftMouseButtonGesture)
-            propertiesOne = QScroller.scroller(self).scrollerProperties()
-            propertiesOne.setScrollMetric(QScrollerProperties.ScrollMetric.MousePressEventDelay, 0)
-            propertiesOne.setScrollMetric(QScrollerProperties.ScrollMetric.VerticalOvershootPolicy, QScrollerProperties.OvershootPolicy.OvershootAlwaysOff)
-            propertiesOne.setScrollMetric(QScrollerProperties.ScrollMetric.HorizontalOvershootPolicy, QScrollerProperties.OvershootPolicy.OvershootAlwaysOff)
-            QScroller.scroller(self.scrollArea).setScrollerProperties(propertiesOne)
         self.hideButton.clicked.connect(self.OpenForbidWords)
         self.tmpSignView = None
 

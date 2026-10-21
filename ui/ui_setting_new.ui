@@ -156,43 +156,6 @@
           </widget>
          </item>
          <item>
-          <widget class="QFrame" name="frame_16">
-           <property name="frameShape">
-            <enum>QFrame::StyledPanel</enum>
-           </property>
-           <property name="frameShadow">
-            <enum>QFrame::Raised</enum>
-           </property>
-           <layout class="QVBoxLayout" name="verticalLayout_20">
-            <item>
-             <widget class="QLabel" name="label_37">
-              <property name="maximumSize">
-               <size>
-                <width>16777215</width>
-                <height>19</height>
-               </size>
-              </property>
-              <property name="font">
-               <font>
-                <pointsize>12</pointsize>
-               </font>
-              </property>
-              <property name="text">
-               <string>触控（重启生效）（如果出现点击图片位置错乱，请使用100%缩放）：</string>
-              </property>
-             </widget>
-            </item>
-            <item>
-             <widget class="QCheckBox" name="grabGestureBox">
-              <property name="text">
-               <string>启用触控优化</string>
-              </property>
-             </widget>
-            </item>
-           </layout>
-          </widget>
-         </item>
-         <item>
           <widget class="QFrame" name="frame_2">
            <property name="font">
             <font>
@@ -592,113 +555,6 @@
                </spacer>
               </item>
              </layout>
-            </item>
-           </layout>
-          </widget>
-         </item>
-         <item>
-          <widget class="QFrame" name="frame_13">
-           <property name="font">
-            <font>
-             <pointsize>12</pointsize>
-            </font>
-           </property>
-           <property name="styleSheet">
-            <string notr="true"/>
-           </property>
-           <layout class="QVBoxLayout" name="verticalLayout_16">
-            <item>
-             <widget class="QLabel" name="label">
-              <property name="font">
-               <font>
-                <pointsize>12</pointsize>
-               </font>
-              </property>
-              <property name="text">
-               <string>界面缩放显示（需重启生效）：</string>
-              </property>
-             </widget>
-            </item>
-            <item>
-             <widget class="QCheckBox" name="mainScaleBox">
-              <property name="text">
-               <string>是否使用自定义缩放比例</string>
-              </property>
-             </widget>
-            </item>
-            <item>
-             <layout class="QHBoxLayout" name="horizontalLayout_4">
-              <item>
-               <widget class="QLabel" name="label_13">
-                <property name="maximumSize">
-                 <size>
-                  <width>150</width>
-                  <height>16777215</height>
-                 </size>
-                </property>
-                <property name="text">
-                 <string>缩放比例：</string>
-                </property>
-               </widget>
-              </item>
-              <item>
-               <widget class="WheelSpinBox" name="scaleBox">
-                <property name="minimum">
-                 <number>50</number>
-                </property>
-                <property name="maximum">
-                 <number>300</number>
-                </property>
-                <property name="value">
-                 <number>100</number>
-                </property>
-               </widget>
-              </item>
-             </layout>
-            </item>
-           </layout>
-          </widget>
-         </item>
-         <item>
-          <widget class="QFrame" name="frame_17">
-           <property name="frameShape">
-            <enum>QFrame::StyledPanel</enum>
-           </property>
-           <property name="frameShadow">
-            <enum>QFrame::Raised</enum>
-           </property>
-           <layout class="QVBoxLayout" name="verticalLayout_21">
-            <item>
-             <widget class="QLabel" name="label_38">
-              <property name="font">
-               <font>
-                <pointsize>12</pointsize>
-               </font>
-              </property>
-              <property name="text">
-               <string>关闭设置</string>
-              </property>
-             </widget>
-            </item>
-            <item>
-             <widget class="QRadioButton" name="showCloseButton0">
-              <property name="text">
-               <string>关闭后退出</string>
-              </property>
-              <attribute name="buttonGroup">
-               <string notr="true">showCloseButtonGroup</string>
-              </attribute>
-             </widget>
-            </item>
-            <item>
-             <widget class="QRadioButton" name="showCloseButton1">
-              <property name="text">
-               <string>关闭后最小化到托盘</string>
-              </property>
-              <attribute name="buttonGroup">
-               <string notr="true">showCloseButtonGroup</string>
-              </attribute>
-             </widget>
             </item>
            </layout>
           </widget>
@@ -2445,7 +2301,6 @@
   <buttongroup name="saveNameGroup"/>
   <buttongroup name="languageGroup"/>
   <buttongroup name="themeGroup"/>
-  <buttongroup name="showCloseButtonGroup"/>
   <buttongroup name="logGroup"/>
  </buttongroups>
 </ui>

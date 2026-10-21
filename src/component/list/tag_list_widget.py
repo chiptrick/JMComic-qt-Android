@@ -4,7 +4,6 @@ from PySide6.QtWidgets import QListWidgetItem, QLabel, QAbstractItemView, QListW
 
 from component.list.base_list_widget import BaseListWidget
 from component.scroll.smooth_scroll_bar import SmoothScrollBar
-from config.setting import Setting
 from qt_owner import QtOwner
 
 
@@ -33,9 +32,6 @@ class TagListWidget(BaseListWidget):
         elif -arg__1.angleDelta().y() < 0 and abs(self.horizontalScrollBar().value() - self.horizontalScrollBar().minimum()) <= 2:
             arg__1.ignore()
             return
-        if Setting.IsGrabGesture.value:
-            return QListWidget.wheelEvent(self, arg__1)
-            # return
         self.hScrollBar.ScrollValue(-arg__1.angleDelta().y())
 
     def AddItem(self, name, isSelectable=False):

@@ -82,10 +82,6 @@ def InitQt(app=None):
     Setting.InitLoadSetting()
     os.environ['QT_IMAGEIO_MAXALLOC'] = "10000000000000000000000000000000000000000000000000000000000000000"
     QtGui.QImageReader.setAllocationLimit(0)
-    if Setting.IsUseScaleFactor.value > 0 and not platform_mobile.IsAndroid():
-        indexV = Setting.ScaleFactor.value
-        # os.environ["QT_ENABLE_HIGHDPI_SCALING"] = "0"
-        os.environ["QT_SCALE_FACTOR"] = str(indexV / 100)
 
     if app is None:
         app = QtWidgets.QApplication.instance()

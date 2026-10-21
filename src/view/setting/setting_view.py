@@ -7,7 +7,7 @@ from functools import partial
 from PySide6 import QtWidgets
 from PySide6.QtCore import QSettings, Qt, QSize, QUrl, QFile, QTranslator, QLocale
 from PySide6.QtGui import QDesktopServices, QFontDatabase
-from PySide6.QtWidgets import QFileDialog, QScroller, QScrollerProperties
+from PySide6.QtWidgets import QFileDialog
 
 from config import config
 from config.setting import Setting, SettingValue
@@ -43,10 +43,8 @@ class SettingView(QtWidgets.QWidget, Ui_SettingNew):
         self.logGroup.buttonClicked.connect(partial(self.ButtonClickEvent, Setting.LogIndex))
         self.proxyGroup.buttonClicked.connect(partial(self.ButtonClickEvent, Setting.IsHttpProxy))
         self.saveNameGroup.buttonClicked.connect(partial(self.ButtonClickEvent, Setting.SaveNameType))
-        self.showCloseButtonGroup.buttonClicked.connect(partial(self.ButtonClickEvent, Setting.ShowCloseType))
 
         # CheckButton:
-        self.mainScaleBox.clicked.connect(partial(self.CheckButtonEvent, Setting.IsUseScaleFactor, self.mainScaleBox))
         self.checkBox_IsUpdate.clicked.connect(partial(self.CheckButtonEvent, Setting.IsUpdate, self.checkBox_IsUpdate))
         self.readCheckBox.clicked.connect(partial(self.CheckButtonEvent, Setting.IsOpenWaifu, self.readCheckBox))
         self.preDownWaifu2x.clicked.connect(partial(self.CheckButtonEvent, Setting.PreDownWaifu2x, self.preDownWaifu2x))
@@ -54,7 +52,6 @@ class SettingView(QtWidgets.QWidget, Ui_SettingNew):
         self.downAuto.clicked.connect(partial(self.CheckButtonEvent, Setting.DownloadAuto, self.downAuto))
         # self.titleBox.clicked.connect(partial(self.CheckButtonEvent, Setting.IsUseTitleBar, self.titleBox))
         self.openglBox.clicked.connect(partial(self.CheckButtonEvent, Setting.IsOpenOpenGL, self.openglBox))
-        self.grabGestureBox.clicked.connect(partial(self.CheckButtonEvent, Setting.IsGrabGesture, self.grabGestureBox))
 
         # LineEdit:
         self.httpEdit.editingFinished.connect(partial(self.LineEditEvent, Setting.HttpProxy, self.httpEdit))
@@ -86,7 +83,6 @@ class SettingView(QtWidgets.QWidget, Ui_SettingNew):
 
         # spinBox
         # self.preDownNum.valueChanged.connect(partial(self.SpinBoxEvent, "", self.preDownNum))
-        self.scaleBox.valueChanged.connect(partial(self.SpinBoxEvent, Setting.ScaleFactor))
         self.coverSize.valueChanged.connect(partial(self.SpinBoxEvent, Setting.CoverSize))
         self.categorySize.valueChanged.connect(partial(self.SpinBoxEvent, Setting.CategorySize))
         self.readScale.valueChanged.connect(partial(self.SpinBoxEvent, Setting.LookScale))
@@ -113,14 +109,6 @@ class SettingView(QtWidgets.QWidget, Ui_SettingNew):
         self.categorySize.setVisible(False)
 
         self.msgLabel.setVisible(False)
-
-        if Setting.IsGrabGesture.value:
-            QScroller.grabGesture(self.scrollArea, QScroller.ScrollerGestureType.LeftMouseButtonGesture)
-            propertiesOne = QScroller.scroller(self).scrollerProperties()
-            propertiesOne.setScrollMetric(QScrollerProperties.ScrollMetric.MousePressEventDelay, 0)
-            propertiesOne.setScrollMetric(QScrollerProperties.ScrollMetric.VerticalOvershootPolicy, QScrollerProperties.OvershootPolicy.OvershootAlwaysOff)
-            propertiesOne.setScrollMetric(QScrollerProperties.ScrollMetric.HorizontalOvershootPolicy, QScrollerProperties.OvershootPolicy.OvershootAlwaysOff)
-            QScroller.scroller(self.scrollArea).setScrollerProperties(propertiesOne)
 
         # self.dohButton.clicked.connect(self.OpenDohView)
 
@@ -249,13 +237,11 @@ class SettingView(QtWidgets.QWidget, Ui_SettingNew):
 
     def InitSetting(self):
         self.checkBox_IsUpdate.setChecked(Setting.IsUpdate.value)
-        self.mainScaleBox.setChecked(Setting.IsUseScaleFactor.value)
         self.SetRadioGroup("themeButton", Setting.ThemeIndex.value)
         self.SetRadioGroup("languageButton", Setting.Language.value)
         # self.SetRadioGroup("mainScaleButton", Setting.ScaleLevel.value)
         self.SetRadioGroup("proxy", Setting.IsHttpProxy.value)
         self.SetRadioGroup("saveNameButton", Setting.SaveNameType.value)
-        self.SetRadioGroup("showCloseButton", Setting.ShowCloseType.value)
         self.coverSize.setValue(Setting.CoverSize.value)
         self.categorySize.setValue(Setting.CategorySize.value)
         self.SetRadioGroup("logutton", Setting.LogIndex.value)
@@ -263,7 +249,6 @@ class SettingView(QtWidgets.QWidget, Ui_SettingNew):
         self.sockEdit.setText(Setting.Sock5Proxy.value)
         # self.titleBox.setChecked(Setting.IsUseTitleBar.value)
         self.openglBox.setChecked(Setting.IsOpenOpenGL.value)
-        self.grabGestureBox.setChecked(Setting.IsGrabGesture.value)
         for index in range(self.encodeSelect.count()):
             if Setting.SelectEncodeGpu.value == self.encodeSelect.itemText(index):
                 self.encodeSelect.setCurrentIndex(index)
@@ -282,7 +267,6 @@ class SettingView(QtWidgets.QWidget, Ui_SettingNew):
         self.preDownWaifu2x.setChecked(Setting.PreDownWaifu2x.value)
         # self.readNoise.setCurrentIndex(Setting.LookNoise.value)
         self.readScale.setValue(Setting.LookScale.value)
-        self.scaleBox.setValue(Setting.ScaleFactor.value)
         # self.readModel.setCurrentIndex(Setting.LookModel.value)
 
         self.categoryBox.setCurrentIndex(Setting.NotCategoryShow.value)

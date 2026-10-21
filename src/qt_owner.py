@@ -20,7 +20,6 @@ class QtOwner(Singleton):
         from tools.user import User
         self.user = User()
         self.isOfflineModel = False
-        self.closeType = 1   # 1普通， 2关闭弹窗触发， 3任务栏触发
         self.isMaxSize = 0
         self.echConfig = ""
 

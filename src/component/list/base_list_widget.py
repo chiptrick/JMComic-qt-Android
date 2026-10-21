@@ -1,9 +1,8 @@
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QMouseEvent
-from PySide6.QtWidgets import QListWidget, QAbstractItemView, QScroller, QScrollerProperties
+from PySide6.QtWidgets import QListWidget, QAbstractItemView
 
 from component.scroll.smooth_scroll_bar import SmoothScrollBar
-from config.setting import Setting
 from qt_owner import QtOwner
 from task.qt_task import QtTaskBase
 from tools.str import Str
@@ -22,22 +21,13 @@ class BaseListWidget(QListWidget, QtTaskBase):
         self.LikeBack = None
         self.KillBack = None
         self.parentId = -1
-        self.vScrollBar = None
-        if Setting.IsGrabGesture.value:
-            QScroller.grabGesture(self, QScroller.ScrollerGestureType.LeftMouseButtonGesture)
-            propertiesOne = QScroller.scroller(self).scrollerProperties()
-            print(propertiesOne.scrollMetric(QScrollerProperties.ScrollMetric.MousePressEventDelay))
-            propertiesOne.setScrollMetric(QScrollerProperties.ScrollMetric.MousePressEventDelay, 1)
-            propertiesOne.setScrollMetric(QScrollerProperties.ScrollMetric.VerticalOvershootPolicy, QScrollerProperties.OvershootPolicy.OvershootAlwaysOff)
-            propertiesOne.setScrollMetric(QScrollerProperties.ScrollMetric.HorizontalOvershootPolicy, QScrollerProperties.OvershootPolicy.OvershootAlwaysOff)
-            propertiesOne.setScrollMetric(QScrollerProperties.ScrollMetric.AcceleratingFlickMaximumTime , 0)
-            QScroller.scroller(self).setScrollerProperties(propertiesOne)
-            self.verticalScrollBar().valueChanged.connect(self.ValueChange)
-        else:
-            self.vScrollBar = SmoothScrollBar()
-            self.vScrollBar.setOrientation(Qt.Vertical)
-            self.setVerticalScrollBar(self.vScrollBar)
-            self.vScrollBar.MoveEvent.connect(self.OnActionTriggered)
+        self.vScrollBar = SmoothScrollBar()
+        self.vScrollBar.setOrientation(Qt.Vertical)
+        self.setVerticalScrollBar(self.vScrollBar)
+        # 翻页(滚到底加载下一页)挂 C++ 级的 valueChanged：
+        # 移动端是 QScroller(C++) 直接改滚动条值，不会走 Python 覆写的 setValue，
+        # 纯 Python 信号 MoveEvent 在触控滚动下不会发 —— 挂它会让移动端"加载更多"静默失效。
+        self.verticalScrollBar().valueChanged.connect(self.OnActionTriggered)
 
         self.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
         self.verticalScrollBar().setSingleStep(30)
@@ -49,19 +39,6 @@ class BaseListWidget(QListWidget, QtTaskBase):
         self.lastClick = 0
         self.lastIndex = -1
         self.doubleClickType = 0
-
-    def ValueChange(self, v):
-        if v >= self.verticalScrollBar().maximum():
-            if Setting.IsGrabGesture.value:
-                QScroller.ungrabGesture(self)
-
-            self.ClearWheelEvent()
-            self.isLoadingPage = True
-            if self.LoadCallBack:
-                self.LoadCallBack()
-
-            if Setting.IsGrabGesture.value:
-                QScroller.grabGesture(self, QScroller.ScrollerGestureType.LeftMouseButtonGesture)
 
     # def event(self, e) -> bool:
     #     print(e)
@@ -77,17 +54,7 @@ class BaseListWidget(QListWidget, QtTaskBase):
     def wheelEvent(self, arg__1) -> None:
         if not self.wheelStatus:
             return
-        if Setting.IsGrabGesture.value:
-            return QListWidget.wheelEvent(self, arg__1)
-            # self.verticalScrollBar().setValue(-arg__1.angleDelta().y())
-            # return
-
-        if self.vScrollBar:
-            self.vScrollBar.ScrollValue(-arg__1.angleDelta().y())
-        else:
-            print(self.verticalScrollMode())
-            print(self.verticalScrollBar().singleStep())
-            return QListWidget.wheelEvent(self, arg__1)
+        self.vScrollBar.ScrollValue(-arg__1.angleDelta().y())
 
     def OnActionTriggered(self):
         if self.isLoadingPage:

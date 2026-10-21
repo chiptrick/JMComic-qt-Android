@@ -7,7 +7,7 @@ from functools import partial
 from PySide6 import QtWidgets, QtCore, QtGui
 from PySide6.QtCore import Qt, QSize, QEvent, Signal
 from PySide6.QtGui import QColor, QFont, QPixmap, QIcon, QCursor
-from PySide6.QtWidgets import QListWidgetItem, QLabel, QScroller, QPushButton, QMessageBox, QMenu, QListWidget, QFrame
+from PySide6.QtWidgets import QListWidgetItem, QLabel, QPushButton, QMessageBox, QMenu, QListWidget, QFrame
 
 from component.label.text_label import InstallTextSelect
 from component.layout.flow_layout import FlowLayout
@@ -79,8 +79,6 @@ class BookInfoView(QtWidgets.QWidget, Ui_BookInfo, QtTaskBase):
         self.listWidget.setFrameShape(QFrame.NoFrame)
         self.listWidget.setResizeMode(QListWidget.Adjust)
         self.listWidget.clicked.connect(self.OpenReadImg2)
-        if Setting.IsGrabGesture.value:
-            QScroller.grabGesture(self.epsListWidget, QScroller.ScrollerGestureType.LeftMouseButtonGesture)
         # QScroller.grabGesture(self.epsListWidget, QScroller.LeftMouseButtonGesture)
         # self.epsListWidget.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
         # self.epsListWidget.verticalScrollBar().setStyleSheet(QssDataMgr().GetData('qt_list_scrollbar'))
