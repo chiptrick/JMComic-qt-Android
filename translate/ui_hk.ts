@@ -744,39 +744,6 @@
     </message>
 </context>
 <context>
-    <name>Exit</name>
-    <message>
-        <location filename="../ui/component/ui_exit.ui" line="14"/>
-        <source>Form</source>
-        <translation>表單</translation>
-    </message>
-    <message>
-        <location filename="../ui/component/ui_exit.ui" line="23"/>
-        <source>退出</source>
-        <translation>退出</translation>
-    </message>
-    <message>
-        <location filename="../ui/component/ui_exit.ui" line="36"/>
-        <source>最小化到任务栏</source>
-        <translation>最小化到任務欄</translation>
-    </message>
-    <message>
-        <location filename="../ui/component/ui_exit.ui" line="49"/>
-        <source>不在每次弹出该窗口（可在设置中设置）</source>
-        <translation>不再每次彈出該窗口（可在設置中設置）</translation>
-    </message>
-    <message>
-        <location filename="../ui/component/ui_exit.ui" line="70"/>
-        <source>确定</source>
-        <translation>確定</translation>
-    </message>
-    <message>
-        <location filename="../ui/component/ui_exit.ui" line="73"/>
-        <source>Return</source>
-        <translation>Return</translation>
-    </message>
-</context>
-<context>
     <name>Favorite</name>
     <message>
         <location filename="../ui/ui_favorite.ui" line="14"/>
@@ -2278,16 +2245,6 @@
         <translation>代理</translation>
     </message>
     <message>
-        <location filename="../ui/ui_setting_new.ui" line="576"/>
-        <source>是否使用自定义缩放比例</source>
-        <translation>是否使用自定義縮放比例</translation>
-    </message>
-    <message>
-        <location filename="../ui/ui_setting_new.ui" line="591"/>
-        <source>缩放比例：</source>
-        <translation>縮放比例：</translation>
-    </message>
-    <message>
         <location filename="../ui/ui_setting_new.ui" line="1261"/>
         <source>Waifu2x设置</source>
         <translation>Waifu2x設置</translation>
@@ -2324,11 +2281,6 @@
         <translation>啟動時檢查更新</translation>
     </message>
     <message>
-        <location filename="../ui/ui_setting_new.ui" line="181"/>
-        <source>触控（重启生效）（如果出现点击图片位置错乱，请使用100%缩放）：</source>
-        <translation>觸控（重啟生效）（如果出現點擊圖片位置錯亂，請使用100%縮放）：</translation>
-    </message>
-    <message>
         <location filename="../ui/ui_setting_new.ui" line="220"/>
         <source>主题：</source>
         <translation>主題：</translation>
@@ -2347,11 +2299,6 @@
         <location filename="../ui/ui_setting_new.ui" line="240"/>
         <source>白</source>
         <translation>白</translation>
-    </message>
-    <message>
-        <location filename="../ui/ui_setting_new.ui" line="188"/>
-        <source>启用触控优化</source>
-        <translation>啟用觸控優化</translation>
     </message>
     <message>
         <location filename="../ui/ui_setting_new.ui" line="279"/>
@@ -2486,11 +2433,6 @@
         <translation>黑體</translation>
     </message>
     <message>
-        <location filename="../ui/ui_setting_new.ui" line="569"/>
-        <source>界面缩放显示（需重启生效）：</source>
-        <translation>界面縮放顯示（需重啟生效）：</translation>
-    </message>
-    <message>
         <location filename="../ui/ui_setting_new.ui" line="677"/>
         <source>封面显示大小（默认为100%）：</source>
         <translation>封面顯示大小（默認為100%）：</translation>
@@ -2603,21 +2545,6 @@
         <location filename="../ui/ui_setting_new.ui" line="1455"/>
         <source>Waifu2x看图模式</source>
         <translation>Waifu2x看圖模式</translation>
-    </message>
-    <message>
-        <location filename="../ui/ui_setting_new.ui" line="630"/>
-        <source>关闭设置</source>
-        <translation>關閉設置</translation>
-    </message>
-    <message>
-        <location filename="../ui/ui_setting_new.ui" line="637"/>
-        <source>关闭后退出</source>
-        <translation>關閉後退出</translation>
-    </message>
-    <message>
-        <location filename="../ui/ui_setting_new.ui" line="647"/>
-        <source>关闭后最小化到托盘</source>
-        <translation>關閉後最小化到托盤</translation>
     </message>
     <message>
         <location filename="../ui/ui_setting_new.ui" line="781"/>

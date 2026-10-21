@@ -744,39 +744,6 @@
     </message>
 </context>
 <context>
-    <name>Exit</name>
-    <message>
-        <location filename="../ui/component/ui_exit.ui" line="14"/>
-        <source>Form</source>
-        <translation>Form</translation>
-    </message>
-    <message>
-        <location filename="../ui/component/ui_exit.ui" line="23"/>
-        <source>退出</source>
-        <translation>Exit</translation>
-    </message>
-    <message>
-        <location filename="../ui/component/ui_exit.ui" line="36"/>
-        <source>最小化到任务栏</source>
-        <translation>Minimize to Taskbar</translation>
-    </message>
-    <message>
-        <location filename="../ui/component/ui_exit.ui" line="49"/>
-        <source>不在每次弹出该窗口（可在设置中设置）</source>
-        <translation>Do not show this window every time (can be changed in Settings)</translation>
-    </message>
-    <message>
-        <location filename="../ui/component/ui_exit.ui" line="70"/>
-        <source>确定</source>
-        <translation>OK</translation>
-    </message>
-    <message>
-        <location filename="../ui/component/ui_exit.ui" line="73"/>
-        <source>Return</source>
-        <translation>Return</translation>
-    </message>
-</context>
-<context>
     <name>Favorite</name>
     <message>
         <location filename="../ui/ui_favorite.ui" line="14"/>
@@ -2278,16 +2245,6 @@
         <translation>Proxy</translation>
     </message>
     <message>
-        <location filename="../ui/ui_setting_new.ui" line="576"/>
-        <source>是否使用自定义缩放比例</source>
-        <translation>Use Custom Scale Factor</translation>
-    </message>
-    <message>
-        <location filename="../ui/ui_setting_new.ui" line="591"/>
-        <source>缩放比例：</source>
-        <translation>Scale Factor:</translation>
-    </message>
-    <message>
         <location filename="../ui/ui_setting_new.ui" line="1261"/>
         <source>Waifu2x设置</source>
         <translation>Waifu2x Settings</translation>
@@ -2324,11 +2281,6 @@
         <translation>Check for Updates at Startup</translation>
     </message>
     <message>
-        <location filename="../ui/ui_setting_new.ui" line="181"/>
-        <source>触控（重启生效）（如果出现点击图片位置错乱，请使用100%缩放）：</source>
-        <translation>Touch Input (takes effect after restart; use 100% scale if image clicks are misaligned):</translation>
-    </message>
-    <message>
         <location filename="../ui/ui_setting_new.ui" line="220"/>
         <source>主题：</source>
         <translation>Theme:</translation>
@@ -2347,11 +2299,6 @@
         <location filename="../ui/ui_setting_new.ui" line="240"/>
         <source>白</source>
         <translation>Light</translation>
-    </message>
-    <message>
-        <location filename="../ui/ui_setting_new.ui" line="188"/>
-        <source>启用触控优化</source>
-        <translation>Enable Touch Optimization</translation>
     </message>
     <message>
         <location filename="../ui/ui_setting_new.ui" line="279"/>
@@ -2486,11 +2433,6 @@
         <translation>Black</translation>
     </message>
     <message>
-        <location filename="../ui/ui_setting_new.ui" line="569"/>
-        <source>界面缩放显示（需重启生效）：</source>
-        <translation>UI Scaling (requires restart):</translation>
-    </message>
-    <message>
         <location filename="../ui/ui_setting_new.ui" line="677"/>
         <source>封面显示大小（默认为100%）：</source>
         <translation>Cover Display Size (default: 100%):</translation>
@@ -2603,21 +2545,6 @@
         <location filename="../ui/ui_setting_new.ui" line="1455"/>
         <source>Waifu2x看图模式</source>
         <translation>Waifu2x Reader Mode</translation>
-    </message>
-    <message>
-        <location filename="../ui/ui_setting_new.ui" line="630"/>
-        <source>关闭设置</source>
-        <translation>Close Behavior</translation>
-    </message>
-    <message>
-        <location filename="../ui/ui_setting_new.ui" line="637"/>
-        <source>关闭后退出</source>
-        <translation>Exit on Close</translation>
-    </message>
-    <message>
-        <location filename="../ui/ui_setting_new.ui" line="647"/>
-        <source>关闭后最小化到托盘</source>
-        <translation>Minimize to Tray on Close</translation>
     </message>
     <message>
         <location filename="../ui/ui_setting_new.ui" line="781"/>
