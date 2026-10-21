@@ -701,6 +701,8 @@ if ($deferLine.Success) {
 }
 $backBtn = [regex]::Matches($app, "顶栏加了返回按钮").Count
 Check '⑧ 顶栏已加"返回"按钮(返回键到不了 Qt 时的兜底入口)' ($backBtn -ge 1) ("命中 $backBtn 次")
+$backShortcut = [regex]::Matches($app, "主窗口装了返回键快捷键").Count
+Check '⑧ 主窗口已装窗口级返回键快捷键(不依赖焦点)' ($backShortcut -ge 1) ("命中 $backShortcut 次")
 $appAlive = ((Adb shell pidof $Pkg) -join "").Trim()
 Check "⑩ 应用进程仍然存活(没有崩溃退出)" ($appAlive -ne "") ("pid=" + $appAlive)
 

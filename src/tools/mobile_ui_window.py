@@ -4,6 +4,7 @@ import os
 import shutil
 import time
 from PySide6.QtCore import QEvent, QObject, Qt
+from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import QApplication, QDialog, QToolButton, QWidget
 from tools.log import Log
 from tools.mobile_ui_base import *  # noqa: F401,F403
@@ -464,20 +465,7 @@ def HandleBackKey(mainView):
         # 5. 看图 -> 退出看图回到漫画详情页
         if getattr(mainView, "totalStackWidget", None) is not None \
                 and mainView.totalStackWidget.currentIndex() == 1 and readView is not None:
-            # Close() 会把 bookId/isLocal 清掉，先记下来
-            bookId = getattr(readView, "bookId", "") or ""
-            isLocal = bool(getattr(readView, "isLocal", False))
-            readView.Close()
-            # 回到漫画详情页：在线看书都是从详情页进来的，Close() 就回到详情页；
-            # 万一当前页不是详情页(自检直进等)，补切到这一本的详情页。
-            # 本地漫画没有在线详情页，回到本地列表即可。
-            if bookId and not isLocal:
-                stack = getattr(mainView, "subStackWidget", None)
-                cur = stack.currentWidget() if stack is not None else None
-                if cur is not None and cur not in (
-                        getattr(mainView, "bookInfoView", None),
-                        getattr(mainView, "bookInfoView2", None)):
-                    mainView.SwitchWidget(mainView.bookInfoView, bookId=bookId)
+            _ExitReader(mainView, readView)
             return _BackDone("close-reader")
 
         # 6. 页面栈回退一层(与左上角返回按钮一致)
@@ -508,6 +496,78 @@ def HandleBackKey(mainView):
     except Exception as es:
         Log.Error(es)
         return _BackDone("error")
+
+
+def _ExitReader(mainView, readView):
+    """ 退出看图，并且**确保**真的回到漫画详情页(本地漫画回本地列表)
+
+    readView.Close() 是一条长链：
+        AddHistory(存阅读历史/写库) -> ClearPixItem -> Clear(存设置、清任务、清下载)
+        -> QtOwner().CloseReadView()  ← 真正切页( totalStackWidget.setCurrentIndex(0) )
+    链上**任何一步**抛异常，切页那步就根本不会执行；而 HandleBackKey 外层的
+    except 又会把这次按键记成"已处理"(返回 True)，于是用户看到的正是
+    "在看图界面按返回键毫无反应"。所以这里不再依赖 Close() 自己切页：
+    先记状态，Close() 出错也继续兜底把页面切回去。
+    """
+    # Close() 会把 bookId/isLocal 清掉，先记下来
+    bookId = getattr(readView, "bookId", "") or ""
+    isLocal = bool(getattr(readView, "isLocal", False))
+    try:
+        readView.Close()
+    except Exception as es:
+        Log.Error(es)
+        Log.Warn("back: readView.Close() 抛异常，走兜底切页")
+    # 兜底 1：页面栈还停在看图(索引 1)就自己切回详情页那一层
+    try:
+        stack = getattr(mainView, "totalStackWidget", None)
+        if stack is not None and stack.currentIndex() == 1:
+            stack.setCurrentIndex(0)
+            Log.Warn("back: Close() 未切页，兜底 setCurrentIndex(0)")
+    except Exception as es:
+        Log.Error(es)
+    # 兜底 2：在线漫画补切到这一本的详情页(自检直进/详情页被换掉的情况)；
+    #         本地漫画没有在线详情页，停在本地列表即可。
+    if bookId and not isLocal:
+        try:
+            stack = getattr(mainView, "subStackWidget", None)
+            cur = stack.currentWidget() if stack is not None else None
+            if cur is not None and cur not in (
+                    getattr(mainView, "bookInfoView", None),
+                    getattr(mainView, "bookInfoView2", None)):
+                mainView.SwitchWidget(mainView.bookInfoView, bookId=bookId)
+        except Exception as es:
+            Log.Error(es)
+    return
+
+
+def InstallBackKeyShortcut(mainView):
+    """ 窗口级返回键快捷键：不管焦点在哪个子控件，返回键都先到这里
+
+    Qt 官方说明(Qt 6 Android platform notes "Back Key and Back Gesture")：
+    返回键只送给**当前有焦点的项**，而触摸界面经常没有任何项持有焦点
+    ("the back press never reaches it")，推荐的做法是绑一个**窗口级**快捷键；
+    没人接住时 Qt 会把应用切到后台(旧版本直接走关闭)，应用侧看起来就是
+    "按了没反应"。看图界面正好是纯触摸页(没有输入框/没有焦点控件)，是这条
+    规则最容易踩中的地方，所以这里给主窗口补一个不受焦点影响的后备入口。
+
+    与下面两条路径共存、互不重复：
+        * main_view.keyPressEvent / keyReleaseEvent(有焦点时的按键路径)
+        * 顶栏"返回"按钮(真机上连按键都到不了 Qt 时的可见入口)
+    HandleBackKey 开头的 _backLastTick 去抖保证一次按键只处理一次。
+    """
+    try:
+        if not IsEnabled() or getattr(mainView, "_jmBackShortcut", None) is not None:
+            return False
+        shortcut = QShortcut(QKeySequence(Qt.Key.Key_Back), mainView)
+        shortcut.setContext(Qt.ShortcutContext.WindowShortcut)
+        # 与 main_view.keyPressEvent/顶栏返回按钮共用同一个入口(去抖在 HandleBackKey 里)
+        shortcut.activated.connect(lambda: HandleBackKey(mobile_ui._mainView))
+        mainView._jmBackShortcut = shortcut
+        Log.Warn("mobile ui: 主窗口装了返回键快捷键(窗口级，不依赖焦点)")
+        return True
+    except Exception as es:
+        Log.Error(es)
+    return False
 
 
 def _BackDone(action):

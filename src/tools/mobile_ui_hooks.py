@@ -31,6 +31,7 @@ def Apply(mainView):
         # 装上"后建滚动区域自动接管"，后面建出来的列表/面板照样能手指滚动
         mobile_ui.InstallScrollWatcher(mainView)
         mobile_ui.SetupBackButton(mainView)
+        mobile_ui.InstallBackKeyShortcut(mainView)
         mobile_ui.InstallAppFilter(mainView)
         mobile_ui.InstallTouchGuard(mainView)
         mobile_ui.InstallWindowGuard(mainView)
