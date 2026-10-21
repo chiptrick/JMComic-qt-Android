@@ -1164,12 +1164,14 @@ touchTap(combo, QPointF(combo.width() / 2.0, combo.height() / 2.0))
 assert combo.view().isVisible(), "正常点按必须仍然弹出下拉列表(激活链路断了)"
 combo.hidePopup()
 app.processEvents()
-# 数值框：点它的"上箭头"应该加 1(激活走的是控件自己的按钮 click())
+# 数值框：点它的"上箭头"应该加一个步长(激活走的是控件自己的按钮 click())
+# 步长取控件自己的 singleStep：不同数值框的步长不同(封面大小是 10)，写死 +1 会误判
 upX = spin.width() - 6
 beforeValue = spin.value()
+step = spin.singleStep()
 touchTap(spin, QPointF(upX, 6))
-assert spin.value() == beforeValue + 1, \
-    "点数值框上箭头应该 +1, 实际 %d -> %d" % (beforeValue, spin.value())
+assert spin.value() == beforeValue + step, \
+    "点数值框上箭头应该 +%d, 实际 %d -> %d" % (step, beforeValue, spin.value())
 print("[ok] 正常点按仍然生效: 下拉框弹出列表, 数值框箭头 %d -> %d"
       % (beforeValue, spin.value()))
 
