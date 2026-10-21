@@ -3,6 +3,10 @@
 Android 移植用的脚本集合。**所有脚本都不写死本机路径**，公共路径由 `env.sh` / `env.ps1` 提供，
 见 [android/README.md 的 §9.5](../README.md#95-androidtools-的约定路径不写死脚本分两档)。
 
+> 构建失败先查 **[SKILL.md](SKILL.md)**：按「现象 → 原因 → 解决 → 验证」整理了从零搭环境
+> 到打出 arm64-v8a / x86_64 两个 APK 时踩过的坑（sdkmanager 清单失败、源码包断流、recipe 补丁过期、
+> libtool 宏缺失、minSdk/ndk_api 不一致、Gradle PKIX/OOM、产物校验与安装报错），末尾有照做清单与命令速查。
+
 ```bash
 # bash 脚本里(紧跟 shebang)
 . "$(dirname "${BASH_SOURCE[0]}")/env.sh"
