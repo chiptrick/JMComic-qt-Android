@@ -29,11 +29,20 @@
 android/
 ├── main.py                  # 打包入口(pyside6-android-deploy 要求叫 main.py)
 ├── pysidedeploy.spec        # 部署配置(Qt 模块/插件、wheel、local_libs)
-├── build_android.sh         # 一键构建：原生库 + 模型检查 + 打包 APK
+├── build_android.sh         # 一键构建：默认同时构建 arm64-v8a + x86_64 两个 APK
+├── build_arm64.sh           # 单架构构建：arm64-v8a(真机)，实际调 build_android.sh --abi arm64-v8a
+├── build_x86_64.sh          # 单架构构建：x86_64(模拟器)，实际调 build_android.sh --abi x86_64
+├── build_apk_from_windows.ps1   # Windows 一键(PowerShell -> WSL)，默认两种架构
+├── build_arm64.ps1          # Windows 单架构一键：arm64-v8a(经 WSL)
+├── build_x86_64.ps1         # Windows 单架构一键：x86_64(经 WSL)
 ├── README.md                # 本文档
 ├── app_src/                 # 构建时由 build_android.sh 从 ../src 复制(不入库)
 ├── libs/arm64-v8a/          # 原生库产物：libsr_qnn.so / libonnxruntime.so / QNN 库(不入库)
-├── wheels/                  # PySide6 / shiboken6 的 android_aarch64 wheel(不入库)
+├── libs/x86_64/             # x86_64(模拟器)原生库产物(不入库)
+├── dist/                    # APK 产物：JMComic-<版本>-<abi>-debug.apk(不入库)
+├── build_logs/              # 每个架构一份完整构建日志 build-<abi>.log(不入库)
+├── logs/                    # Windows 一键脚本的编排日志 build_apk_<时间戳>.log(不入库)
+├── wheels/                  # PySide6 / shiboken6 的 android wheel(不入库)
 ├── sr_qnn/                  # 高通 NPU 超分后端
 │   ├── __init__.py          # ctypes 封装，sr_vulkan 同构接口 + MODEL_* 常量
 │   ├── cpp/                 # libsr_qnn.so 源码(ONNX Runtime C API + QNN EP)
@@ -1045,19 +1054,99 @@ export ANDROID_HOME=$HOME/Android/Sdk
 export ANDROID_NDK_HOME=$HOME/Android/Sdk/ndk/26.1.10909125
 
 # Android wheel(Qt 6.12.0 abi3 + curl_cffi 0.16.3 cp314)：下载并 sha256 校验，放 android/wheels/
-bash android/tools/wsl_fetch_android_wheels.sh
+# (每个 ABI 一套；缺失时 build_android.sh 会按目标 ABI 自动 qtpip download)
+bash android/tools/wsl_fetch_android_wheels.sh                  # arm64-v8a
+JM_ABI=x86_64 bash android/tools/wsl_fetch_android_wheels.sh    # x86_64
 
-# 一键构建(会下载 onnxruntime-android-qnn、用 NDK 编 libsr_qnn.so、调用 pyside6-android-deploy)
+# 一键构建两种架构(arm64-v8a 真机 + x86_64 模拟器)，产物落 android/dist/：
+#   JMComic-<版本>-arm64-v8a-debug.apk / JMComic-<版本>-x86_64-debug.apk
+# (一个 APK 只含一种 ABI；某架构失败会打印 架构+步骤+原因，日志在 android/build_logs/build-<abi>.log)
 cd android && ./build_android.sh
 
-# 只改 python 代码时
+# 只构建某一个架构 / 只改 python 代码时
+./build_android.sh --abi x86_64
 SKIP_NATIVE=1 ./build_android.sh
 
-# 给 x86_64 模拟器出一版（详见 §10）
+# WSL 一体化流程(同步+wheel+打包+校验，等价 --abi)仍可用，详见 §10
 bash android/tools/wsl_build_apk.sh --abi x86_64
 
-adb install -r android/*.apk
+adb install -r android/dist/*.apk
 ```
+
+#### 5.0.1 Windows 一键构建(PowerShell -> WSL)
+
+不想开 WSL 手动敲命令的话，用 `android/build_apk_from_windows.ps1`：
+在 Windows 侧自检 WSL/发行版/路径，然后进入 WSL 按架构调用上面的构建流程，
+产物复制到输出目录(默认脚本所在目录 `android\`)，构建成功自动清理临时文件。
+
+```powershell
+# 先自检(不构建)：WSL/发行版/项目路径/构建树是否就绪
+powershell -ExecutionPolicy Bypass -File android\build_apk_from_windows.ps1 -DryRun
+
+# 一键构建两种架构(默认)，产物输出到脚本所在目录(android\)
+powershell -ExecutionPolicy Bypass -File android\build_apk_from_windows.ps1
+
+# 只构建模拟器包、指定发行版/输出目录/版本号
+powershell -ExecutionPolicy Bypass -File android\build_apk_from_windows.ps1 `
+    -Distro Ubuntu -Abi x86_64 -OutputDir D:\apk -AppVersion 0.52
+```
+
+要点：
+
+- **仓库根自动定位**：从脚本所在目录逐级向上找含 `android\build_android.sh` 的目录，
+  找不到再试当前工作目录；脚本被移动/复制到别处也能用，或用 `-ProjectPath` 显式指定。
+- **发行版自动检测**：不传 `-Distro` 时优先选 `Ubuntu`，只有一个发行版时直接用它；
+  传了则校验存在性，不存在会列出所有可用发行版。
+- **构建入口**：默认走 `tools/wsl_build_apk.sh`(按架构分别构建 + `wsl_collect_apk.sh`
+  自动收集回仓库)；`-BuildScript build_android.sh` 可改走 §5 的多架构脚本
+  (单次运行、产物取 `android\dist`)。
+- **产物与命名**：`JMComic-<版本>-<abi>-<buildtype>.apk`，与仓库现有产物一致。
+- **日志**：编排日志在 `android/logs/build_apk_<时间戳>.log`；每个架构的
+  详细构建日志归档到 `<输出目录>\logs\`；失败时保留临时目录(诊断信息)并给出重跑命令。
+- **失败处理**：默认某架构失败也继续构建其余架构，最后汇总(退出码 1)；
+  `-StopOnError` 可改成失败即停。退出码：0=全部成功，1=有架构失败，2=环境自检失败。
+- **注意**：构建是 wsl.exe 的前台子进程，**构建期间不要关终端**；
+  单架构冷构建约 40~60 分钟，缓存命中约 5 分钟。
+
+#### 5.0.2 单架构专用脚本(四个独立入口)
+
+每个架构有各自独立的入口脚本，架构在脚本内钉死，**不会下载/编译另一架构的
+wheel、AAR、原生库，也不会产出另一架构的 APK**；目标架构仍可用
+命令行参数或环境变量指定(只接受本脚本的架构，传错会报错并指路)：
+
+| 脚本 | 平台 | 架构 | 底层流程 |
+| --- | --- | --- | --- |
+| `android/build_arm64.ps1` | Windows(PowerShell) | arm64-v8a 真机 | WSL -> `tools/wsl_build_apk.sh --abi arm64-v8a` |
+| `android/build_x86_64.ps1` | Windows(PowerShell) | x86_64 模拟器 | WSL -> `tools/wsl_build_apk.sh --abi x86_64` |
+| `android/build_arm64.sh` | Linux/macOS | arm64-v8a 真机 | `build_android.sh --abi arm64-v8a` |
+| `android/build_x86_64.sh` | Linux/macOS | x86_64 模拟器 | `build_android.sh --abi x86_64` |
+
+```powershell
+# Windows：先自检(不构建)，再一键构建
+powershell -ExecutionPolicy Bypass -File android\build_arm64.ps1 -DryRun
+powershell -ExecutionPolicy Bypass -File android\build_arm64.ps1
+powershell -ExecutionPolicy Bypass -File android\build_x86_64.ps1 -AppVersion 0.52 -OutputDir D:\apk
+```
+
+```bash
+# Linux/macOS(WSL 内同理)
+cd android
+./build_arm64.sh  --dry-run     # 只校验+打印将执行的命令
+./build_arm64.sh  --version 0.52
+./build_x86_64.sh
+ABI=arm64-v8a ./build_arm64.sh  # 环境变量指定(等价默认)
+```
+
+共性行为：
+
+- **架构判断**：优先级 `--abi`/`-Abi` 参数 > `ABI` 环境变量 > 脚本默认架构；
+  接受别名(arm64/aarch64、x86-64/x64)。传另一架构会报错并提示对应的脚本，
+  传 `both`/`--abis` 会指路 `build_android.sh` / `build_apk_from_windows.ps1`。
+- **自检后失败即停**：PowerShell 版退出码 0=成功 / 1=构建失败 / 2=自检失败；
+  Shell 版沿用时 `build_android.sh` 的退出码。都支持 `--dry-run`/`-DryRun`
+  (只校验不构建)与 `-KeepTemp`(保留临时目录)。
+- **产物**：默认输出到脚本所在目录；PowerShell 版自动把 WSL 侧构建日志
+  归档到 `<输出目录>\logs\`，成功后清理临时目录，失败保留诊断信息。
 
 `build_android.sh` 会打印 `adb push` 模型的命令；如果希望模型直接打进 APK，
 用 `tools/patch_buildozer_spec.py --models android/sr_qnn/models` 把 `onnx/txt`
@@ -1066,6 +1155,58 @@ adb install -r android/*.apk
 带上这一步）。刻意不用 `android.add_assets`：那会往 APK 里再塞一份 ~200MB 的副本，
 而且 p4a 的 assets 只能通过 Qt 的 `assets:/` 或 Java AssetManager 读，原生
 `fopen` 打不开。
+
+#### 5.0.3 版本号参数(全部构建脚本通用)
+
+**参数命名与作用范围**
+
+| 脚本 | 命令行参数 | 环境变量 | 默认值来源 |
+| --- | --- | --- | --- |
+| `build_android.sh` | `--version <v>` | `APP_VERSION` | `tools/patch_buildozer_spec.py` 的 `AppVersion`(现为 0.49)，取不到再退 `0.1` |
+| `build_arm64.sh` / `build_x86_64.sh` | `--version <v>`(透传) | `APP_VERSION`(透传) | 同左(由 `build_android.sh` 提取) |
+| `build_apk_from_windows.ps1` | `-AppVersion <v>` | `APP_VERSION` | 同左(WSL 侧 `patch_buildozer_spec.py` 提取) |
+| `build_arm64.ps1` / `build_x86_64.ps1` | `-AppVersion <v>` | `APP_VERSION` | 同左 |
+
+优先级统一为：**命令行参数 > 环境变量 > 默认值**。四个单架构脚本在收到显式版本号时
+会先自行校验再透传；不传则由 `build_android.sh` / `patch_buildozer_spec.py` 提取
+默认值并校验——两层都校，非法值在动手前就会被拒。
+
+**格式规则(语义化版本的数字核心子集)**
+
+```
+MAJOR.MINOR            仓库沿用简写，如 0.51
+MAJOR.MINOR.PATCH      完整三段，如 1.2.3
+每段：纯数字、不允许前导零(段为 0 除外)
+不接受：-alpha.1 / +build.5 之类预发布/构建元数据后缀
+```
+
+为什么不让带后缀：该值会写进 `buildozer.spec` 的 `app.version`(即 Android
+versionName)，p4a 的 `get_android_numeric_version()` 再按 `"."` 切**数字段**推导
+versionCode(如 `0.1`/minSdk34 → `10341`)，带后缀会推导失败或产出错误 versionCode。
+
+**该参数在哪里被用到**
+
+- **版本输出**：每个脚本启动时打印 `版本号: <值>(来源: ...)`，构建结束汇总里再次出现。
+- **构建标识(APK 文件名)**：`buildozer.spec` 的 `app.version` 决定 p4a 的 dist 名，
+  产物即 `JMComic-<版本>-<abi>-<类型>.apk`(如 `JMComic-0.52-arm64-v8a-debug.apk`)。
+- **元数据生成**：`app.version` 即 APK 的 versionName；versionCode 由 p4a 从它推导。
+  **versionCode 只能往上改**——改小会让 `adb install -r` 报
+  `INSTALL_FAILED_VERSION_DOWNGRADE`，手机上必须先卸载。注意这是 Android 包版本，
+  与桌面端 `config.RealVersion`(上游版本号，用于检查更新)无关。
+
+**错误处理**
+
+- 不合法：任何脚本都在**动手前**报错退出——Shell 版退出码 1，PowerShell 版退出码 2，
+  `patch_buildozer_spec.py` 返回 2；错误信息含非法值、来源(参数/环境变量/默认值)、
+  规则说明与修正示例，且不会写进 `buildozer.spec`、不会启动构建。
+- 不传：用默认值，各环节照常校验与打印。
+- 示例：
+
+```bash
+./build_android.sh --version 1.2.3      # OK(三段)
+APP_VERSION=0.52 ./build_arm64.sh       # OK(环境变量)
+./build_android.sh --version 1.2-beta   # 拒绝: 不接受预发布后缀
+```
 
 ### 5.1 minSdk 34 与屏幕方向怎么落地
 

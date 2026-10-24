@@ -688,18 +688,18 @@ class ReadTool(QtWidgets.QWidget, Ui_ReadImg):
                 else:
                     self.scrollArea.GetScrollBar().Finished()
                 self.imgFrame.scrollArea.vScrollBar.scrollValue(value)
-            elif self.stripModel == ReadMode.LeftRightScroll:
-                if self.imgFrame.scrollArea.hScrollBar.value() >= self.imgFrame.scrollArea.hScrollBar.maximum():
+            elif self.stripModel in [ReadMode.LeftRightScroll, ReadMode.RightLeftScroll, ReadMode.RightLeftScroll2]:
+                # 横向自动滚动：左右滚动"前进=值增大"，右左滚动"前进=值减小"。
+                # 用 ForwardScrollDelta 统一换算，结束条件也跟着方向走(左右看
+                # maximum、右左看 minimum)，不再两种方向各写一遍。
+                bar = self.imgFrame.scrollArea.hScrollBar
+                step = ReadMode.ForwardScrollDelta(self.stripModel, value)
+                atEnd = bar.value() >= bar.maximum() if step > 0 else bar.value() <= bar.minimum()
+                if atEnd:
                     self.CloseScrollAndTurn()
                 else:
                     self.scrollArea.GetScrollBar().Finished()
-                self.imgFrame.scrollArea.hScrollBar.scrollValue(value)
-            elif self.stripModel in [ReadMode.RightLeftScroll, ReadMode.RightLeftScroll2]:
-                if self.imgFrame.scrollArea.hScrollBar.value() <= self.imgFrame.scrollArea.hScrollBar.minimum():
-                    self.CloseScrollAndTurn()
-                else:
-                    self.scrollArea.GetScrollBar().Finished()
-                self.imgFrame.scrollArea.hScrollBar.scrollValue(-value)
+                bar.scrollValue(step)
         else:
             self._NextPage()
         pass

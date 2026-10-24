@@ -21,19 +21,18 @@
        换到 QTabBar 上攒出的 scroller 从来不会被引擎认领 —— 宿主.cpp 上(CI 的 Linux
        和本机 Windows 结果一致)松手后 scroller.state() 一直是 Inactive，一点惯性都
        没有。与其留一条"看运气"的路，不如自己算：跨平台逐 pixel 行为完全一致。
-    4. 滑块/滚动条/输入框(需要真鼠标按下语义的控件) —— 不认领触控，让 Qt 自己
+    4. 滑块/滚动条/只读文本框(需要真鼠标按下语义的控件) —— 不认领触控，让 Qt 自己
        合成鼠标(Qt::AA_SynthesizeMouseForUnhandledTouchEvents 的原生兼容路径)：
-       拖把手/光标/选区/输入法照旧可用。只读文本框(评论/简介/日志，_jmTextSelect
-       标记)也走这条路：选中文本被改成"触摸长按才允许"(全选+复制菜单，见
+       拖把手/选区照旧可用。只读文本框(评论/简介/日志，_jmTextSelect 标记)也走这条
+       路：选中文本被改成"触摸长按才允许"(全选+复制菜单，见
        component.label.text_label)，滑动不再误选文字，鼠标点按/拖选原样保留。
-       文本输入框(QLineEdit/QTextEdit/QPlainTextEdit)另走 "input" 通道：同样不
-       认领，但会登记这次按下，抬手时兜底确认"真的聚焦了没有" —— 见 OnInputPress/
-       _FocusInput。这条兜底是给"合成鼠标根本没发生"的情况准备的：
-         * 同一时刻还有别的触点被认领(双指/残留序列)，事件被整条吞掉；
-         * 父级滚动区的 QScroller 把手势判成滚动，合成本身被抑制；
-         * 输入框上盖了别的东西/分类落到父级，合成出来的 press 没落在它身上。
-       兜底只在**确实没聚焦**时才动(已聚焦就一个分支都不进)，所以不会造成
-       "再聚焦一次→双击选词→把内容选中覆盖"这类新问题。
+       文本输入框(QLineEdit/QTextEdit/QPlainTextEdit)原本也走这条路，现在改成
+       "input" 通道 —— **认领触控**，抬手时自己结算(见 OnInputPress/_FocusInput)：
+       放行合成的代价是平台层的 click-focus 在**按下那一刻**就把输入框聚焦、把系统
+       输入法弹出来(那是 QWidgetWindow 在投递之前做的，控件自己的 eventFilter 拦不住)，
+       于是"在文本框上滑一下"= 键盘弹出 + 可能拖出一段选区。认领之后 Qt 不再合成
+       鼠标：点按 -> 聚焦 + 光标落到手指位置 + 弹输入法；滑动 -> 什么都不做。
+       只读的照样不认领(它们不弹输入法)。
     5. 看图控件(QGraphicsView) —— 见 mobile_ui_reader，同样纯触控
        (拖动滚动/双指缩放/点按三分区都在 QTouchEvent 上实现)。
 
@@ -62,11 +61,21 @@
     * `_ScrollWatcher`(App 级过滤器) —— 听 ChildAdded/ChildPolished，建立即接管
       (顺带接管新标签条的横划)
     * `_TouchRouter.OnTouch` 里的 `_AdoptScrollArea` —— 手指按上去时兜底补装
+
+另外还有一层兜底(`_TapGate`)：上面这套只对"路由认领得到的触控序列"生效。下面这些
+路径 Qt 会走"未消费触控 -> 当场合成鼠标"，点击由控件自己的 mouseRelease 完成，路由
+完全看不见：Qt::Popup 弹窗里的控件(下拉选项框弹出来的列表)、不在已接管滚动区里的
+控件、以及真机上 QScroller 抢先把整条触控序列拿走的那几帧。所以在选项框(勾选框、
+单选、下拉框，以及下拉弹出来的列表)自己身上还挂了一道"点按门卫"：判据和路由同一套，
+按下到松手(含中途最远点)的位移 > TouchSlopPx 就吞掉这次松手，并把按钮按下态复位，
+点击不会发生；只对 `MouseEventSynthesizedByQt` 的鼠标事件生效，桌面真鼠标不受影响。
+真机现象"在分流设置页选项框附近滑一下，选项就被切掉了"就是这条路径，见 TapGateStats。
 """
 import time
 
 from PySide6.QtCore import QEvent, QObject, QPoint, QPointF, Qt, QTimer
-from PySide6.QtGui import QEventPoint, QGuiApplication, QInputDevice, QPointingDevice, QWheelEvent
+from PySide6.QtGui import (QEventPoint, QGuiApplication, QInputDevice, QMouseEvent,
+                           QPointingDevice, QWheelEvent)
 from PySide6.QtWidgets import (QAbstractButton, QAbstractItemView,
                                QAbstractScrollArea, QAbstractSpinBox, QApplication,
                                QComboBox, QGraphicsView, QLineEdit, QPlainTextEdit,
@@ -355,12 +364,15 @@ def _InputTarget(widget):
     return None
 
 
-def _FocusInput(edit, globalPos):
+def _FocusInput(edit, globalPos, placeCursor=False):
     """ 兜底：让输入框拿到焦点，并把光标落到手指点的位置
 
     只在"这次点按确实没让控件聚焦"时调用(见 _TouchRouter._finalize)：
     Qt 原生合成成功时输入框已经聚焦、光标/选区都是 Qt 自己的结果，这里直接返回，
     绝不重复聚焦(重复聚焦会变成双击选词，下一次输入就把原内容整个覆盖掉)。
+
+    placeCursor=True 是给"按下被门卫扣住了"的那条路用的：这时控件根本没收到
+    press，已经聚焦也**要**把光标挪到手指位置(这就是点一下输入框该有的结果)。
     """
     try:
         if edit is None or not _WidgetAlive(edit):
@@ -370,7 +382,18 @@ def _FocusInput(edit, globalPos):
         if _InPopup(edit):
             return False
         if edit.hasFocus():
-            return False                    # Qt 自己已经办好了：不碰光标/选区
+            if not placeCursor:
+                return False                # Qt 自己已经办好了：不碰光标/选区
+            point = QPoint(int(globalPos.x()), int(globalPos.y()))
+            if isinstance(edit, QLineEdit):
+                edit.deselect()
+                edit.setCursorPosition(edit.cursorPositionAt(edit.mapFromGlobal(point)))
+            else:
+                viewport = edit.viewport() if edit.viewport() is not None else edit
+                cursor = edit.cursorForPosition(viewport.mapFromGlobal(point))
+                cursor.clearSelection()
+                edit.setTextCursor(cursor)
+            return True
         edit.setFocus(Qt.FocusReason.MouseFocusReason)
         point = QPoint(int(globalPos.x()), int(globalPos.y()))
         if isinstance(edit, QLineEdit):
@@ -387,7 +410,7 @@ def _FocusInput(edit, globalPos):
                 method.show()               # Android: 让系统输入法弹出来
         except Exception:
             pass
-        Log.Warn("touch: 输入框兜底聚焦 {} (合成鼠标没有落到它身上)".format(_DescribeWidget(edit)))
+        Log.Warn("touch: 输入框聚焦 {} (光标落在手指位置)".format(_DescribeWidget(edit)))
         return True
     except Exception as es:
         Log.Error(es)
@@ -441,6 +464,12 @@ def _Activate(widget, globalPos):
                 node.click()
                 return _DescribeWidget(node)
             if isinstance(node, QComboBox):
+                # 弹出的列表是 Qt::Popup(独立窗口)，触控路由按设计不进弹窗 ——
+                # 给它挂上"滑动不选中"门卫，否则在列表里滑一下就把某项选了
+                try:
+                    MarkTapGate(node.view(), force=True)
+                except Exception:
+                    pass
                 try:
                     if node.view().isVisible():
                         node.hidePopup()
@@ -668,8 +697,8 @@ class _TouchRouter(QObject):
         "reader"   -> 看图控件(有自己的触控处理，这里完全不插手)
         "native"   -> 需要真鼠标按下语义的控件(滑块/滚动条/只读文本框)：
                       不认领触控，Qt 原生"未消费触控->鼠标"合成照常工作
-        "input"    -> 文本输入框：同 native(不认领、不吞事件)，额外登记这次按下，
-                      抬手时兜底确认聚焦(见 _FocusInput)
+        "input"    -> 文本输入框：认领触控(否则 Qt 合成的按下会当场聚焦+弹键盘)，
+                      抬手时点按走 _FocusInput、滑动什么都不做
         """
         node = widget
         while node is not None:
@@ -681,6 +710,11 @@ class _TouchRouter(QObject):
                 # 和输入框同款待遇：不认领触控、放 Qt 原生合成 —— 合成出来的
                 # press/release 由门卫放行(点链接/光标)，move 由门卫拦掉(不选中)，
                 # 滚动仍由 QScroller 在触控层提供，互不干扰。
+                return "native"
+            if isinstance(node, (QSlider, QScrollBar)):
+                # 滑块/滚动条必须走真正的"按下-拖动"语义，合成鼠标不能省。这条要
+                # 排在 _InputTarget 之前：多行输入框/列表的滚动条往上找会先撞到它的
+                # 宿主控件，于是"拖滚动条"被当成"在输入框上滑动"（审计脚本抓到的）。
                 return "native"
             edit = _InputTarget(node)
             if edit is not None:
@@ -763,8 +797,9 @@ class _TouchRouter(QObject):
             self.OnPress(obj, point, event)
 
         # 2) 位移跟踪 / 松手结算
-        # 只有"认领过的"触点才吞事件：输入框/滑块这类 native 序列从来不认领，
-        # 不能因为表里还有别的触点就把它们的事件也一起吃掉(Qt 的合成依赖它)。
+        # 只有"认领过的"触点才吞事件：滑块/滚动条/只读文本这类 native 序列不认领
+        # (它们的按下语义只能由 Qt 原生合成提供)，不能因为表里还有别的触点就
+        # 把它们的事件也一起吃掉。
         handled = False
         for point in points:
             seq = self._seqs.get(point.id())
@@ -783,9 +818,9 @@ class _TouchRouter(QObject):
             if claimed:
                 handled = True
         if eventType == QEvent.Type.TouchBegin:
-            # 按下这一趟必须看**整条事件**：只要有一个新触点没被认领(输入框/滑块)，
-            # 就不能吞 —— 一吞，Qt 的"未消费触控->鼠标"合成就不会发生，输入框点不进去。
-            # 只有全部触点都被认领(纯按钮/勾选框的多指)才整条吞掉。
+            # 按下这一趟必须看**整条事件**：只要有一个新触点没被认领(滑块/滚动条/
+            # 只读文本)，就不能吞 —— 一吞，Qt 的"未消费触控->鼠标"合成就不会发生，
+            # 那些控件就再也没有按下语义了。只有全部触点都被认领才整条吞掉。
             pressed = []
             for point in points:
                 try:
@@ -803,7 +838,7 @@ class _TouchRouter(QObject):
         if seq is not None:
             self._UnwatchScroller(seq)
             self.Stales += 1
-            # 输入框序列本来就不认领事件，抬手没收到也只是清个表，不用刷日志
+            # 没认领的序列(滑块等)抬手没收到也只是清个表，不用刷日志
             if seq.get("claimed", True):
                 Log.Warn("touch: 丢弃残留触点序列 {} ({})".format(
                     pid, _DescribeWidget(seq.get("widget"))))
@@ -844,8 +879,19 @@ class _TouchRouter(QObject):
             if not _InTouchArea(widget):
                 return
         if mode == "input":
+            # 输入框**也要认领**这条触控(以前故意放行让 Qt 合成鼠标，见下面的说明)。
+            # 放行的代价是：Qt 把触控合成成鼠标时，QWidgetWindow 在**投递之前**就按
+            # "点了一下"给它聚焦(平台层的 click-focus，控件自己的 eventFilter 拦不住)，
+            # 真机现象就是"在分流设置页的代理地址/DoH 地址这些文本框上滑一下，
+            # 键盘弹出来了"。认领之后 Qt 不再合成任何鼠标，抬手时:
+            #   点按 -> _FocusInput(聚焦 + 光标落到手指位置 + 弹输入法)
+            #   滑动 -> 什么都不做，滚动照旧由 QScroller 完成
             self.OnInputPress(point, pos, widget)
-            return
+            try:
+                event.accept()
+            except Exception:
+                pass
+            return True
         if mode == "native":
             return
         if self.DryRun:
@@ -855,7 +901,10 @@ class _TouchRouter(QObject):
             return
         seq = {"id": point.id(), "widget": widget, "mode": mode, "press": pos,
                "last": pos, "moved": False, "bar": None, "conn": None,
-               "claimed": True, "tick": time.monotonic()}
+               "claimed": True, "tick": time.monotonic(),
+               # worst = 按下以来最远的位移：判定"滑动过"用最远点，不用松手点
+               # (手指划出去再划回来，松手点几乎回到按下点，只看松手点会误判成点按)
+               "worst": 0.0}
         if mode == "tabbar":
             bar = _TabBarAncestor(widget) if not isinstance(widget, QTabBar) else widget
             if bar is None:
@@ -879,21 +928,25 @@ class _TouchRouter(QObject):
         return
 
     def OnInputPress(self, point, pos, widget):
-        """ 文本输入框按下：**不认领、不吞事件**，只登记这次按下
+        """ 文本输入框按下：登记这次按下(触控由调用方认领，见 OnPress)
 
-        输入框的光标位置/选区/输入法全部由 Qt 把触控合成成鼠标后交给控件自己办，
-        所以这里绝不能 accept()。登记是为了抬手时做一次"到底聚焦了没有"的兜底
-        (见 _finalize -> _FocusInput)：合成被别的触点/滚动区/焦点策略挡掉时，
-        用户看到的就是"点了输入框没反应、打不了字"。
+        以前这里"不认领、让 Qt 合成鼠标"，由控件自己办聚焦/光标/输入法；代价是
+        平台层的 click-focus 在**按下那一刻**就生效，滑动还没判定完键盘已经弹起来了
+        (见 OnPress 里的说明)。现在改成认领 + 抬手结算：
+            * 点按 -> _FocusInput 聚焦、光标落到手指位置、弹输入法(Qt 自己的 API)
+            * 滑动 -> 什么都不做
         """
         edit = _InputTarget(widget)
         if edit is None:
             return
+        # 兜底：万一这个输入框还没挂门卫(建得太晚/不在扫描范围)，第一次被手指
+        # 按到时就地补挂 —— 下一个 press 起就由它把关
+        MarkTapGate(edit)
         now = time.monotonic()
         self._seqs[point.id()] = {
             "id": point.id(), "widget": edit, "mode": "input", "press": pos,
             "last": pos, "moved": False, "bar": None, "conn": None,
-            "claimed": False, "tick": now}
+            "claimed": True, "tick": now, "worst": 0.0}
         self.Inputs += 1
         self.LastInput = _DescribeWidget(edit)
         return
@@ -914,11 +967,18 @@ class _TouchRouter(QObject):
             owner = self
 
             def OnState(state, _seq=seq, _owner=owner):
-                if state != QScroller.State.Inactive and state != QScroller.State.Pressed:
+                # 只认 Dragging(手指正在拖)。Scrolling 是**上一次**松手后的惯性，
+                # 它在下一次点按期间还会自己走一段 —— 按它判会把紧随其后的
+                # 正常点按全吃掉(真机上表现就是"滑动之后第一下点不动")。
+                if state == QScroller.State.Dragging:
                     _owner._MarkMoved(_seq)
 
             scroller.stateChanged.connect(OnState)
             seq["conn"] = (scroller, OnState)
+            # 这里**不**看"连上那一刻的当前状态"：手指刚按下时状态还停在上一轮
+            # 手势留下的 Dragging/Scrolling 上(真机/宿主都能复现)，按它判会把
+            # 紧接着的正常点按吞掉。Dragging 一定是**按下之后**手指真的移动了
+            # 才会发生，那时信号已经连上了，收得到。
         except Exception:
             return
 
@@ -943,7 +1003,13 @@ class _TouchRouter(QObject):
         return
 
     def OnMove(self, seq, pos):
-        if not seq["moved"] and (pos - seq["press"]).manhattanLength() > TouchSlopPx:
+        # 位移记的是"离按下点最远到过哪"(worst)，不是"现在离按下点多远"：
+        # 手指划出去再划回原点时，松手点和按下点几乎重合，只看松手点会把
+        # 这次滑动判成点按 —— 均衡手感的用户"往回修一点再松手"就正好命中。
+        distance = (pos - seq["press"]).manhattanLength()
+        if distance > seq.get("worst", 0.0):
+            seq["worst"] = distance
+        if not seq["moved"] and distance > TouchSlopPx:
             self._MarkMoved(seq)
         if seq["mode"] == "tabbar" and seq["bar"] is not None:
             # 横划跟手(含抬手后的惯性)：全在 _TabSwipe 自己的触控轨迹上算
@@ -964,9 +1030,12 @@ class _TouchRouter(QObject):
     def _finalize(self, seq, pos):
         mode = seq["mode"]
         widget = seq["widget"]
-        # 滑动判定三保险：跟踪到的位移 / 松手位置离按下点 / QScroller 活过没有
+        # 滑动判定三保险：跟踪到的最远位移 / 松手位置离按下点 / QScroller 活过没有
         # (QScroller 认领会吞掉中途的 TouchUpdate，后两条兜住这种情况)
-        if (pos - seq["press"]).manhattanLength() > TouchSlopPx:
+        distance = (pos - seq["press"]).manhattanLength()
+        if distance > seq.get("worst", 0.0):
+            seq["worst"] = distance
+        if distance > TouchSlopPx:
             self._MarkMoved(seq)
         if self._multi or seq["moved"]:
             # 滑动(或多指)：什么都不激活 —— 滚动由 QScroller 自己完成
@@ -982,10 +1051,11 @@ class _TouchRouter(QObject):
         if mode == "tabbar" and seq["bar"] is not None:
             self._tabSwipe.NoteEnd(seq["bar"])
         if mode == "input":
-            # 输入框点按：Qt 原生的合成鼠标此刻还没发生(应用级过滤器先于控件分发)，
-            # 等这一轮事件循环结束再确认；已经聚焦就什么都不做。
+            # 输入框点按：触控被我们认领了，Qt 不会合成鼠标，聚焦/光标/输入法
+            # 由这里补上(placeCursor=True：已经聚焦也要把光标挪到手指位置)。
+            # 推到这一轮事件循环之后再动焦点，避免在输入事件处理中重入。
             press = seq["press"]
-            QTimer.singleShot(0, lambda w=widget, p=press: _FocusInput(w, p))
+            QTimer.singleShot(0, lambda w=widget, p=press: _FocusInput(w, p, placeCursor=True))
             return
         if mode == "spin":
             # 数值框点按：编辑区聚焦+弹输入法(可键入)，上下箭头才走 stepBy
@@ -1016,14 +1086,334 @@ class _TouchRouter(QObject):
 # (否则 TouchBegin 只会在它们的**父级**上投递，扣不住 press 语义，
 #  Qt 的 focus-follow 也认不出手指下的控件)
 _TapClassWidgets = (QAbstractButton, QComboBox, QAbstractSpinBox, QTabBar)
+# 门卫要覆盖的控件(文本框单独一类：处理方式不同，见 _TapGate)
+_InputWidgets = (QLineEdit, QTextEdit, QPlainTextEdit)
+_GateWatchClasses = _TapClassWidgets + _InputWidgets
+
+
+# ---------------------------------------------------------------------------
+# 第二层：合成鼠标的点按门卫(触控路由够不着的那几条路径)
+# ---------------------------------------------------------------------------
+
+def _IsSynthesizedMouse(event):
+    """ 这条鼠标事件是不是 Qt 从触控合成出来的(桌面上真鼠标点击返回 False) """
+    try:
+        return event.source() == Qt.MouseEventSource.MouseEventSynthesizedByQt
+    except Exception:
+        return False
+
+
+def _MouseGlobalPos(event):
+    try:
+        return QPointF(event.globalPosition())
+    except Exception:
+        try:
+            return QPointF(event.globalPos())
+        except Exception:
+            return None
+
+
+# ---------------------------------------------------------------------------
+# 文本输入框：合成鼠标的按下**先扣住**，判定是滑动就什么都不做
+# ---------------------------------------------------------------------------
+#
+# 真机现象：在分流设置页"代理地址/DoH 地址"这些文本框上(或紧挨着的行里)滑动，
+# 页面确实滚了，但输入框同时也被聚焦、系统输入法**弹出来**，有时候还把里面的
+# 文字拖出一段选区。
+#
+# 主路径已经由路由解决(见 OnPress 的 "input" 分支：认领触控，Qt 不再合成鼠标)。
+# 这一层管的是路由**够不着**的那几条路(Qt::Popup 里的输入框、不在已接管滚动区里的
+# 输入框、真机上 QScroller 抢走整条序列的那几帧)：在那里 Qt 仍然会合成鼠标，
+# 而 QWidgetWindow 在投递之前就按"点了一下"给它聚焦了 —— 控件自己的过滤器拦不住
+# 那一步，所以这里只能在投递这一侧自救：
+#   * 合成鼠标的 press/move **先扣住不给控件**(不让它按左键扩选区、不让它收到
+#     手势序列里的移动)，抬手时再判
+#   * 位移 <= TouchSlopPx -> 点按：把这次按下/松手**补回**给控件(Qt 自己的光标/选区
+#     语义)，再补一次聚焦+弹输入法(平台层的 click-focus 在补发这条路上不会发生)
+#   * 位移 >  TouchSlopPx -> 滑动：什么都不补
+# 只读文本框不在这里管(它们不弹输入法，选中交给 TextSelectGate 的长按门卫)。
+
+def _InputEditOf(widget):
+    """ 控件(或其 viewport)属于哪个**可编辑**文本输入框；不是则 None
+
+    QTextEdit/QPlainTextEdit 的鼠标事件其实落在自己的 viewport 上，所以从
+    viewport 也要能找回它的宿主控件。下拉框/数值框内部那条 QLineEdit 不算
+    独立输入框(它们的点按语义是 showPopup()/stepBy())。
+    """
+    try:
+        if isinstance(widget, QLineEdit):
+            if isinstance(widget.parentWidget(), (QComboBox, QAbstractSpinBox)):
+                return None
+            return widget
+        if isinstance(widget, (QTextEdit, QPlainTextEdit)):
+            return widget
+        parent = widget.parentWidget() if widget is not None else None
+        if isinstance(parent, (QTextEdit, QPlainTextEdit)):
+            return parent
+    except Exception:
+        return None
+    return None
+
+
+def _IsInputGateTarget(widget):
+    """ 这个控件要不要挂"输入框版"门卫(可编辑文本框本身或其 viewport) """
+    edit = _InputEditOf(widget)
+    if edit is None:
+        return False
+    try:
+        return not edit.isReadOnly()
+    except Exception:
+        return False
+
+
+def _GateInstallTarget(widget):
+    """ 门卫要挂在"真正收鼠标事件"的那个控件上(QTextEdit 是它的 viewport) """
+    try:
+        if isinstance(widget, (QTextEdit, QPlainTextEdit)):
+            viewport = widget.viewport()
+            return viewport if viewport is not None else widget
+    except Exception:
+        pass
+    return widget
+
+
+class _TapGate(QObject):
+    """ 选项框点按门卫：**滑动不点击，点按照常**(判据与触控路由同一套)
+
+    为什么路由之外还要这一层：`_TouchRouter` 只对"它认领得到的触控序列"生效。
+    下面这些路径 Qt 会走"未消费触控 -> 当场合成鼠标"，点击由控件自己的
+    mouseRelease 完成，路由完全看不见：
+
+        * Qt::Popup 弹窗里的控件(下拉选项框弹出来的列表) —— 路由按设计不进来
+        * 控件不在任何"已接管手指滚动"的滚动区里(路由 _InTouchArea 之外)
+        * 真机上 QScroller 先把整条触控序列拿走，路由只拿到按下/松手两个点
+
+    真机现象就是"在选项框附近滑一下，选项被切掉了"：合成鼠标的 press 落在选项框
+    上，手指滑了几十像素、松手时**却还在它的可点击矩形里** —— 分流页的选项框被整行
+    拉伸到 370~390px 宽(QRadioButton 的可点击矩形就是整个控件；QCheckBox 是
+    "指示器+文字"那块，文案越长窗口越宽)，QAbstractButton 就按"点了一下"处理。
+
+    判据(与路由一致)：按下到松手(含中途最远点)的位移 > TouchSlopPx 就算滑动。
+    成立就把这次 release 吞掉、把按钮的按下态复位 —— 点击不会发生。
+    (不用"滚动位置变没变"来判：松手后的惯性会让滚动条在下一次点按期间继续走，
+     按这个判会把紧随其后的正常点按全部吃掉。)
+    只看 source()==MouseEventSynthesizedByQt 的事件：桌面鼠标的按下/拖选行为不变。
+
+    文本输入框(QLineEdit/QTextEdit)是另一种处理：它们的聚焦/光标/拖选全在 **press**
+    里发生，光扣 release 不够(键盘在按下那一刻就弹了)，所以 press 也先扣住，
+    判定是点按才把"按下+松手"补回给控件(见 _InputEditOf/_ReplayInput)。
+
+    统计面(Count/Last + InputSuppressed)给宿主回归与真机自检看。
+    """
+
+    Count = 0
+    Last = ""
+    InputSuppressed = 0
+    LastInput = ""
+
+    def __init__(self, widget):
+        super().__init__(widget)
+        self._press = None
+        self._worst = 0.0
+        self._dragged = False
+        self._replaying = False
+
+    # -- 状态 --------------------------------------------------------------
+    def Reset(self):
+        self._press = None
+        self._worst = 0.0
+        self._dragged = False
+        return
+
+    # -- 事件 --------------------------------------------------------------
+    def eventFilter(self, obj, event):
+        try:
+            eventType = event.type()
+            if eventType == QEvent.Type.MouseButtonPress:
+                return self.OnPress(obj, event)
+            if eventType == QEvent.Type.MouseMove:
+                return self.OnMove(obj, event)
+            if eventType == QEvent.Type.MouseButtonRelease:
+                return self.OnRelease(obj, event)
+        except Exception as es:
+            Log.Error(es)
+            self.Reset()
+        return False
+
+    def OnPress(self, obj, event):
+        if self._replaying:
+            # 我们自己补发的那一对(点按)别被自己拦回去
+            return False
+        self.Reset()
+        if not _IsSynthesizedMouse(event):
+            # 真鼠标/触控板：完全不插手
+            return False
+        pos = _MouseGlobalPos(event)
+        if pos is None:
+            return False
+        self._press = pos
+        if isinstance(obj, QComboBox):
+            # 下拉框在按下时就弹列表了：顺手给弹出的列表也挂上门卫，
+            # 否则"在列表里滑一下就把某项选中"照样会发生
+            try:
+                MarkTapGate(obj.view(), force=True)
+            except Exception:
+                pass
+        if _IsInputGateTarget(obj):
+            # 文本框：按下这一刻就聚焦+弹输入法+起选区，所以这个 press 先扣住，
+            # 等抬手判定完再决定要不要补回给控件(见 OnRelease)
+            return True
+        return False                    # 放行：按下视觉/焦点照旧由控件自己处理
+
+    def OnMove(self, obj, event):
+        if self._press is None:
+            return False
+        pos = _MouseGlobalPos(event)
+        if pos is not None:
+            self._Track(pos)
+        if self._worst > TouchSlopPx:
+            self._MarkDragged(obj)
+        if _IsInputGateTarget(obj):
+            # 输入框的 move 也要扣：(QLineEdit 只认"左键按着"就顺着锚点扩选区，
+            # 它并不检查自己有没有收到 press) 放过去就等于用滑动拖出一段选区。
+            return True
+        return False
+
+    def OnRelease(self, obj, event):
+        if self._replaying or self._press is None:
+            # 按下没被我们看见(例如按下时路由认领了触控)：这次松手不管
+            return False
+        pos = _MouseGlobalPos(event)
+        if pos is not None:
+            self._Track(pos)
+        dragged = self._dragged or self._worst > TouchSlopPx
+        edit = _InputEditOf(obj)
+        press = self._press
+        self.Reset()
+        if edit is not None and not edit.isReadOnly():
+            # 文本框：press 已经被我们扣住了，两种收尾都要自己处理
+            if dragged:
+                self._SuppressInput(edit)
+            else:
+                self._ReplayInput(edit, press)
+            return True
+        if not dragged:
+            return False                # 正常点按：交给控件自己的 mouseRelease
+        self._Suppress(obj)
+        return True                     # 吞掉松手：click/toggled 不会发生
+
+    def _ReplayInput(self, edit, press):
+        """ 点按：把被扣下的按下/松手补回给控件，光标落点/选区/聚焦/输入法全走 Qt 自己 """
+        self._replaying = True
+        try:
+            target = _GateInstallTarget(edit)
+            local = QPointF(target.mapFromGlobal(QPoint(int(press.x()), int(press.y()))))
+            for eventType, buttons in (
+                    (QEvent.Type.MouseButtonPress, Qt.MouseButton.LeftButton),
+                    (QEvent.Type.MouseButtonRelease, Qt.MouseButton.NoButton)):
+                event = QMouseEvent(eventType, local, QPointF(local), QPointF(press),
+                                    Qt.MouseButton.LeftButton, buttons,
+                                    Qt.KeyboardModifier.NoModifier,
+                                    Qt.MouseEventSource.MouseEventSynthesizedByQt)
+                QApplication.sendEvent(target, event)
+        except Exception as es:
+            Log.Error(es)
+        finally:
+            self._replaying = False
+        # 补发的 press 走的是 sendEvent，平台层那一步 click-focus 不会发生：
+        # 聚焦 + 弹输入法在这里补上(光标/选区已经由上面的 press 落好了)
+        _FocusInput(edit, press, placeCursor=False)
+        return
+
+    def _SuppressInput(self, edit):
+        """ 滑动收尾：输入框既没聚焦也没弹键盘(按下根本没发给它)，只记一笔 """
+        _TapGate.InputSuppressed += 1
+        _TapGate.LastInput = _DescribeWidget(edit)
+        Log.Warn("touch: 滑动松手未触发输入框 {}".format(_TapGate.LastInput))
+        return
+
+    # -- 内部 --------------------------------------------------------------
+    def _Track(self, pos):
+        distance = (pos - self._press).manhattanLength()
+        if distance > self._worst:
+            self._worst = distance
+        return
+
+    def _MarkDragged(self, obj):
+        if self._dragged:
+            return
+        self._dragged = True
+        if isinstance(obj, QComboBox):
+            # 已经弹出来的列表：这次是在滑动，不是在挑选项，直接收起来
+            try:
+                if obj.view().isVisible():
+                    obj.hidePopup()
+            except Exception:
+                pass
+        return
+
+    def _Suppress(self, obj):
+        """ 滑动收尾：把控件"被按着"的状态复位，统计+日志 """
+        try:
+            if isinstance(obj, QAbstractButton):
+                obj.setDown(False)      # 松手被吞掉了，按下态得自己复位
+        except Exception:
+            pass
+        _TapGate.Count += 1
+        _TapGate.Last = _DescribeWidget(obj)
+        Log.Warn("touch: 滑动松手未触发控件(合成鼠标) {}".format(_TapGate.Last))
+        return
+
+
+def TapGateStats():
+    """ 给宿主回归/真机自检看：合成鼠标路径上被拦下的点击次数 """
+    return {"suppressed": _TapGate.Count, "last": _TapGate.Last,
+            "input_suppressed": _TapGate.InputSuppressed, "last_input": _TapGate.LastInput}
+
+
+def _WantsTapGate(widget):
+    if isinstance(widget, QAbstractSpinBox):
+        # 数值框的加减是"按住不放自动重复、只认 mouseRelease 才停"：把 release
+        # 吞掉会让数值一直加下去(旧实现踩过这个坑)，所以数值框不挂门卫 ——
+        # 它由触控路由的 "spin" 通道负责。
+        return False
+    if isinstance(widget, (QAbstractButton, QComboBox)):
+        return True
+    # 可编辑文本框(本身或它的 viewport)：见 OnPress/OnRelease 的输入框分支
+    return _IsInputGateTarget(widget)
+
+
+def MarkTapGate(widget, force=False):
+    """ 给一个控件挂上"滑动不点击"门卫(幂等)，返回门卫对象(挂不上返回 None)
+
+    QTextEdit/QPlainTextEdit 的鼠标事件落在它们的 viewport 上，所以门卫挂在
+    viewport 上(见 _GateInstallTarget)，属性也记在那儿，避免重复挂。
+    """
+    if widget is None or not _WidgetAlive(widget):
+        return None
+    target = _GateInstallTarget(widget)
+    gate = getattr(target, "_jmTapGate", None)
+    if gate is not None:
+        return gate
+    if not force and not _WantsTapGate(target):
+        return None
+    try:
+        gate = _TapGate(target)
+        target.installEventFilter(gate)
+        target._jmTapGate = gate       # 挂在控件上：随控件一起销毁，也防被 GC
+        return gate
+    except Exception as es:
+        Log.Error(es)
+    return None
 
 
 def MarkTapClass(widget):
-    """ 给点按类控件打开触控接收(幂等，建出来就打一次) """
+    """ 给点按类控件打开触控接收 + 挂上合成鼠标门卫(幂等，建出来就打一次) """
     try:
         widget.setAttribute(Qt.WidgetAttribute.WA_AcceptTouchEvents, True)
     except Exception:
         pass
+    MarkTapGate(widget)
     return
 
 
@@ -1043,6 +1433,11 @@ def InstallTouchGuard(mainView):
         for cls in (QAbstractButton, QComboBox, QAbstractSpinBox):
             for widget in _SelfAndChildren(mainView, cls):
                 MarkTapClass(widget)
+        # 文本框单独挂：它们不需要 WA_AcceptTouchEvents(合成鼠标照旧产生)，
+        # 只需要门卫把"按下"按住到抬手判定为止(见 _TapGate 的输入框分支)
+        for cls in (QLineEdit, QTextEdit, QPlainTextEdit):
+            for widget in _SelfAndChildren(mainView, cls):
+                MarkTapGate(widget)
     except Exception as es:
         Log.Error(es)
     return
@@ -1182,7 +1577,7 @@ class _ScrollWatcher(QObject):
         # 只看滚动区域/标签条/点按类控件自己：普通容器不用管 —— 它里面真装了这些，
         # 那个控件建出来时也会各发一次 ChildAdded(漫画 item 那种叶子控件一天几百个，
         # 不筛会白扫)
-        if not isinstance(child, (QAbstractScrollArea,) + _TapClassWidgets):
+        if not isinstance(child, (QAbstractScrollArea,) + _GateWatchClasses):
             return False
         self.Seen += 1
         self._pending.append(child)
@@ -1205,8 +1600,11 @@ class _ScrollWatcher(QObject):
                 else:
                     MarkTapClass(widget)
                 continue
-            if isinstance(widget, _TapClassWidgets):
-                MarkTapClass(widget)
+            if isinstance(widget, _GateWatchClasses):
+                if isinstance(widget, (QLineEdit, QTextEdit, QPlainTextEdit)):
+                    MarkTapGate(widget)     # 文本框只挂门卫(见上)
+                else:
+                    MarkTapClass(widget)
                 continue
             self.Adopted += EnableTouchScroll(widget)
         return

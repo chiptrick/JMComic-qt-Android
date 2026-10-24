@@ -124,6 +124,8 @@ Android 移植用的脚本集合。**所有脚本都不写死本机路径**，�
 | `host_test_file_dialog.py` | 应用内文件选择器回归（委托/排序/过滤/权限降级/嵌套事件循环） |
 | `host_test_net_fallback.py` | HTTP/3、ECH 失败自动降级回归（垫片跳过 / 降级语义 / `_Send`、CDN 图片真实调用点重投） |
 | `host_test_crypto_android.py` | Android 模式下接口解密链（AES）回归 |
+| `host_test_tap_gate.py` | 滑动误触回归：选项框(勾选/单选/下拉/弹窗列表)与文本框(单行/多行)都不许被滑动触发，点按与滚动照常（`JM_TAP_GATE_OFF=1` 可反证） |
+| `host_test_widget_guard_audit.py` | 防误触覆盖审计：静态扫 `ui/**.ui` + 真实页面(分流页/设置页)逐个控件核验门卫与通道分类 |
 | `dump_ui.py` | 打印 `.ui` 的结构骨架（类名/对象名/几何/布局行列），用于规划竖屏排版 |
 
 ### 7. 真机

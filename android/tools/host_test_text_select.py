@@ -255,8 +255,8 @@ def _InstallStubs():
     sys.modules["PySide6.QtWidgets"] = widgets
 
     gui = _MakeModule("PySide6.QtGui", [])
-    for name in ("QEventPoint", "QGuiApplication", "QInputDevice", "QPointingDevice",
-                 "QWheelEvent"):
+    for name in ("QEventPoint", "QGuiApplication", "QInputDevice", "QMouseEvent",
+                 "QPointingDevice", "QWheelEvent"):
         setattr(gui, name, type(name, (QObjectStub,), {}))
     sys.modules["PySide6.QtGui"] = gui
 

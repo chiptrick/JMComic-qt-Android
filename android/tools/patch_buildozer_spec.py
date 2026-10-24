@@ -19,6 +19,7 @@
 """
 import argparse
 import os
+import re
 import shutil
 import sys
 
@@ -75,6 +76,23 @@ SkipRequirements = ["curl-cffi"]
 # INSTALL_FAILED_VERSION_DOWNGRADE，手机上必须先卸载才能装。
 # 注意这是 Android 包版本，跟桌面端的 config.RealVersion(上游版本号，用于检查更新)无关。
 AppVersion = "0.49"
+
+# 版本号格式规则(语义化版本的数字核心子集，与全部构建脚本同一套校验)：
+#   * MAJOR.MINOR(仓库沿用简写，如 0.51) 或 MAJOR.MINOR.PATCH(完整三段，如 1.2.3)
+#   * 每段纯数字、不允许前导零(段为 0 除外)
+#   * 不接受 -alpha.1 / +build.5 之类预发布/构建元数据后缀：
+#     p4a 的 get_android_numeric_version() 只按 "." 切数字段推导 versionCode，
+#     带后缀会推导失败或产出错误 versionCode。
+# 不合法时由调用方(构建脚本/本脚本)在动手前报错退出，不会写进 buildozer.spec。
+VersionPattern = re.compile(r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:\.(?:0|[1-9][0-9]*))?")
+
+
+def CheckVersion(version):
+    """ 返回 (是否合法, 归一化后的版本号)；调用方负责打印错误 """
+    v = (version or "").strip()
+    if not v:
+        return False, ""
+    return bool(VersionPattern.fullmatch(v)), v
 
 # 这些 Qt 模块必须从加载清单里去掉：
 #   pyside6-android-deploy 解析 wheel 的 *-android-dependencies.xml 时会把
@@ -304,11 +322,22 @@ def Main():
     parser.add_argument("--api", default="34", help="targetSdk，默认 34")
     parser.add_argument("--minapi", default="34", help="minSdk，默认 34(用户要求不考虑 Android 14 以下)")
     parser.add_argument("--version", default="",
-                        help="APK 版本号(versionName)，默认用脚本里的 AppVersion")
+                        help="APK 版本号(versionName)，默认用脚本里的 AppVersion；"
+                             "格式 MAJOR.MINOR 或 MAJOR.MINOR.PATCH(纯数字段、无前导零，"
+                             "如 0.51 / 1.2.3)，不接受预发布/构建元数据后缀")
     args = parser.parse_args()
 
     if not os.path.exists(args.spec):
         print("找不到 {}".format(args.spec))
+        return 2
+
+    # 版本号格式校验(写进 app.version 之前)：不合法直接退出，不写盘
+    ok, version = CheckVersion(args.version or AppVersion)
+    if not ok:
+        print("错误: APK 版本号格式不合法: '{}'".format((args.version or AppVersion).strip()))
+        print("  规则: MAJOR.MINOR 或 MAJOR.MINOR.PATCH(纯数字段、无前导零，如 0.51 / 1.2.3)")
+        print("  该值会写进 app.version(versionName)并由 p4a 推导 versionCode，只认数字段，")
+        print("  因此不接受 -alpha.1 / +build.5 之类后缀")
         return 2
 
     print("== 补丁 {}".format(args.spec))
@@ -338,7 +367,7 @@ def Main():
 
     # 工具生成的 buildozer.spec 把 version 写死成 0.1，不覆盖的话每次打包都还是 0.1，
     # 也就没法用 versionCode 区分"这一版到底含不含最新改动"。
-    spec.SetKey("app", "version", args.version.strip() or AppVersion)
+    spec.SetKey("app", "version", version)
 
     spec.SetKey("app", "android.api", str(args.api))
     spec.SetKey("app", "android.minapi", str(args.minapi))

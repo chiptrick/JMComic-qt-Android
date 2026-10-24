@@ -64,7 +64,6 @@ class ReadScroll(QScrollBar):
     #     self.oldupdateCurrentValue(value)
 
     def ResetAniValueByAdd(self, oldV, addV):
-        print("reset1 setV, {}".format(oldV + addV))
         QScrollBar.setValue(self, oldV + addV)
         changeV = self.lastAniEndV - self.lastAniStartV
         laveV = self.lastAniEndV - oldV
@@ -145,10 +144,35 @@ class ReadScroll(QScrollBar):
     def ForceSetValue(self, value):
         self.ani.stop()
         # print("ani stop 3")
-        if self.orientation() == Qt.Orientation.Vertical:
-            print("force setV, {}".format(value))
         QScrollBar.setValue(self, value)
         self.StartAni(value, value, self.scrollTime)
+
+    def DragScroll(self, value: int, notify=True):
+        """ 触摸拖动专用：**1:1 跟手**，不套补间动画
+
+        为什么不能走 setValue 的 200ms 缓动(桌面滚轮/键盘半页/自动滚动用那条，
+        那是"按一下滚一段"，缓动是刻意的)：
+          * 拖动时每个 TouchUpdate 都调一次，动画永远追不上手指 —— 实测 600px/s
+            的拖动，滚动条恒定落后十几像素；
+          * `AniValueByAdd` 会把目标按 maxRate(10) 放大，抬手后还要再跑 200ms，
+            并**冲过手指位置一百多像素**(一次 600px 的滑动过冲 ~18%)，真机现象
+            就是"拖完图还在飘、滑过头"；
+          * 安卓会把一帧里的多条触摸事件合并投递(dt≈0)，目标会被连续放大好几倍，
+            过冲更夸张。
+
+        notify=False 用于"放大后平移"：只改位置，不结算换页(放大状态下翻页是
+        另一套逻辑，平移绝不该顺带换页)。
+        """
+        self.ani.stop()
+        target = max(self.minimum(), min(self.maximum(), self.value() + int(value)))
+        if target == self.value():
+            return
+        # 直接置值：QGraphicsView 跟着 valueChanged 立刻重绘，零延迟
+        QScrollBar.setValue(self, target)
+        if notify:
+            # 动画路径靠 finished 触发 OnValueChange(滚动模式靠它结算跨到哪一页)
+            self.OnValueChange(target)
+        return
 
     # def ForceSetValue2(self, value, isAdd):
     #     if value == self.value():
@@ -171,10 +195,8 @@ class ReadScroll(QScrollBar):
         self.ani.setEndValue(end)
         self.ani.setDuration(duration)
         self.ani.start()
-        print("start ani, start:{}, end:{}".format(start, end))
 
     def setValue(self, value: int):
-        print("setV, {}".format(value))
         if value == self.value():
             return
 
@@ -234,8 +256,6 @@ class ReadScroll(QScrollBar):
         else:
             subV = 0
 
-        if self.isCurReadModel:
-            print("set lastV, {}, {}".format(oldV, subV))
         self.lastSubV = subV
         self.changeState = True
         return
@@ -267,8 +287,6 @@ class ReadScroll(QScrollBar):
             return
         self.ani.stop()
         QScrollBar.setValue(self, newV)
-        if self.isCurReadModel:
-            print("set lastV2, {}, {}".format(oldV, newV))
         self.__value = newV
         self.lastSubV = 0
         self.changeState = False
@@ -277,7 +295,6 @@ class ReadScroll(QScrollBar):
     def OnValueChange(self, value):
         if self.changeState:
             return
-        curV = self.value()
         addValue = value - self.__value
         # self.UpdateScrollBar(value)
         self.__value = value
@@ -342,9 +359,6 @@ class ReadScroll(QScrollBar):
                     break
                 curPictureSize = self.labelSize.get(changeIndex)
                 nextPictureSize = self.labelSize.get(changeIndex + 1, 0)
-                print("change, {}->{}, {}->{}, curV:{}, value:{}, addV:{}".format(self.readImg.curIndex, changeIndex,
-                                                                          curPictureSize, nextPictureSize, curV, value,
-                                                                          addValue))
 
         if self.readImg.curIndex == changeIndex:
             return

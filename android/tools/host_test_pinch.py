@@ -10,6 +10,8 @@
   * 1 指(拖动/点按) -> 2 指(缩放) -> 抬手，每次切换都要保证
     "不误翻页、不误滚动、缩放只结算一次"
   * 缩放之后剩下的那根手指必须被吞掉，否则松手会变成点按翻页
+  * 翻页模式下滑动翻页必须**一次手势只翻一页**：旧实现按每个 update 的增量
+    判定，翻页模式下滚动条一直停在边界，一次长滑会连翻十几页
 
 这里用假的事件/触点把每条路径跑一遍。新实现把触控直接映射到看图控件自己的
 入口(ScrollValue/ScrollLastPage/ScrollNextPage/ShowAndCloseTool/ScalePicture2)，
@@ -170,6 +172,7 @@ def _InstallStubs():
 
     base = _MakeModule("tools.mobile_ui_base", [])
     base.TouchSlopPx = 10
+    base.TurnPageSlopPx = 32
     sys.modules["tools.mobile_ui_base"] = base
 
     ui = _MakeModule("tools.mobile_ui", [])
@@ -180,14 +183,27 @@ def _InstallStubs():
     # _Scroll 里 from view.read.read_enum import ReadMode(调用时才导入)
     class ReadModeStub:
         RightLeftScroll2 = "RightLeftScroll2"
+        LeftRight = "LeftRight"
+        LeftRightDouble = "LeftRightDouble"
+        RightLeftDouble = "RightLeftDouble"
+        RightLeftDouble2 = "RightLeftDouble2"
+        Samewight = "Samewight"
 
         @staticmethod
         def isUpDown(mode):
-            return mode in ("UpDown", "UpDownScroll")
+            # 与真实现一致：滚动模式以外，LeftRight 系列也算"纵向"(滚轮语义)
+            return mode not in ("LeftRightScroll", "RightLeftDouble2",
+                                "RightLeftScroll", "RightLeftScroll2")
 
         @staticmethod
         def isScroll(mode):
-            return mode in ("UpDownScroll", "LeftRightScroll", "RightLeftScroll2")
+            return mode in ("UpDownScroll", "LeftRightScroll",
+                            "RightLeftScroll", "RightLeftScroll2")
+
+        @staticmethod
+        def isHorizontalPage(mode):
+            return mode in ("LeftRight", "LeftRightDouble",
+                            "RightLeftDouble", "RightLeftDouble2")
 
     _MakeModule("view", [])
     _MakeModule("view.read", [])
@@ -245,8 +261,18 @@ class FakeScrollBar:
         self._v = 0
         self._max = maximum
         self.values = []
+        self.animated = 0     # scrollValue 次数(带 200ms 补间的路径)
+        self.drags = 0        # DragScroll 次数(1:1 立即置值)
+        self.notify = []      # DragScroll 的 notify 参数(放大平移必须 False)
 
     def scrollValue(self, v):
+        self.animated += 1
+        self.values.append(int(v))
+        self._v = max(0, min(self._max, self._v + int(v)))
+
+    def DragScroll(self, v, notify=True):
+        self.drags += 1
+        self.notify.append(bool(notify))
         self.values.append(int(v))
         self._v = max(0, min(self._max, self._v + int(v)))
 
@@ -424,7 +450,7 @@ def TestTap():
 
 
 def TestDrag():
-    print("\n[2] 单指拖动：滚动模式 1:1 跟手(ScrollValue，不合成鼠标)")
+    print("\n[2] 单指拖动：滚动模式 1:1 跟手(立即置值，不合成鼠标)")
     touch, view, _ = NewTouch("UpDownScroll")
     touch.eventFilter(None, Event(QEvent.Type.TouchBegin, [Point(1, 200, 700)]))
     for y in (650, 600, 550, 500):
@@ -432,13 +458,17 @@ def TestDrag():
     touch.eventFilter(None, Event(QEvent.Type.TouchEnd, [Point(1, 200, 500, _State.Released)]))
     Check(touch.Drags == 1, "位移超阈值判定为拖动")
     Check(sum(view.vScrollBar.values) == 200, "划 200px 滚 200px({})".format(view.vScrollBar.values))
+    Check(view.vScrollBar.drags == 4 and view.vScrollBar.animated == 0,
+          "拖动走 DragScroll(立即置值)，不套补间动画(drags={}, ani={})".format(
+              view.vScrollBar.drags, view.vScrollBar.animated))
+    Check(view.vScrollBar.notify and all(view.vScrollBar.notify), "未放大拖动要结算换页(notify=True)")
     Check(view.qtTool.next == 0 and view.qtTool.last == 0, "拖动不翻页")
     Check(view.readImg.toolShown == 0, "拖动不弹菜单")
     NoMouse("拖动滚动")
 
 
 def TestPageFlip():
-    print("\n[3] 单页模式：滑到边界翻页(和滚轮一致)")
+    print("\n[3] 单页模式：滑到边界翻页(和滚轮一致，一次手势只翻一页)")
     touch, view, _ = NewTouch("UpDown")
     view.vScrollBar._v = view.vScrollBar.maximum()   # 停在页尾
     touch.eventFilter(None, Event(QEvent.Type.TouchBegin, [Point(1, 200, 700)]))
@@ -453,6 +483,48 @@ def TestPageFlip():
     Check(view.qtTool.last == 1, "页首继续下滑 -> 上一页")
     NoMouse("边界翻页")
 
+    # -- 一次滑动只翻一页(核心回归：旧实现按每个 update 的增量判定，
+    #    翻页模式下滚动条一直停在边界，一次长滑会连翻十几页) --
+    touch, view, _ = NewTouch("UpDown")
+    view.vScrollBar._v = view.vScrollBar.maximum()   # 停在页尾
+    touch.eventFilter(None, Event(QEvent.Type.TouchBegin, [Point(1, 200, 700)]))
+    for y in range(690, 199, -20):                   # 25 拍、共 500px 的一次长滑
+        touch.eventFilter(None, Event(QEvent.Type.TouchUpdate, [Point(1, 200, y, _State.Updated)]))
+    touch.eventFilter(None, Event(QEvent.Type.TouchEnd, [Point(1, 200, 200, _State.Released)]))
+    Check(view.qtTool.next == 1, "一次长滑(500px/25拍)只翻一页({})".format(view.qtTool.next))
+    Check(touch.Turns == 1, "翻页计数也是一次({})".format(touch.Turns))
+
+    # 翻过页之后：同一次手势里继续同方向滑、再反方向滑，都不再翻
+    touch, view, _ = NewTouch("UpDown")
+    view.vScrollBar._v = view.vScrollBar.maximum()
+    touch.eventFilter(None, Event(QEvent.Type.TouchBegin, [Point(1, 200, 700)]))
+    touch.eventFilter(None, Event(QEvent.Type.TouchUpdate, [Point(1, 200, 660, _State.Updated)]))
+    touch.eventFilter(None, Event(QEvent.Type.TouchUpdate, [Point(1, 200, 400, _State.Updated)]))
+    touch.eventFilter(None, Event(QEvent.Type.TouchUpdate, [Point(1, 200, 500, _State.Updated)]))
+    touch.eventFilter(None, Event(QEvent.Type.TouchEnd, [Point(1, 200, 500, _State.Released)]))
+    Check(view.qtTool.next == 1 and view.qtTool.last == 0,
+          "翻过页后同手势继续滑/反方向滑都不再翻(next={}, last={})".format(
+              view.qtTool.next, view.qtTool.last))
+
+    # 阈值内的滑动不翻页(位移已过拖动阈值，不是点按，但不够"果断的一划")
+    touch, view, _ = NewTouch("UpDown")
+    view.vScrollBar._v = view.vScrollBar.maximum()
+    touch.eventFilter(None, Event(QEvent.Type.TouchBegin, [Point(1, 200, 700)]))
+    touch.eventFilter(None, Event(QEvent.Type.TouchUpdate, [Point(1, 200, 690, _State.Updated)]))
+    touch.eventFilter(None, Event(QEvent.Type.TouchEnd, [Point(1, 200, 690, _State.Released)]))
+    Check(view.qtTool.next == 0 and view.qtTool.last == 0, "阈值内(10px)滑动不翻页")
+
+    # 手势结束(抬手)之后，新的滑动可以再翻一页
+    touch, view, _ = NewTouch("UpDown")
+    view.vScrollBar._v = view.vScrollBar.maximum()
+    touch.eventFilter(None, Event(QEvent.Type.TouchBegin, [Point(1, 200, 700)]))
+    touch.eventFilter(None, Event(QEvent.Type.TouchUpdate, [Point(1, 200, 650, _State.Updated)]))
+    touch.eventFilter(None, Event(QEvent.Type.TouchEnd, [Point(1, 200, 650, _State.Released)]))
+    touch.eventFilter(None, Event(QEvent.Type.TouchBegin, [Point(1, 200, 650)]))
+    touch.eventFilter(None, Event(QEvent.Type.TouchUpdate, [Point(1, 200, 600, _State.Updated)]))
+    touch.eventFilter(None, Event(QEvent.Type.TouchEnd, [Point(1, 200, 600, _State.Released)]))
+    Check(view.qtTool.next == 2, "两次独立滑动翻两页({})".format(view.qtTool.next))
+
     # 放大后：拖动是平移，不许翻页
     touch, view, _ = NewTouch("UpDown")
     view.frame.scaleCnt = 5
@@ -463,6 +535,145 @@ def TestPageFlip():
     touch.eventFilter(None, Event(QEvent.Type.TouchEnd, [Point(1, 200, 600, _State.Released)]))
     Check(view.qtTool.next == 0 and view.qtTool.last == 0, "放大后拖动只平移不翻页")
     Check(len(view.vScrollBar.values) + len(view.hScrollBar.values) > 0, "放大后拖动有平移")
+
+
+def TestPageFlipHorizontal():
+    print("\n[3c] 左右/右左翻页：**左右滑动**必须能翻页(横向轴)")
+    # 左右翻页：左滑 -> 下一页(页尾侧)，右滑 -> 上一页(页首侧)
+    touch, view, _ = NewTouch("LeftRight")
+    view.hScrollBar._v = view.hScrollBar.maximum()
+    touch.eventFilter(None, Event(QEvent.Type.TouchBegin, [Point(1, 900, 600)]))
+    touch.eventFilter(None, Event(QEvent.Type.TouchUpdate, [Point(1, 850, 600, _State.Updated)]))
+    touch.eventFilter(None, Event(QEvent.Type.TouchEnd, [Point(1, 850, 600, _State.Released)]))
+    Check(view.qtTool.next == 1 and view.qtTool.last == 0, "左右翻页: 左滑 -> 下一页")
+
+    touch, view, _ = NewTouch("LeftRight")
+    touch.eventFilter(None, Event(QEvent.Type.TouchBegin, [Point(1, 100, 600)]))
+    touch.eventFilter(None, Event(QEvent.Type.TouchUpdate, [Point(1, 150, 600, _State.Updated)]))
+    touch.eventFilter(None, Event(QEvent.Type.TouchEnd, [Point(1, 150, 600, _State.Released)]))
+    Check(view.qtTool.last == 1 and view.qtTool.next == 0, "左右翻页: 右滑 -> 上一页")
+
+    # 左右双页：同向
+    touch, view, _ = NewTouch("LeftRightDouble")
+    view.hScrollBar._v = view.hScrollBar.maximum()
+    touch.eventFilter(None, Event(QEvent.Type.TouchBegin, [Point(1, 900, 600)]))
+    touch.eventFilter(None, Event(QEvent.Type.TouchUpdate, [Point(1, 840, 600, _State.Updated)]))
+    touch.eventFilter(None, Event(QEvent.Type.TouchEnd, [Point(1, 840, 600, _State.Released)]))
+    Check(view.qtTool.next == 1, "左右双页: 左滑 -> 下一页")
+
+    # 右左双页：方向反过来(NextPage/LastPage 在右左模式内部已反转，
+    # 所以右滑就是"继续阅读"，这里断言的是公开入口被调了哪个)
+    touch, view, _ = NewTouch("RightLeftDouble")
+    touch.eventFilter(None, Event(QEvent.Type.TouchBegin, [Point(1, 100, 600)]))
+    touch.eventFilter(None, Event(QEvent.Type.TouchUpdate, [Point(1, 160, 600, _State.Updated)]))
+    touch.eventFilter(None, Event(QEvent.Type.TouchEnd, [Point(1, 160, 600, _State.Released)]))
+    Check(view.qtTool.last == 1 and view.qtTool.next == 0, "右左双页: 右滑 -> 继续阅读(LastPage)")
+
+    touch, view, _ = NewTouch("RightLeftDouble")
+    view.hScrollBar._v = view.hScrollBar.maximum()
+    touch.eventFilter(None, Event(QEvent.Type.TouchBegin, [Point(1, 900, 600)]))
+    touch.eventFilter(None, Event(QEvent.Type.TouchUpdate, [Point(1, 840, 600, _State.Updated)]))
+    touch.eventFilter(None, Event(QEvent.Type.TouchEnd, [Point(1, 840, 600, _State.Released)]))
+    Check(view.qtTool.next == 1 and view.qtTool.last == 0, "右左双页: 左滑 -> 回看(NextPage)")
+
+    # 右左双页(滚轮正序)：横向同"正序"，左滑 -> 下一页
+    touch, view, _ = NewTouch("RightLeftDouble2")
+    view.hScrollBar._v = view.hScrollBar.maximum()
+    touch.eventFilter(None, Event(QEvent.Type.TouchBegin, [Point(1, 900, 600)]))
+    touch.eventFilter(None, Event(QEvent.Type.TouchUpdate, [Point(1, 840, 600, _State.Updated)]))
+    touch.eventFilter(None, Event(QEvent.Type.TouchEnd, [Point(1, 840, 600, _State.Released)]))
+    Check(view.qtTool.next == 1, "右左双页(滚轮正序): 左滑 -> 下一页")
+
+    # 横向长滑仍然一次只翻一页
+    touch, view, _ = NewTouch("LeftRight")
+    view.hScrollBar._v = view.hScrollBar.maximum()
+    touch.eventFilter(None, Event(QEvent.Type.TouchBegin, [Point(1, 950, 600)]))
+    for x in range(930, 349, -20):                   # 30 拍、共 600px 的横向长滑
+        touch.eventFilter(None, Event(QEvent.Type.TouchUpdate, [Point(1, x, 600, _State.Updated)]))
+    touch.eventFilter(None, Event(QEvent.Type.TouchEnd, [Point(1, 350, 600, _State.Released)]))
+    Check(view.qtTool.next == 1, "横向长滑(600px/30拍)只翻一页({})".format(view.qtTool.next))
+
+    # 纵向手势保留(以前只能上下滑翻页，不能因为改成横轴就丢掉)
+    touch, view, _ = NewTouch("LeftRight")
+    view.vScrollBar._v = view.vScrollBar.maximum()
+    touch.eventFilter(None, Event(QEvent.Type.TouchBegin, [Point(1, 500, 700)]))
+    touch.eventFilter(None, Event(QEvent.Type.TouchUpdate, [Point(1, 500, 640, _State.Updated)]))
+    touch.eventFilter(None, Event(QEvent.Type.TouchEnd, [Point(1, 500, 640, _State.Released)]))
+    Check(view.qtTool.next == 1, "左右翻页: 纵向手势仍可翻页(旧行为保留)")
+
+    # 等宽模式是纵向阅读：横向滑动不该翻页
+    touch, view, _ = NewTouch("Samewight")
+    touch.eventFilter(None, Event(QEvent.Type.TouchBegin, [Point(1, 900, 600)]))
+    touch.eventFilter(None, Event(QEvent.Type.TouchUpdate, [Point(1, 820, 600, _State.Updated)]))
+    touch.eventFilter(None, Event(QEvent.Type.TouchEnd, [Point(1, 820, 600, _State.Released)]))
+    Check(view.qtTool.next == 0 and view.qtTool.last == 0, "等宽模式: 横向滑动不翻页")
+    NoMouse("横向翻页")
+
+
+def TestScrollDirections():
+    print("\n[3d] 横向滚动方向：左右滚动 / 右左滚动 / 右左滚动(正序) 各差一档")
+
+    def DragHorizontal(mode, x0, x1):
+        touch, view, _ = NewTouch(mode)
+        touch.eventFilter(None, Event(QEvent.Type.TouchBegin, [Point(1, x0, 600)]))
+        touch.eventFilter(None, Event(QEvent.Type.TouchUpdate, [Point(1, x1, 600, _State.Updated)]))
+        touch.eventFilter(None, Event(QEvent.Type.TouchEnd, [Point(1, x1, 600, _State.Released)]))
+        return touch, view
+
+    _, view = DragHorizontal("LeftRightScroll", 900, 800)
+    Check(sum(view.hScrollBar.values) == 100,
+          "左右滚动: 手指左移 -> 横向条 +100(前进=值增大, {})".format(view.hScrollBar.values))
+    _, view = DragHorizontal("RightLeftScroll", 900, 800)
+    Check(sum(view.hScrollBar.values) == 100,
+          "右左滚动: 手指左移 -> 横向条 +100(内容跟手, {})".format(view.hScrollBar.values))
+    _, view = DragHorizontal("RightLeftScroll2", 900, 800)
+    Check(sum(view.hScrollBar.values) == -100,
+          "右左滚动(正序): 手指左移 -> 横向条 -100(按页面正序前进, {})".format(view.hScrollBar.values))
+
+    _, view = DragHorizontal("LeftRightScroll", 200, 300)
+    Check(sum(view.hScrollBar.values) == -100,
+          "左右滚动: 手指右移 -> 横向条 -100(回看)")
+    _, view = DragHorizontal("RightLeftScroll2", 200, 300)
+    Check(sum(view.hScrollBar.values) == 100,
+          "右左滚动(正序): 手指右移 -> 横向条 +100(回看)")
+
+    # 上下滚动不受影响
+    touch, view, _ = NewTouch("UpDownScroll")
+    touch.eventFilter(None, Event(QEvent.Type.TouchBegin, [Point(1, 200, 900)]))
+    touch.eventFilter(None, Event(QEvent.Type.TouchUpdate, [Point(1, 200, 800, _State.Updated)]))
+    touch.eventFilter(None, Event(QEvent.Type.TouchEnd, [Point(1, 200, 800, _State.Released)]))
+    Check(sum(view.vScrollBar.values) == 100 and not view.hScrollBar.values,
+          "上下滚动: 手指上移 -> 纵向条 +100(横向不动, {})".format(view.vScrollBar.values))
+    Check(view.qtTool.next == 0 and view.qtTool.last == 0, "滚动模式不会误翻页")
+    NoMouse("横向滚动方向")
+
+
+def TestScrollUnaffected():
+    print("\n[3b] 滚动模式：一次长滑仍然 1:1 连续滚动(翻页锁不作用于滚动)")
+    touch, view, _ = NewTouch("UpDownScroll")
+    touch.eventFilter(None, Event(QEvent.Type.TouchBegin, [Point(1, 200, 900)]))
+    for y in range(880, 99, -20):                    # 40 拍、共 800px 的一次长滑
+        touch.eventFilter(None, Event(QEvent.Type.TouchUpdate, [Point(1, 200, y, _State.Updated)]))
+    touch.eventFilter(None, Event(QEvent.Type.TouchEnd, [Point(1, 200, 100, _State.Released)]))
+    Check(touch.Drags == 1, "滚动模式长滑判定为一次拖动")
+    Check(sum(view.vScrollBar.values) == 800, "划 800px 滚 800px({})".format(sum(view.vScrollBar.values)))
+    Check(view.vScrollBar.drags == 40 and view.vScrollBar.animated == 0,
+          "每一拍都立即置值(40 拍=40 次)，零补间({}/{})".format(
+              view.vScrollBar.drags, view.vScrollBar.animated))
+    Check(view.qtTool.next == 0 and view.qtTool.last == 0, "滚动模式长滑不翻页")
+    Check(touch.Turns == 0, "滚动模式不产生滑动翻页({})".format(touch.Turns))
+    NoMouse("滚动模式长滑")
+
+    # 放大后的平移：同样立即置值(1:1)，但 notify=False —— 平移绝不结算换页
+    touch, view, _ = NewTouch("UpDownScroll")
+    view.frame.scaleCnt = 5
+    touch.eventFilter(None, Event(QEvent.Type.TouchBegin, [Point(1, 200, 700)]))
+    for y in (650, 600, 550):
+        touch.eventFilter(None, Event(QEvent.Type.TouchUpdate, [Point(1, 200, y, _State.Updated)]))
+    touch.eventFilter(None, Event(QEvent.Type.TouchEnd, [Point(1, 200, 550, _State.Released)]))
+    Check(view.vScrollBar.drags >= 3 and all(n is False for n in view.vScrollBar.notify),
+          "放大后平移立即置值且不结算换页({})".format(view.vScrollBar.notify))
+    Check(view.qtTool.next == 0 and view.qtTool.last == 0, "放大后平移不翻页")
 
 
 def TestPinchOneSequence():
@@ -556,6 +767,9 @@ def main():
     TestTap()
     TestDrag()
     TestPageFlip()
+    TestPageFlipHorizontal()
+    TestScrollDirections()
+    TestScrollUnaffected()
     TestPinchOneSequence()
     TestPinchTwoSequences()
     TestCancel()

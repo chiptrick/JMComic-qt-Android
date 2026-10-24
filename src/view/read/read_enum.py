@@ -37,6 +37,51 @@ class ReadMode(Enum):
     def isScroll(model):
         return model in [ReadMode.UpDown, ReadMode.LeftRightScroll, ReadMode.RightLeftScroll, ReadMode.RightLeftScroll2]
 
+    @staticmethod
+    def isHorizontalPage(model):
+        """ 横向翻页模式(单页/双页)：滑动翻页的手势轴是**横向**
+
+        这几种模式的页面是左右排布的，用户自然是左右滑。注意不能用 isUpDown()
+        判断：它把 LeftRight/LeftRightDouble/RightLeftDouble 也算成"纵向"
+        (那是给滚轮留的旧语义，滚轮只有 angleDelta().y())，触摸手势照抄就会
+        只认上下滑、左右滑被整条丢弃 —— 真机现象"左右/右左翻页怎么滑都不翻"。
+
+        方向不用在这里区分左右：qtTool.NextPage()/LastPage() 内部已经为右左模式
+        做了反转(RightLeftDouble: NextPage -> _LastPage)，横向位移统一按 -dx
+        映射即可 —— LTR 左滑、RTL 右滑，都是"把下一张从它的方向拖进来"。
+        """
+        return model in [ReadMode.LeftRight, ReadMode.LeftRightDouble,
+                         ReadMode.RightLeftDouble, ReadMode.RightLeftDouble2]
+
+    @staticmethod
+    def isHorizontalScroll(model):
+        """ 横向滚动模式(左右滚动/右左滚动) """
+        return model in [ReadMode.LeftRightScroll, ReadMode.RightLeftScroll, ReadMode.RightLeftScroll2]
+
+    @staticmethod
+    def isRightLeftScroll(model):
+        """ 右左滚动(含滚轮正序)：页面从右往左排
+
+        右左布局里**阅读前进 = 横向滚动条的值减小**(视口左移，新页从左边进来)，
+        左右布局里则是值增大。所以凡是"下一屏/下一页"这种**语义量**都必须按这个
+        方向换算(见 ForwardScrollDelta，被 ScrollValue/自动滚动使用)。
+
+        手指拖动和滚轮**不用**在这里换算：它们是"内容跟手"的输入量，符号在
+        ReadGraphicsView.wheelEvent / _ReaderTouch._Scroll 里按模式各自定
+        (右左滚动基础版跟手即后退，只有"滚轮正序"版才把输入翻成页面正序)。
+        """
+        return model in [ReadMode.RightLeftScroll, ReadMode.RightLeftScroll2]
+
+    @staticmethod
+    def ForwardScrollDelta(model, value):
+        """ 把"下一屏为正"的语义量换算成**横向**滚动条增量
+
+        左右滚动：前进 = 值增大 -> 原样；
+        右左滚动：前进 = 值减小 -> 取反。
+        纵向模式(上下/等宽)没有这个问题，原样返回。
+        """
+        return -value if ReadMode.isRightLeftScroll(model) else value
+
 
 class QtFileData(object):
     Downloading = Str.Downloading

@@ -17,6 +17,20 @@
 
 1 指 -> 2 指 的转换：手上那次"拖动"直接作废(状态清掉)，缩放结束后剩下的手指
 继续按"已吞掉"处理 —— 松手不能变成点按(否则会翻页/弹菜单)。
+
+滚动模式下的 1 指拖动是**立即置值**(ReadScroll.DragScroll)，不套 200ms 补间：
+手指到哪、图到哪。任何补间都会让滚动条值滞后于手指，抬手后还会继续飘并冲过
+手指位置(原因与实测数据见 ReadScroll.DragScroll 的注释)。
+
+翻页模式(单页/双页/等宽，非滚动)下的"滑动翻页"是**一次手势只翻一页**：
+判定 = **翻页轴**上、以按下位置为基准的累计位移超过 TurnPageSlopPx，且滚动条
+停在对应边界(和滚轮一致：页尾再往前 -> 下一页，页首再往后 -> 上一页)。翻页轴
+按模式定：左右/右左的单页与双页是**横向**(ReadMode.isHorizontalPage)，等宽/
+上下模式是纵向；轴在本手势第一次越过阈值时锁定，之后不再换轴。翻过页
+之后本手势直接作废 —— 手指继续滑、甚至反方向滑都不再翻页，想继续翻必须重新
+按下。这样一次滑动和"点按一下翻一页 / 滚轮一格翻一页"一一对应，不会一滑跳过
+好几页(旧实现按每个 TouchUpdate 的增量判定，而翻页模式下滚动条一直停在边界，
+一次长滑会连翻十几页)。滚动模式是连续滚动，没有这个锁，行为完全不变。
 """
 from PySide6.QtCore import QEvent, QObject, QPoint, QPointF, Qt, QTimer
 from PySide6.QtGui import QEventPoint
@@ -97,6 +111,12 @@ class _ReaderTouch(QObject):
         self._dragging = False
         self._swallow = False       # 缩放之后剩下的手指直接吞掉(松手不许变点按)
         self._pinching = False
+        # 翻页模式专用(见 _Scroll)：一次手势只翻一页
+        # 横向/纵向各自累计，第一次越过阈值的那条轴被锁定(见 _Scroll)，之后不再换轴
+        self._turnAccumX = 0.0      # 本手势横向累计位移(以按下位置为基准)
+        self._turnAccumY = 0.0      # 本手势纵向累计位移(以按下位置为基准)
+        self._turnAxis = None       # 本手势锁定的翻页轴：None / "x" / "y"
+        self._turnFired = False     # 本手势是否已经翻过页(翻过即作废，抬手才重置)
         self._startDist = 0.0
         self._basePercent = 100
         self._ratio = 1.0
@@ -110,6 +130,7 @@ class _ReaderTouch(QObject):
         self.Cancels = 0
         self.LastDelta = 0
         self.Pinches = 0
+        self.Turns = 0            # 翻页模式下滑动翻页的次数(一次手势最多 +1)
         self.LastPercent = 100
 
     def Reset(self):
@@ -122,6 +143,10 @@ class _ReaderTouch(QObject):
         self._dragging = False
         self._swallow = False
         self._pinching = False
+        self._turnAccumX = 0.0
+        self._turnAccumY = 0.0
+        self._turnAxis = None
+        self._turnFired = False
         self._startDist = 0.0
         self._ratio = 1.0
         self._carry = 0.0
@@ -177,6 +202,11 @@ class _ReaderTouch(QObject):
                     self._Tap(endPos)
                 self._primary = None
                 self._dragging = False
+                # 手势结束：翻页锁一起复位，下一次按下可以再翻一页
+                self._turnAccumX = 0.0
+                self._turnAccumY = 0.0
+                self._turnAxis = None
+                self._turnFired = False
         self._Sync()
         return True
 
@@ -212,6 +242,11 @@ class _ReaderTouch(QObject):
             self._pressPos = self._points[pid][1]
             self._lastPos = self._pressPos
             self._dragging = False
+            # 新的一次手势：翻页轴累计位移/翻页锁都从零开始
+            self._turnAccumX = 0.0
+            self._turnAccumY = 0.0
+            self._turnAxis = None
+            self._turnFired = False
         if self._primary is None:
             return
         point = self._points.get(self._primary)
@@ -252,6 +287,10 @@ class _ReaderTouch(QObject):
             self._primary = None
             self._dragging = False
             self._swallow = False
+            self._turnAccumX = 0.0
+            self._turnAccumY = 0.0
+            self._turnAxis = None
+            self._turnFired = False
         return
 
     # -- 点按三分区 --------------------------------------------------------
@@ -316,12 +355,22 @@ class _ReaderTouch(QObject):
                 if step == 0:
                     return
                 self._carry -= step
+                # 必须走 DragScroll(直接置值)：ReadScroll.scrollValue 会给每个
+                # TouchUpdate 套 200ms 补间动画，滚动条值永远追不上手指(实测
+                # 600px/s 恒定落后十几像素)，抬手后还要再飘 200ms、并冲过手指
+                # 位置一百多像素 —— 真机现象就是"滚动模式拖不动/滑过头"。
+                #
+                # 横向三种模式的手指方向各差一档(都是内容跟手，差别在排版)：
+                #   左右滚动       手指左移 -> 值增大 -> 下一页
+                #   右左滚动       页面从右往左排，手指左移仍是值增大，但铺开的是
+                #                  "回看"页(前进 = 值减小；内容跟手本身就正确)
+                #   右左滚动(正序)  取反：手指左移 -> 值减小 -> 下一页(和左右滚动一致)
                 if upDown:
-                    view.vScrollBar.scrollValue(step)
+                    view.vScrollBar.DragScroll(step)
                 elif initMode == ReadMode.RightLeftScroll2:
-                    view.hScrollBar.scrollValue(-step)
+                    view.hScrollBar.DragScroll(-step)
                 else:
-                    view.hScrollBar.scrollValue(step)
+                    view.hScrollBar.DragScroll(step)
                 self.Scrolled += 1
                 self.LastDelta = step
                 return
@@ -331,22 +380,58 @@ class _ReaderTouch(QObject):
                 self._Pan(dx, dy)
                 return
 
-            # 没放大：滑到边界翻页(和滚轮一致)
-            bar = view.vScrollBar if upDown else view.hScrollBar
-            delta = -dy if upDown else -dx
-            self._carry += delta
-            step = int(self._carry)
-            if step == 0:
+            # 没放大：翻页模式 —— **一次手势只翻一页**(与点按/滚轮翻页一一对应)
+            #
+            # 旧实现按"每个 TouchUpdate 的增量"判定：翻页轴向上只要攒够 1px 且
+            # 滚动条在边界就翻一页，而翻页模式下松手前滚动条一直停在边界(100%
+            # 时 maximum 就是 0，首尾两个判定同时成立)，于是一次长滑会跟着每个
+            # update 连翻十几页 —— 真机现象"轻轻一滑跳过好几张"。
+            #
+            # 判定(全部满足才翻，且翻完本手势作废)：
+            #   1. 本手势还没翻过页：每根手指从按下到抬起最多翻一页，想继续翻
+            #      必须重新按下(和点按一下翻一页、滚轮一格翻一页一致)；
+            #   2. 在**翻页轴**上的累计位移超过 TurnPageSlopPx：
+            #      左右/右左单页双页是**横向**轴(见 ReadMode.isHorizontalPage)，
+            #      等宽/上下模式沿用纵向轴；
+            #   3. 滚动条停在对应边界(和滚轮一致：页尾再往前 -> 下一页，
+            #      页首再往后 -> 上一页；100% 时首尾是同一个位置，方向决定翻哪边)。
+            #
+            # 翻页轴在本手势第一次越过阈值时锁定，之后不再换轴(斜着滑也不会
+            # 因为另一条轴后来居上而突然按另一个方向翻)。
+            if self._turnFired:
                 return
-            self._carry -= step
-            if step > 0 and abs(bar.value() - bar.maximum()) <= 5:
+            horizontal = ReadMode.isHorizontalPage(initMode)
+            self._turnAccumX += -dx
+            self._turnAccumY += -dy
+            if self._turnAxis is None:
+                ax, ay = abs(self._turnAccumX), abs(self._turnAccumY)
+                # 横向翻页模式里横向优先(左右滑动才是这类模式的"翻页"手势)；
+                # 纵向手势保留为旧行为(以前只能上下滑翻页)，取位移更大的那条
+                if horizontal and ax >= TurnPageSlopPx and ax >= ay:
+                    self._turnAxis = "x"
+                elif ay >= TurnPageSlopPx:
+                    self._turnAxis = "y"
+                elif horizontal and ax >= TurnPageSlopPx:
+                    self._turnAxis = "x"
+                else:
+                    return
+            if self._turnAxis == "x":
+                accum, bar = self._turnAccumX, view.hScrollBar
+            else:
+                accum, bar = self._turnAccumY, view.vScrollBar
+            if accum > 0:
+                if abs(bar.value() - bar.maximum()) > 5:
+                    return
                 view.qtTool.NextPage()
-                return
-            if step < 0 and bar.value() <= 5:
+            else:
+                if bar.value() > 5:
+                    return
                 view.qtTool.LastPage()
-                return
+            # 翻过页了：本手势直接作废(继续滑/反方向滑都不再翻)，抬手才重置
+            self._turnFired = True
+            self.Turns += 1
             self.Scrolled += 1
-            self.LastDelta = step
+            self.LastDelta = int(accum)
         except Exception as es:
             Log.Error(es)
         return
@@ -367,14 +452,15 @@ class _ReaderTouch(QObject):
         stepX = int(self._carryX)
         if stepX:
             self._carryX -= stepX
-            view.hScrollBar.scrollValue(stepX)
+            # 平移同样必须 1:1 跟手；notify=False：放大状态下平移绝不结算换页
+            view.hScrollBar.DragScroll(stepX, notify=False)
             self.Scrolled += 1
             self.LastDelta = stepX
         self._carryY += -dy
         stepY = int(self._carryY)
         if stepY:
             self._carryY -= stepY
-            view.vScrollBar.scrollValue(stepY)
+            view.vScrollBar.DragScroll(stepY, notify=False)
             self.Scrolled += 1
             self.LastDelta = stepY
         return

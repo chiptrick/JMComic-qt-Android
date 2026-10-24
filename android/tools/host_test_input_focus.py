@@ -1,23 +1,26 @@
 # coding:utf-8
-""" 宿主自检：文本输入框的点按/聚焦链路(触控不吞事件 + 兜底聚焦 + 防误触)
+""" 宿主自检：文本输入框的点按/聚焦链路(认领触控 + 抬手结算 + 防误触)
 
-真机现象："设置页所有输入框都点不进去、打不了字"。输入框靠 Qt 把**未消费的触控**
-合成成鼠标才能拿到焦点，所以这条链路上任何一环把触控吞掉，输入框就彻底哑掉：
+真机现象一："设置页所有输入框都点不进去、打不了字" —— 起因是输入框靠 Qt 把
+**未消费的触控**合成成鼠标才能拿到焦点，链路上任何一环把触控吞掉它就哑了
+(应用级过滤器吞事件 / 别的触点被认领时 `handled=bool(_seqs)` 连坐 / QScroller
+把手势判成滚动把合成抑制掉)。当时的对策是"输入框不认领触控，抬手后兜底聚焦"。
 
-  * 应用级过滤器一吞事件，QWidgetWindow 的合成就不会发生；
-  * 同一时刻还有别的触点被认领/残留序列没收尾，旧实现 `handled = bool(_seqs)`
-    会把**所有**触控都当成"已处理"，输入框跟着一起哑(按钮不受影响，因为它们走
-    公开入口激活) —— 这就是"只有输入框不能输入"的根因路径；
-  * 就算没被吞，父级滚动区的 QScroller 把手势判成滚动时，合成也会被抑制。
+真机现象二(现在修的)："在分流设置页的文本框附近滑一下，键盘自己弹出来" ——
+兜底策略的副作用：Qt 合成鼠标时，QWidgetWindow 在**投递之前**就按"点了一下"
+给输入框聚焦(平台层 click-focus，控件的 eventFilter 拦不住)，滑动判定还没做完
+键盘已经弹了，有时候还会被拖出一段选区。
 
-这个自检在宿主上用真 Qt 造一套"滚动区 + 单行/多行输入框 + 只读日志 + 按钮"，
-用假触控事件直接喂 `_TouchRouter`，逐条验证：
+所以契约改成和按钮一致的"认领 + 自己结算"：按下就认领(accept)，Qt 不再合成
+鼠标；抬手时 点按 -> _FocusInput(聚焦 + 光标落到手指位置 + 弹输入法)、
+滑动 -> 什么都不做。这个自检在宿主上用真 Qt 造一套"滚动区 + 单行/多行输入框 +
+只读日志 + 按钮"，用假触控事件直接喂 `_TouchRouter`，逐条验证：
 
-  1. 输入框按下：不吞事件、不 accept、分类是 "input"
-  2. 抬手后确实聚焦，且光标落在手指位置
-  3. 已经聚焦时不再动光标(避免"重复聚焦→双击选词→下次输入覆盖原内容")
+  1. 分类：可编辑输入框是 "input"，只读文本框是 "native"(不弹输入法)
+  2. 输入框按下：**认领**(accept)，Qt 不再合成鼠标 -> 按下不会聚焦/弹键盘
+  3. 抬手后确实聚焦，光标落在手指位置；已聚焦时点按也能把光标挪过去，且不产生选区
   4. 在输入框上滑动：不聚焦、不动光标(防误触)
-  5. 表里已有别的触点被认领时，落在输入框上的触控**仍然不被吞**
+  5. 表里已有别的触点被认领时，输入框的按下照样认领且照样能聚焦(不连坐)
   6. 残留序列(抬手丢了)会按 id 重建，不会把输入框永久饿死
   7. 只读文本框不弹输入法(分类 native)
   8. 鼠标点按行为不变(仍然能聚焦/落光标)
@@ -177,15 +180,15 @@ def TestClassify(scene):
 
 
 def TestTapFocus(scene):
-    print("\n[2] 点按输入框：不吞事件 + 抬手后聚焦 + 光标落在手指处")
+    print("\n[2] 点按输入框：认领触控(不合成鼠标) + 抬手后聚焦 + 光标落在手指处")
     router = scene.router
     scene.edit.clearFocus()
     scene.edit.setCursorPosition(0)
     scene.Flush()
     point = scene.edit.mapToGlobal(QPoint(scene.edit.width() - 4, scene.edit.height() // 2))
     handled, ev = Press(router, scene.viewport, point)
-    Check(handled is False, "按下不吞事件(Qt 才能合成鼠标)")
-    Check(not ev.isAccepted(), "按下没有 accept")
+    Check(handled is True, "按下被认领(Qt 不再合成鼠标 -> 滑动不会弹键盘)")
+    Check(ev.isAccepted(), "按下 accept 了")
     Check(router.Inputs == 1, "登记了一次输入框按下")
     Release(router, scene.viewport, point)
     scene.Flush()
@@ -194,8 +197,8 @@ def TestTapFocus(scene):
     Check(router._seqs == {}, "抬手后没有残留序列")
 
 
-def TestNoDoubleFocus(scene):
-    print("\n[3] 已聚焦时不再动光标(不会变成双击选词/覆盖内容)")
+def TestCursorFollowsTap(scene):
+    print("\n[3] 已聚焦时点按别处：光标跟着走，但不产生选区(不会覆盖原内容)")
     router = scene.router
     scene.edit.setFocus()
     scene.edit.setCursorPosition(2)
@@ -204,7 +207,8 @@ def TestNoDoubleFocus(scene):
     Press(router, scene.viewport, point)
     Release(router, scene.viewport, point)
     scene.Flush()
-    Check(scene.edit.cursorPosition() == 2, "光标没被兜底逻辑挪走")
+    Check(scene.edit.cursorPosition() == len("abcdef"),
+          "光标落到手指位置(行尾) -> {}".format(scene.edit.cursorPosition()))
     Check(not scene.edit.hasSelectedText(), "没有产生选区(下次输入不会覆盖原内容)")
 
 
@@ -225,7 +229,7 @@ def TestDragOnInput(scene):
 
 
 def TestClaimedSeqDoesNotStarve(scene):
-    print("\n[5] 表里已有被认领的触点时，输入框的触控仍然不被吞")
+    print("\n[5] 表里已有被认领的触点时，输入框的按下照样认领、照样能聚焦")
     router = scene.router
     router.Reset()
     scene.edit.clearFocus()
@@ -234,15 +238,16 @@ def TestClaimedSeqDoesNotStarve(scene):
     checkPoint = CenterOf(scene.check)
     handled1, ev1 = Press(router, scene.viewport, checkPoint, pid=0)
     Check(handled1 is True and ev1.isAccepted(), "勾选框按下被认领(防误触的既有行为)")
-    # 第二根手指落在输入框上：旧实现 handled=bool(_seqs)=True -> 事件被吞，输入框永远不聚焦
+    # 第二根手指落在输入框上：也要独立认领(不能被前一根手指连累)，抬手后照样聚焦
     editPoint = CenterOf(scene.edit)
     handled2, ev2 = Press(router, scene.viewport, editPoint, pid=1)
-    Check(handled2 is False, "输入框按下不被别的触点连累(旧实现是 True)")
-    Check(not ev2.isAccepted(), "输入框按下没有 accept")
+    Check(handled2 is True, "输入框按下也被认领(和勾选框同一套)")
+    Check(ev2.isAccepted(), "输入框按下 accept 了")
     Release(router, scene.viewport, editPoint, pid=1)
     Release(router, scene.viewport, checkPoint, pid=0)
     scene.Flush()
     Check(router._seqs == {}, "两个触点都收尾了")
+    Check(not scene.edit.hasFocus(), "多指手势不激活输入框(和按钮同一套防误触)")
 
 
 def TestStaleSeq(scene):
@@ -259,7 +264,7 @@ def TestStaleSeq(scene):
     point = CenterOf(scene.edit)
     handled, ev = Press(router, scene.viewport, point, pid=7)
     Check(router.Stales == 1, "旧的残留序列被丢弃")
-    Check(handled is False, "重建后的输入框按下不吞事件")
+    Check(handled is True, "重建后的输入框按下照样被认领")
     Release(router, scene.viewport, point, pid=7)
     scene.Flush()
     Check(scene.edit.hasFocus(), "输入框仍然能拿到焦点")
@@ -311,7 +316,7 @@ def main():
     scene = Scene(app)
     TestClassify(scene)
     TestTapFocus(scene)
-    TestNoDoubleFocus(scene)
+    TestCursorFollowsTap(scene)
     TestDragOnInput(scene)
     TestClaimedSeqDoesNotStarve(scene)
     TestStaleSeq(scene)

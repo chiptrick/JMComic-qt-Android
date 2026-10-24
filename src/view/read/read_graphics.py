@@ -204,6 +204,11 @@ class ReadGraphicsView(QGraphicsView, SmoothScroll):
         if ReadMode.isUpDown(self.initReadMode):
             self.vScrollBar.scrollValue(value)
         else:
+            # 滚轮是"内容跟着滚轮走"的**输入量**，不是"下一屏"的语义量，所以这里
+            # 不能走 ForwardScrollDelta：
+            #   左右滚动      ：滚轮下 = 值增大 = 下一页
+            #   右左滚动(基础)：滚轮下 = 值增大 = 内容往左走 = 回看(和手指跟手一致)
+            #   右左滚动(正序)：取反，滚轮下 = 值减小 = 下一页(和左右滚动手感一致)
             if self.initReadMode == ReadMode.RightLeftScroll2:
                 self.hScrollBar.scrollValue(-value)
             else:
@@ -334,7 +339,12 @@ class ReadGraphicsView(QGraphicsView, SmoothScroll):
                 self.vScrollBar.scrollValue(value)
             # QScroller.scroller(self).scrollTo(QPoint(0, self.verticalScrollBar().value() + value), 500)
         else:
-            self.hScrollBar.scrollValue(value)
+            # 横向滚动：value > 0 一律表示"下一屏"，但**两种排版的前进方向相反** ——
+            #   左右滚动：前进 = 横向值增大
+            #   右左滚动：页面从右往左排，前进 = 横向值减小(视口左移，新页从左边进来)
+            # 以前这里两种模式共用 +value，于是右左滚动下点下半屏/按空格/PageDown
+            # 会往回滚(和它自己的"下一屏"语义相反)。
+            self.hScrollBar.scrollValue(ReadMode.ForwardScrollDelta(self.initReadMode, value))
             # QScroller.scroller(self).scrollTo(QPoint(self.horizontalScrollBar().value() + value, 0), 500)
         return
 

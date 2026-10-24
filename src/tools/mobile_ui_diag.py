@@ -284,6 +284,14 @@ def _WidgetValue(widget):
     return "?"
 
 
+def GatedCount():
+    """ 合成鼠标点按门卫拦下的次数(弹窗/未接管区域那条路径，见 mobile_ui_touch._TapGate) """
+    try:
+        return mobile_ui.TapGateStats().get("suppressed", -1)
+    except Exception:
+        return -1
+
+
 def _TouchSelfTestReport(view, target, lines, extras=None):
     try:
         area = getattr(view, "scrollArea", None)
@@ -368,17 +376,18 @@ def _TouchSelfTestReport(view, target, lines, extras=None):
                guard.Suppressed if guard else -1, guard.Replayed if guard else -1,
                guard.LastSuppressed if guard else "", checked, setting, scroll,
                barMax, contentH,
-               " ".join("{}={}".format(tag, _WidgetValue(w)) for tag, w in (extras or [])))
+               " ".join("{}={}".format(tag, _WidgetValue(w)) for tag, w in (extras or [])),
+               GatedCount())
         if cur != state["last"] or state["tick"] % 15 == 0:
             # barMax=0 说明内容没超出视口，这个页面本来就滚不动，别把"没滚动"当成失败
             # (注意别在 format 串里写 {max}，那会被当成关键字参数 -> KeyError)
             _WriteUiDiag(["  t={:>3}s presses={} drags={} suppressed={} replayed={} last={} "
                           "checkbox={} Setting.DownloadAuto={} scrollValue={}/{} contentH={} "
-                          "target={} {}".format(
+                          "target={} {} gated={}".format(
                               state["tick"], cur[0], cur[1], cur[2], cur[3], cur[4] or "-",
                               cur[5], cur[6], cur[7], cur[8], cur[9],
                               _DescribeWidget(target) if target is not None else "-",
-                              cur[10])])
+                              cur[10], cur[11])])
             state["last"] = cur
         if state["tick"] >= TouchSelfTestSeconds:
             timer.stop()

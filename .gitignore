@@ -171,3 +171,6 @@ android/.run/
 android/deployment/
 android/wheels/
 android/buildozer.spec
+# Android：一键构建脚本(Windows PowerShell)的执行日志与产物输出
+android/tools/logs/
+android/logs/
