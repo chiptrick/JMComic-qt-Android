@@ -1095,6 +1095,11 @@ class Ui_SettingNew(object):
 
         self.horizontalLayout_10.addWidget(self.setDirButton)
 
+        self.cacheDirButton = QPushButton(self.frame_11)
+        self.cacheDirButton.setObjectName(u"cacheDirButton")
+
+        self.horizontalLayout_10.addWidget(self.cacheDirButton)
+
         self.horizontalSpacer_8 = QSpacerItem(40, 20, QSizePolicy.Expanding, QSizePolicy.Minimum)
 
         self.horizontalLayout_10.addItem(self.horizontalSpacer_8)
@@ -1338,6 +1343,7 @@ class Ui_SettingNew(object):
         self.label_17.setText(QCoreApplication.translate("SettingNew", u"JM\u56fe\u7247\u89e3\u5bc6\u8fdb\u7a0b\u6570\u91cf\uff08\u5bf9\u5e94\u4e0b\u8f7d\u7ebf\u7a0b\u6570\u91cf\uff0c\u9700\u91cd\u542f\uff09", None))
         self.label_21.setText(QCoreApplication.translate("SettingNew", u"\u4e0b\u8f7d\u548c\u7f13\u5b58\u8def\u5f84\uff08\u7f13\u5b58\u6587\u4ef6\u9700\u81ea\u5df1\u624b\u52a8\u6e05\u9664\uff09", None))
         self.setDirButton.setText(QCoreApplication.translate("SettingNew", u"\u8bbe\u7f6e\u76ee\u5f55", None))
+        self.cacheDirButton.setText(QCoreApplication.translate("SettingNew", u"\u7f13\u5b58\u4f4d\u7f6e", None))
         self.label_3.setText(QCoreApplication.translate("SettingNew", u"\u4e0b\u8f7d", None))
         self.downloadDir.setText("")
         self.openDownloadDir.setText(QCoreApplication.translate("SettingNew", u"\u6253\u5f00\u76ee\u5f55", None))

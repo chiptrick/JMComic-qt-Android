@@ -8,6 +8,7 @@ from PySide6.QtGui import Qt
 from PySide6.QtWidgets import QLabel
 
 from component.label.msg_label import MsgLabel
+from component.widget.sr_model_table import FormatModelLabel
 from config import config
 from config.setting import Setting
 from interface.ui_read_tool import Ui_ReadImg
@@ -117,7 +118,7 @@ class ReadTool(QtWidgets.QWidget, Ui_ReadImg):
         self.gpuLabel.setMaximumWidth(250)
         self.curWaifu2x.clicked.connect(self.OpenCurWaifu)
         self.preDownWaifu2x.clicked.connect(self.OpenPreDownloadWaifu2x)
-        self.modelNameButton.setText(ToolUtil.GetShowModelName(Setting.LookModelName.value))
+        self.modelNameButton.setText(FormatModelLabel(Setting.LookModelName.value))
         self.modelNameButton.setToolTip(Setting.LookModelName.value)
         self.modelNameButton.clicked.connect(self.OpenSrSelect)
         self.modelNameButton.setEnabled(False)
@@ -127,7 +128,7 @@ class ReadTool(QtWidgets.QWidget, Ui_ReadImg):
 
     def OpenSrSelectBack(self, newModName):
         Setting.LookModelName.SetValue(newModName)
-        self.modelNameButton.setText(ToolUtil.GetShowModelName(Setting.LookModelName.value))
+        self.modelNameButton.setText(FormatModelLabel(Setting.LookModelName.value))
         self.modelNameButton.setToolTip(Setting.LookModelName.value)
 
     @property
@@ -363,13 +364,13 @@ class ReadTool(QtWidgets.QWidget, Ui_ReadImg):
     def UpdateText(self, model):
         if not model:
             self.scaleLabel.setText(str(Setting.LookScale.value))
-            self.modelNameButton.setText(ToolUtil.GetShowModelName(Setting.LookModelName.value))
+            self.modelNameButton.setText(FormatModelLabel(Setting.LookModelName.value))
             self.modelNameButton.setToolTip(Setting.LookModelName.value)
         else:
             scale = model.get('scale', 0)
             modelName = model.get('model_name', "")
             self.scaleLabel.setText(str(scale))
-            self.modelNameButton.setText(ToolUtil.GetShowModelName(modelName))
+            self.modelNameButton.setText(FormatModelLabel(modelName))
             self.modelNameButton.setToolTip(modelName)
         # model, noise, scale = ToolUtil.GetModelAndScale(model)
         # self.modelLabel.setText(model)

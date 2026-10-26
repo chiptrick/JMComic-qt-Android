@@ -11,6 +11,7 @@ from PySide6.QtWidgets import QFileDialog
 
 from config import config
 from config.setting import Setting, SettingValue
+from component.widget.sr_model_table import FormatModelLabel
 from interface.ui_setting_new import Ui_SettingNew
 from qt_owner import QtOwner
 from tools.log import Log
@@ -99,6 +100,7 @@ class SettingView(QtWidgets.QWidget, Ui_SettingNew):
         self.downloadButton.clicked.connect(partial(self.MoveToLabel, self.downloadLabel))
 
         self.setDirButton.clicked.connect(self.SelectSavePath)
+        self.cacheDirButton.clicked.connect(self.SelectCachePath)
         self.openDownloadDir.clicked.connect(partial(self.OpenDir, self.downloadDir))
         self.openCacheDir.clicked.connect(partial(self.OpenDir, self.cacheDir))
         self.openWaifu2xDir.clicked.connect(partial(self.OpenDir, self.waifu2xDir))
@@ -170,18 +172,23 @@ class SettingView(QtWidgets.QWidget, Ui_SettingNew):
 
     def CheckOpenSrSelectCoverBack(self, modelName):
         Setting.CoverLookModelName.SetValue(modelName)
-        self.coverModelName.setText(modelName)
+        self.SetModelButton(self.coverModelName, modelName)
         return modelName
 
     def CheckOpenSrSelectReadBack(self, modelName):
         Setting.LookModelName.SetValue(modelName)
-        self.readModelName.setText(modelName)
+        self.SetModelButton(self.readModelName, modelName)
         return modelName
 
     def CheckOpenSrSelectDownBack(self, modelName):
         Setting.DownloadModelName.SetValue(modelName)
-        self.downModelName.setText(modelName)
+        self.SetModelButton(self.downModelName, modelName)
         return modelName
+
+    def SetModelButton(self, button, modelName):
+        """ 按钮上只显示可读名(模型族 · 倍数 · 降噪)，完整 MODEL_ 串只放 tooltip """
+        button.setText(FormatModelLabel(modelName))
+        button.setToolTip(modelName)
 
     def CheckRadioEvent(self, setItem, value):
         assert isinstance(setItem, SettingValue)
@@ -283,9 +290,9 @@ class SettingView(QtWidgets.QWidget, Ui_SettingNew):
         self.downScale.setValue(Setting.DownloadScale.value)
         self.threadSpin.setValue(Setting.MultiNum.value)
         # self.downModel.setCurrentIndex(Setting.DownloadModel.value)
-        self.coverModelName.setText(Setting.CoverLookModelName.value)
-        self.readModelName.setText(Setting.LookModelName.value)
-        self.downModelName.setText(Setting.DownloadModelName.value)
+        self.SetModelButton(self.coverModelName, Setting.CoverLookModelName.value)
+        self.SetModelButton(self.readModelName, Setting.LookModelName.value)
+        self.SetModelButton(self.downModelName, Setting.DownloadModelName.value)
 
         self.SetDownloadLabel()
 
@@ -305,9 +312,9 @@ class SettingView(QtWidgets.QWidget, Ui_SettingNew):
     def retranslateUi(self, SettingNew):
         Ui_SettingNew.retranslateUi(self, SettingNew)
         self.SetDownloadLabel()
-        self.coverModelName.setText(Setting.CoverLookModelName.value)
-        self.readModelName.setText(Setting.LookModelName.value)
-        self.downModelName.setText(Setting.DownloadModelName.value)
+        self.SetModelButton(self.coverModelName, Setting.CoverLookModelName.value)
+        self.SetModelButton(self.readModelName, Setting.LookModelName.value)
+        self.SetModelButton(self.downModelName, Setting.DownloadModelName.value)
 
     def SetRadioGroup(self, text, index):
         radio = getattr(self, text+str(index))
@@ -498,6 +505,36 @@ class SettingView(QtWidgets.QWidget, Ui_SettingNew):
             self.AfterPathChanged(oldRoot, Setting.GetDownloadRoot())
         self.SetDownloadLabel()
 
+    def SelectCachePath(self):
+        """ 修改缓存目录(封面/图片缓存/超分临时图/zip 临时文件)
+
+        入口：设置 → 下载与缓存 → "缓存位置"。
+        默认值是应用外部缓存目录
+        (/storage/emulated/0/Android/data/<包名>/cache/jmcomic-qt)：
+        系统"清理缓存"、设置-存储、支持 Android/data 的文件管理器都能清掉。
+
+        选中别的目录之后新缓存**直接写进新目录**(见 Setting.GetCachePath)，
+        只有旧目录里已有的缓存会在后台搬一次(不覆盖新目录里已有的文件)。
+        """
+        from tools import cache_path, platform_mobile
+        current = Setting.GetCachePath()
+        start = os.path.dirname(current) if current else ""
+        if not start or not os.path.isdir(start):
+            start = platform_mobile.GetExternalDir()
+        picked = mobile_file_dialog.PickLocalDir(self, Str.GetStr(Str.SelectFold), start)
+        if not picked:
+            return
+        ok, reason, oldPath, newPath, moving = cache_path.SetBase(picked)
+        self.SetDownloadLabel()
+        if not ok:
+            QtOwner().ShowMsg("无法使用该目录：{}".format(reason))
+            return
+        Log.Warn("cache path: {} -> {}".format(oldPath, newPath))
+        if moving:
+            QtOwner().ShowMsg(Str.GetStr(Str.Waiting))
+        else:
+            QtOwner().ShowMsg(Str.GetStr(Str.SaveSuc))
+
     def AfterPathChanged(self, oldRoot="", newRoot=""):
         """ 目录变了：刷新显示 + 把已下载条目的路径挪到新根(不然还在往旧路径写) """
         self.SetDownloadLabel()
@@ -521,15 +558,26 @@ class SettingView(QtWidgets.QWidget, Ui_SettingNew):
         mobile_ui.ElideText(self.downloadDir, display)
         self.downloadDir.setToolTip(display)
 
-        # 缓存(封面/图片缓存/超分临时图)在 Android 上落在应用外部缓存目录
+        # 缓存(封面/图片缓存/超分临时图)默认在应用外部缓存目录
         # (/storage/emulated/0/Android/data/<包名>/cache/jmcomic-qt)：
         # 可再生数据不放用户选的下载目录(免得文件管理器里堆一堆看不懂的文件)，
-        # 但也不藏在内置私有目录 —— 放外部，系统"清理缓存"/文件管理器清得掉
+        # 但也不藏在内置私有目录 —— 放外部，系统"清理缓存"/文件管理器清得掉。
+        # 用户也可以在"缓存位置"里改成别的真实目录(配置项 CachePath)。
         cachePath = Setting.GetCachePath()
         mobile_ui.ElideText(self.cacheDir, cachePath)
         mobile_ui.ElideText(self.waifu2xDir, os.path.join(cachePath, config.Waifu2xPath))
         if platform_mobile.IsAndroid():
-            self.cacheDir.setToolTip("{}（应用缓存，可在系统存储设置或文件管理器中手动清理）".format(cachePath))
+            # 自定义目录不可写时会回退默认值，这里按"实际生效的路径"判断
+            isCustom = os.path.normpath(cachePath) != os.path.normpath(Setting.GetDefaultCachePath())
+            if isCustom:
+                self.cacheDir.setToolTip(
+                    "{}（自定义缓存目录，可在“缓存位置”里更改）".format(cachePath))
+            else:
+                self.cacheDir.setToolTip(
+                    "{}（默认缓存目录，可在系统存储设置或文件管理器中手动清理）".format(cachePath))
+            self.waifu2xDir.setToolTip(os.path.join(cachePath, config.Waifu2xPath))
+        else:
+            self.cacheDir.setToolTip(cachePath)
             self.waifu2xDir.setToolTip(os.path.join(cachePath, config.Waifu2xPath))
 
     def OpenDir(self, label):

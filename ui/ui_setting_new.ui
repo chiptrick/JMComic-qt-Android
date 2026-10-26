@@ -2046,6 +2046,13 @@
                </widget>
               </item>
               <item>
+               <widget class="QPushButton" name="cacheDirButton">
+                <property name="text">
+                 <string>缓存位置</string>
+                </property>
+               </widget>
+              </item>
+              <item>
                <spacer name="horizontalSpacer_8">
                 <property name="orientation">
                  <enum>Qt::Horizontal</enum>

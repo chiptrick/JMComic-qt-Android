@@ -9,6 +9,7 @@ from PySide6.QtWidgets import QFrame, QGraphicsPixmapItem, QGraphicsScene, QAppl
 
 from config import config
 from config.setting import Setting
+from component.widget.sr_model_table import FormatModelLabel
 from interface.ui_waifu2x_tool import Ui_Waifu2xTool
 from qt_owner import QtOwner
 from task.qt_task import QtTaskBase
@@ -31,7 +32,7 @@ class Waifu2xToolView(QtWidgets.QWidget, Ui_Waifu2xTool, QtTaskBase):
         # self.resize(800, 900)
         self.checkBox.setChecked(True)
         from config.setting import Setting
-        self.modelName.setText(ToolUtil.GetShowModelName(Setting.LookModelName.value))
+        self.modelName.setText(FormatModelLabel(Setting.LookModelName.value))
         self.modelName.setToolTip(Setting.LookModelName.value)
 
         # self.comboBox.setCurrentIndex(self.index)
@@ -94,14 +95,15 @@ class Waifu2xToolView(QtWidgets.QWidget, Ui_Waifu2xTool, QtTaskBase):
     def retranslateUi(self, SettingNew):
         oldName = self.modelName.toolTip()
         Ui_Waifu2xTool.retranslateUi(self, SettingNew)
-        self.modelName.setText(ToolUtil.GetShowModelName(oldName))
+        self.modelName.setText(FormatModelLabel(oldName))
         self.modelName.setToolTip(oldName)
 
     def OpenSrSelect(self):
-        QtOwner().OpenSrSelectModel(self.modelName.text(), self.OpenSrSelectBack)
+        # 必须传完整模型名：按钮上显示的是可读名，不能拿来当模型 key
+        QtOwner().OpenSrSelectModel(self.modelName.toolTip(), self.OpenSrSelectBack)
 
     def OpenSrSelectBack(self, newModName):
-        self.modelName.setText(ToolUtil.GetShowModelName(newModName))
+        self.modelName.setText(FormatModelLabel(newModName))
         self.modelName.setToolTip(newModName)
         self.CheckStatus()
 

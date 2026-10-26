@@ -1,101 +1,54 @@
-import base64
-
-from PySide6.QtCore import Signal, Qt, QTimer
-from PySide6.QtWidgets import QHeaderView, QTableWidgetItem
+# coding:utf-8
+from PySide6.QtCore import Signal, QTimer
+from PySide6.QtWidgets import QApplication
 
 from component.dialog.base_mask_dialog import BaseMaskDialog
-from component.label.gif_label import GifLabel
-from config.setting import Setting
 from interface.ui_sr_select_widget import Ui_SrSelect
-from qt_owner import QtOwner
-from task.qt_task import QtTaskBase
-from tools.str import Str
 
 
 class SettingSrSelectView(BaseMaskDialog, Ui_SrSelect):
+    """ 超分模型选择弹窗
+
+    旧实现是 4 列定宽表格(200/150/100/100=550)，手机 480 逻辑宽下右侧列永远在屏外，
+    只能靠 setColumnHidden 藏掉「耗时」列来凑宽度。现在列宽/分组/吸顶全部交给
+    SrModelTable，这里只负责尺寸与「确定/关闭」。
+    """
     Close = Signal(str)
 
     def __init__(self, parent=None, curModelName=""):
         BaseMaskDialog.__init__(self, parent)
         Ui_SrSelect.__init__(self)
-        self.widget.adjustSize()
         self.setupUi(self.widget)
-        self.curModelName = curModelName
+        self.curModelName = curModelName or ""
         self.saveButton.clicked.connect(self._ClickButton)
         self.closeButton.clicked.connect(self.close)
-        self.tableWidget.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        # self.tableWidget.horizontalHeader().setMinimumSectionSize(120)
-        self.tableWidget.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)
-        self.tableWidget.setColumnWidth(0, 200)
-        self.tableWidget.setColumnWidth(1, 150)
-        self.tableWidget.setColumnWidth(2, 100)
-        self.tableWidget.setColumnWidth(3, 100)
-        self.Init()
+        self._FitSize()
+        self.tableWidget.SetCurrentModel(self.curModelName)
+        # 让当前项居中要等布局跑完(宽高这时才是真的)
+        QTimer.singleShot(0, self.tableWidget.ScrollToCurrent)
+
+    def _FitSize(self):
+        """ 尺寸夹到窗口内
+
+        旧版 .ui 的 minimumWidth=500 会把整个弹窗顶出 480 宽的屏幕，表格再窄也没用。
+        尺寸取父窗口(手机上是主窗口)，没有父窗口时退回当前活动窗口 —— 不要用
+        QtOwner().owner：那会触发 main_view 的懒导入，那条链上有人 `from this import d`。
+        """
+        owner = self.parentWidget() or QApplication.activeWindow()
+        width = owner.width() if owner is not None else 0
+        height = owner.height() if owner is not None else 0
+        if width <= 0:
+            self.widget.resize(673, 560)
+            return
+        self.widget.setMinimumWidth(0)
+        self.widget.setMaximumWidth(max(320, width - 16))
+        dialogWidth = min(560, max(320, width - 16))
+        dialogHeight = min(620, max(320, height - 96)) if height > 0 else 560
+        self.widget.resize(dialogWidth, dialogHeight)
 
     def _ClickButton(self):
-        selected = self.tableWidget.selectedIndexes()
-        selectRows = []
-        for index in selected:
-            selectRows.append(index.row())
-        if not selectRows:
+        modelName = self.tableWidget.SelectedModelName()
+        if not modelName:
             return
-        row = selectRows[0]
-        modelName1 = self.tableWidget.item(row, 0).text()
-        modelName2 = self.tableWidget.item(row, 1).text().replace("-", "")
-        modelName = "MODEL_" + modelName2.upper() + "_" + modelName1.upper()
         self.Close.emit(modelName)
         self.close()
-
-    def Init(self):
-        recommended = Str.GetStr(Str.Recommended)
-        AllModelNames = [
-            ("CUNET_UP1X_DENOISE0X","Waifu2x", "", "100%"),
-            ("CUNET_UP1X_DENOISE1X","Waifu2x", "", "110%"),
-            ("CUNET_UP1X_DENOISE2X","Waifu2x", "", "110%"),
-            ("CUNET_UP1X_DENOISE3X","Waifu2x", "", "110%"),
-            ("CUNET_UP2X","Waifu2x", "", "300%"),
-            ("CUNET_UP2X_DENOISE0X","Waifu2x", "", "310%"),
-            ("CUNET_UP2X_DENOISE1X","Waifu2x", "", "310%"),
-            ("CUNET_UP2X_DENOISE2X","Waifu2x", "", "310%"),
-            ("CUNET_UP2X_DENOISE3X","Waifu2x", recommended, "310%"),
-            ("ANIME_UP2X","Waifu2x", "", "200%"),
-            ("ANIME_UP2X_DENOISE0X","Waifu2x", "", "210%"),
-            ("ANIME_UP2X_DENOISE1X","Waifu2x", "", "210%"),
-            ("ANIME_UP2X_DENOISE2X","Waifu2x", "", "210%"),
-            ("ANIME_UP2X_DENOISE3X","Waifu2x", recommended, "210%"),
-            ("PHOTO_UP2X","Waifu2x", "", "180%"),
-            ("PHOTO_UP2X_DENOISE0X","Waifu2x", "", "200%"),
-            ("PHOTO_UP2X_DENOISE1X","Waifu2x", "", "200%"),
-            ("PHOTO_UP2X_DENOISE2X","Waifu2x", "", "200%"),
-            ("PHOTO_UP2X_DENOISE3X","Waifu2x", recommended, "200%"),
-            ("PRO_UP2X","Real-CUGAN", "", "350%"),
-            ("PRO_UP2X_CONSERVATIVE","Real-CUGAN", "", "350%"),
-            ("PRO_UP2X_DENOISE3X","Real-CUGAN", recommended, "350%"),
-            ("PRO_UP3X","Real-CUGAN", "", "500%"),
-            ("PRO_UP3X_CONSERVATIVE","Real-CUGAN", "", "500%"),
-            ("PRO_UP3X_DENOISE3X","Real-CUGAN", "", "500%"),
-            ("SE_UP2X","Real-CUGAN", "", "300%"),
-            ("SE_UP2X_CONSERVATIVE","Real-CUGAN", "", "300%"),
-            ("SE_UP2X_DENOISE1X","Real-CUGAN", "", "300%"),
-            ("SE_UP2X_DENOISE2X","Real-CUGAN", "", "300%"),
-            ("SE_UP2X_DENOISE3X","Real-CUGAN", recommended, "300%"),
-            ("SE_UP3X","Real-CUGAN", "", "500%"),
-            ("SE_UP3X_CONSERVATIVE","Real-CUGAN", "", "500%"),
-            ("SE_UP3X_DENOISE3X","Real-CUGAN", "", "500%"),
-            ("SE_UP4X","Real-CUGAN", "", "400%"),
-            ("SE_UP4X_CONSERVATIVE","Real-CUGAN", "", "400%"),
-            ("SE_UP4X_DENOISE3X","Real-CUGAN", "", "400%"),
-            ("ANIMAVIDEOV3_UP2X","Real-ESRGAN", recommended, "200%"),
-            ("ANIMAVIDEOV3_UP3X","Real-ESRGAN", "", "300%"),
-            ("ANIMAVIDEOV3_UP4X","Real-ESRGAN", "", "400%"),
-            ("X4PLUS_UP4X","Real-ESRGAN", "", "600%"),
-            ("X4PLUSANIME_UP4X", "Real-ESRGAN", "", "400%"),
-        ]
-        for v in AllModelNames:
-            rowCont = self.tableWidget.rowCount()
-            self.tableWidget.insertRow(rowCont)
-            self.tableWidget.setItem(rowCont, 0, QTableWidgetItem(v[0]))
-            self.tableWidget.setItem(rowCont, 1, QTableWidgetItem(v[1]))
-            self.tableWidget.setItem(rowCont, 2, QTableWidgetItem(v[3]))
-            self.tableWidget.setItem(rowCont, 3, QTableWidgetItem(v[2]))
-        pass

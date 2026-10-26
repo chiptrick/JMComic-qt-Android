@@ -11,6 +11,7 @@ from PySide6.QtWidgets import QFrame, QGraphicsPixmapItem, QGraphicsScene, QAppl
 
 from config import config
 from config.setting import Setting, SettingValue
+from component.widget.sr_model_table import FormatModelLabel
 from interface.ui_batch_sr import Ui_BatchSrTool
 from interface.ui_waifu2x_tool import Ui_Waifu2xTool
 from qt_owner import QtOwner
@@ -117,10 +118,12 @@ class BatchSrToolView(QtWidgets.QWidget, Ui_BatchSrTool, QtTaskBase):
         return
 
     def CheckOpenSrSelect(self):
-        QtOwner().OpenSrSelectModel(self.coverModelName.text(), self.CheckOpenSrSelectCoverBack)
+        # 传完整模型名（按钮文字是可读名，不能当 key）
+        QtOwner().OpenSrSelectModel(self.coverModelName.toolTip(), self.CheckOpenSrSelectCoverBack)
 
     def CheckOpenSrSelectCoverBack(self, modelName):
-        self.coverModelName.setText(modelName)
+        self.coverModelName.setText(FormatModelLabel(modelName))
+        self.coverModelName.setToolTip(modelName)
         Setting.BatchSrModelName.SetValue(modelName)
         return modelName
 
@@ -157,7 +160,8 @@ class BatchSrToolView(QtWidgets.QWidget, Ui_BatchSrTool, QtTaskBase):
         self.exportDir.setText(self.exportDirPath)
         self.inputDir.setText(self.inputDirPath)
         self.fmtBox.setCurrentText(Setting.BatchSrFmt.value)
-        self.coverModelName.setText(Setting.BatchSrModelName.value)
+        self.coverModelName.setText(FormatModelLabel(Setting.BatchSrModelName.value))
+        self.coverModelName.setToolTip(Setting.BatchSrModelName.value)
         self.coverScale.setValue(Setting.BatchSrScale.value)
 
         if self.curState == self.StartImport:
