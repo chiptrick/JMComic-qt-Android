@@ -697,6 +697,27 @@ def GetExistingDirectory(parent=None, caption="", dir=""):
     return _Launch(parent, caption, dir, ModeDir, "")
 
 
+def PickLocalDir(parent=None, caption="", dir=""):
+    """ 选一个**真实文件系统目录**，不导入、不拷贝任何内容
+
+    与 GetExistingDirectory 的区别：后者在 Android 上是"导入"语义 —— 走 SAF
+    把整棵树拷进应用目录，然后返回拷贝后的本地路径。缓存目录不能那么干：
+    缓存必须由 Python 直接 open，SAF 的 content:// 打不开；而且把缓存目录
+    再拷一份纯属浪费。
+
+    所以这里只用应用内选择器(它列出来的都是真实路径)；用户没权限进的目录
+    本来就列不出来。取消返回 ""。
+    """
+    if not platform_mobile.IsAndroid():
+        from PySide6.QtWidgets import QFileDialog
+        return QFileDialog.getExistingDirectory(parent, caption, dir)
+    result = _Launch(parent, caption, dir or platform_mobile.GetExternalDir(), ModeDir, "")
+    # ModeDir 的确定结果是 (目录, "") 元组，取消是 ""(与 _Launch 一致)
+    if isinstance(result, (tuple, list)):
+        return str(result[0]) if result else ""
+    return str(result or "")
+
+
 def SafImportFolder(caption="", parent=None):
     """ SAF 选目录 -> 拷进应用目录 -> 返回本地路径
 

@@ -75,9 +75,18 @@ class SettingValue:
             self._value = value
             self.autoValue = 0
         Setting.SaveSettingV(self)
+        # 任何设置变化都可能伴随缓存目录变化(目前是 CachePath)，清掉可写缓存
+        Setting._cachePathResolved = ""
+        Setting._cachePathRejected = ""
 
 
 class Setting:
+    # 自定义缓存目录"已校验可写"的缓存：GetCachePath() 每存取一张图都会调用，
+    # 不能每次都 makedirs + 写探针；配置一变(SetValue)就清空重算。
+    _cachePathResolved = ""
+    # 校验失败的目录也记下来，避免每张图都重试一次 + 刷一条日志
+    _cachePathRejected = ""
+
     # 通用设置
     IsUpdate = SettingValue("GeneraSetting", 1, False)
     Language = SettingValue("GeneraSetting", 0, False, ["Auto", "zh", "hk", "en"])  # ch-zh ch-hk eu
@@ -143,6 +152,15 @@ class Setting:
     SavePathTree = SettingValue("DownloadSetting", "", False)
     SavePathTreeName = SettingValue("DownloadSetting", "", False)
     SaveNameType = SettingValue("DownloadSetting", 0, False)
+    # 缓存目录(封面/图片缓存/超分临时图/zip 临时文件)
+    #
+    # 配置项：config.ini 的 [DownloadSetting] CachePath
+    #   * 空串(默认) = 用平台默认值，见 GetDefaultCachePath()
+    #       Android -> /storage/emulated/0/Android/data/<包名>/cache/jmcomic-qt
+    #       Windows -> <SavePath>/cache
+    #       Linux   -> $XDG_CACHE_HOME/jmcomic-qt
+    #   * 绝对路径 = 设置页"缓存位置"选出来的自定义目录(直接写入，不经过默认目录)
+    CachePath = SettingValue("DownloadSetting", "", False)
 
     # Waifu2x设置
     SelectEncodeGpu = SettingValue("Waifu2xSetting", "", True)
@@ -235,13 +253,19 @@ class Setting:
                 setItem.InitValue(value, name)
         from tools.log import Log
         Log.UpdateLoggingLevel()
-        if not Setting.SavePath.value:
-            from tools.platform_mobile import IsAndroid, GetAndroidSavePath
-            if IsAndroid():
-                # Android 14: 应用外部私有目录，无需存储权限且用户可见
-                Setting.SavePath.SetValue(GetAndroidSavePath())
-            elif sys.platform.lower() == "linux":
-                Setting.SavePath.SetValue(Setting.GetDataPath())
+        from tools import platform_mobile
+        if platform_mobile.IsAndroid():
+            if not Setting.SavePath.value:
+                # Android 10+: 应用外部私有目录，无需存储权限且用户可见
+                Setting.SavePath.SetValue(platform_mobile.GetAndroidSavePath())
+            # 老配置里的内部私有下载目录 → 外部目录(已下载内容后台搬过去)；
+            # 自定义缓存目录与默认目录并存时也在这里补齐遗留内容
+            try:
+                platform_mobile.ApplyAndroidPathDefaults()
+            except Exception as es:
+                Log.Error(es)
+        elif sys.platform.lower() == "linux" and not Setting.SavePath.value:
+            Setting.SavePath.SetValue(Setting.GetDataPath())
         return
 
     @staticmethod
@@ -272,11 +296,19 @@ class Setting:
         ]:
             os.makedirs(path, exist_ok=True)
 
+        # 缓存目录：自定义目录直接建；默认目录要等 SavePath 就绪
+        # (Init 早于 InitLoadSetting，那时 SavePath 还是空)
         if Setting.SavePath.value:
-            for path in [
-                Setting.GetCachePath(),
-            ]:
-                os.makedirs(path, exist_ok=True)
+            try:
+                os.makedirs(Setting.GetCachePath(), exist_ok=True)
+            except Exception:
+                pass
+        custom = str(Setting.CachePath.value or "").strip()
+        if custom:
+            try:
+                os.makedirs(custom, exist_ok=True)
+            except Exception:
+                pass
         return
 
     @staticmethod
@@ -295,17 +327,61 @@ class Setting:
         return Setting._xdgDir("XDG_DATA_HOME", ".local/share")
 
     @staticmethod
-    def GetCachePath():
-        """ 缓存目录(封面/图片缓存/超分临时图/zip 临时文件等可再生数据)
+    def GetDefaultCachePath():
+        """ 缓存目录的默认值(不看自定义配置)
 
-        桌面端：<SavePath>/cache
-        Android：platform_mobile.InitAndroidEnv 把 XDG_CACHE_HOME 指到应用外部
-        缓存目录(/storage/emulated/0/Android/data/<包名>/cache)，最终落在
-        …/cache/jmcomic-qt —— 系统"清理缓存"/设置-存储/文件管理器都能手动清理
+        桌面 Windows：<SavePath>/cache
+        其它桌面端：$XDG_CACHE_HOME/jmcomic-qt(通常 ~/.cache/jmcomic-qt)
+        Android：InitAndroidEnv 把 XDG_CACHE_HOME 指到应用外部缓存目录
+                 /storage/emulated/0/Android/data/<包名>/cache，
+                 所以最终是 …/cache/jmcomic-qt —— 系统"清理缓存"、设置-存储、
+                 文件管理器都能看到并手动清掉
         """
         if sys.platform == "win32":
             return os.path.join(Setting.SavePath.value, config.CachePathDir)
         return Setting._xdgDir("XDG_CACHE_HOME", ".cache")
+
+    @staticmethod
+    def IsCustomCachePath():
+        """ 是否设置了自定义缓存目录 """
+        return bool(str(Setting.CachePath.value or "").strip())
+
+    @staticmethod
+    def GetCachePath():
+        """ 当前生效的缓存目录(自定义优先，默认见 GetDefaultCachePath)
+
+        封面/图片缓存/超分临时图/zip 临时文件都**直接**写在这里 —— 不经过
+        任何"临时私有目录"，所以改完目录立即生效。
+
+        自定义目录不可用时(被删、存储卡拔掉、没权限)回退默认值，避免整条图片
+        缓存链写不进去。校验结果缓存到 _cachePathResolved：这个函数每张图都会
+        调一次，不能每次都建目录/写探针。
+        """
+        custom = str(Setting.CachePath.value or "").strip()
+        if not custom:
+            return Setting.GetDefaultCachePath()
+        from tools import platform_mobile
+        path = platform_mobile.NormalizeLocalPath(custom)
+        if not path:
+            return Setting.GetDefaultCachePath()
+        if path == Setting._cachePathResolved:
+            return path
+        if path == Setting._cachePathRejected:
+            return Setting.GetDefaultCachePath()
+        ok, reason = platform_mobile.EnsureWritableDir(path)
+        if not ok:
+            Setting._cachePathRejected = path
+            try:
+                from tools.log import Log
+                if getattr(Log, "logger", None) is not None:
+                    Log.logger.warning(
+                        "cache: 自定义缓存目录不可用，回退默认值: {} ({})".format(
+                            custom, reason))
+            except Exception:
+                pass
+            return Setting.GetDefaultCachePath()
+        Setting._cachePathResolved = path
+        return path
 
     @staticmethod
     def DownloadTreeKey():

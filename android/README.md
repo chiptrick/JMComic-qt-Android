@@ -1247,7 +1247,8 @@ adb shell dumpsys package <包名> | grep -E "minSdk|targetSdk"
 * 桌面端超分仍然是 `sr_vulkan`；只有在 Android 上 `sr_backend.InstallQnnCompat()`
   才会把 `sr_qnn` 注册成 `sr_vulkan`。
 * `Setting.InitLoadSetting()` 里 Android 的默认下载目录改为应用外部私有目录，
-  其他平台分支未变。
+  并在配置读完后调用 `platform_mobile.ApplyAndroidPathDefaults()` 校正历史
+  内部路径(见 §6)；其他平台分支未变。
 * `TaskMulti`（拼图）在 Android 上用线程代替多进程（p4a 下 fork 不稳定），桌面端仍用进程。
 
 ---
@@ -1257,10 +1258,21 @@ adb shell dumpsys package <包名> | grep -E "minSdk|targetSdk"
 | 用途 | 路径 | 权限 |
 | --- | --- | --- |
 | 配置/数据/日志 | `/data/data/<包名>/files/{config,data,state}` | 无需申请 |
-| 缓存(封面/图片缓存/超分临时图/zip 临时文件) | `/storage/emulated/0/Android/data/<包名>/cache/jmcomic-qt` | 无需申请(Android 10+) |
-| 下载目录 | `/storage/emulated/0/Android/data/<包名>/files/JMComic` | 无需申请(Android 10+) |
+| 缓存(封面/图片缓存/超分临时图/zip 临时文件) | 默认 `/storage/emulated/0/Android/data/<包名>/cache/jmcomic-qt`，可在设置里改 | 无需申请(Android 10+) |
+| 下载目录 | 默认 `/storage/emulated/0/Android/data/<包名>/files/commies`；选了 SAF 目录后就是那个目录下的 `commies` | 无需申请(Android 10+) |
 | 导入落地（SAF 选中的文件/目录拷到这里） | `/data/data/<包名>/files/import/<名字>` | 无需申请 |
 | 模型 | `/data/data/<包名>/files/waifu2x-models` | 无需申请 |
+
+**下载与缓存都是"直接写"**：
+* 下载：设置 → 下载与缓存 → "设置目录"，手机走 SAF，选中的目录就是**下载目录本身**
+  (`saf://<key>/commies/…`)，每张图直接写进去(见 §3.14)，没有"先落私有目录再导出"。
+* 缓存：设置 → 下载与缓存 → "缓存位置"。默认值见上表；配置项是 `config.ini` 的
+  `[DownloadSetting] CachePath`(空串 = 默认值)。自定义目录必须是 Python 能直接
+  `open()` 的真实路径(应用内部/外部私有目录都可以)，应用只在其下建 `jmcomic-qt/`
+  子目录；新缓存**直接写新目录**，只有旧目录里已有的缓存会在后台搬一次。
+* 老版本配置里落在 `/data/user/0/…` 的下载目录，启动时由
+  `platform_mobile.ApplyAndroidPathDefaults()` 改到外部存储，并把已下载的
+  `commies` 内容在后台搬过去；新下载立刻写外部目录。
 
 **为什么缓存单独放外部缓存目录**：缓存全是可再生数据(封面、看图图片缓存、超分临时
 图、zip 临时文件)，删了顶多重新下载；放在内部私有目录里用户没有任何手段清理
@@ -1280,9 +1292,9 @@ context binary 编译缓存(`waifu2x-cache`)和模型(`waifu2x-models`)仍留在
 也不再需要引导用户去系统设置里手动开权限。
 
 代价（刻意的取舍）：SAF 授权的是 `content://` URI，Python 的 `open()` 打不开，
-所以"导入"= **拷贝一份**到 `files/import/`（占双份空间）；下载目录同理，本地落盘
-在应用专属目录，用户选的目录作为导出目标，整本下完才拷过去（同样占双份空间，
-换来的是一页一张图的连续写入不必逐文件走一次 IPC）。
+所以"导入本地漫画/图片"= **拷贝一份**到 `files/import/`（占双份空间）。下载与
+缓存的常态写入不走这条路：要么是应用外部目录的真实路径，要么由 `tools/vfs.py`
+的 SAF 数据面**逐文件直写目标目录**（见 §3.14），不会先落私有目录再拷贝。
 
 ---
 

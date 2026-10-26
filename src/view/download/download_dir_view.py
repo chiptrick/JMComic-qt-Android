@@ -58,9 +58,13 @@ class DownloadDirView(BaseMaskDialog, Ui_DownloadDir, QtTaskBase):
         self.waifu2xDir.setText(os.path.join(cachePath, config.Waifu2xPath))
         from tools import platform_mobile
         if platform_mobile.IsAndroid():
-            # 缓存在应用外部缓存目录(Android 11+ 第三方文件管理器大多进不去
-            # Android/data)，tooltip 里把清理途径讲清楚
-            self.cacheDir.setToolTip("{}（应用缓存，可在系统存储设置或文件管理器中手动清理）".format(cachePath))
+            # 缓存默认在应用外部缓存目录(Android 11+ 第三方文件管理器大多进不去
+            # Android/data)，tooltip 里把清理途径讲清楚；自定义目录则提示入口
+            isCustom = os.path.normpath(cachePath) != os.path.normpath(Setting.GetDefaultCachePath())
+            if isCustom:
+                self.cacheDir.setToolTip("{}（自定义缓存目录，可在设置-下载与缓存中更改）".format(cachePath))
+            else:
+                self.cacheDir.setToolTip("{}（默认缓存目录，可在系统存储设置或文件管理器中手动清理）".format(cachePath))
             self.waifu2xDir.setToolTip(os.path.join(cachePath, config.Waifu2xPath))
 
     def SavePath(self):

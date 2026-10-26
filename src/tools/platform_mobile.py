@@ -10,8 +10,14 @@ InitAndroidEnv()，作用：
        (/storage/emulated/0/Android/data/<包名>/cache) —— 封面/图片缓存/超分
        临时图都是可再生数据，放外部用户才清理得掉(系统"清理缓存"、设置-存储、
        文件管理器都能看到它)，内部私有目录留给配置/数据库/模型这些删了会出事的
-    2. 把下载目录默认指向应用外部私有目录(/storage/emulated/0/Android/data/<包名>/files)
-    3. 标记触摸设备、禁用桌面端专有特性(系统托盘/单实例/无边框窗口)
+    2. 把下载目录默认指向应用外部私有目录
+       (/storage/emulated/0/Android/data/<包名>/files/commies)
+    3. 校验/校正路径：历史配置里落在内部私有目录的下载目录会被改到外部目录，
+       并把已下载的内容搬过去；自定义缓存目录不可用时由 Setting 回退默认值
+    4. 标记触摸设备、禁用桌面端专有特性(系统托盘/单实例/无边框窗口)
+
+下载与缓存都**直接写目标目录**：要么是应用外部目录的真实路径，要么是用户用
+SAF 选的目录(见 tools/vfs.py)，不存在"先落私有目录再拷贝"。
 """
 import os
 import sys
@@ -35,7 +41,7 @@ _appDataDir = ""
 _saveDir = ""
 _externalDir = ""
 _nativeLibDirs = None
-_cacheMigrateThread = None
+_migrateThreads = []                    # 后台目录搬迁线程(缓存/下载目录变更)
 
 
 def IsAndroid():
@@ -220,10 +226,93 @@ def GetExternalCacheDir():
 
 
 def GetAndroidSavePath():
-    """ 下载目录默认值 """
+    """ 下载目录默认值
+
+    应用外部私有目录(/storage/emulated/0/Android/data/<包名>/files)：
+    Android 10+ 读写自己的外部目录不需要任何存储权限，用户在文件管理器里
+    也能看到(而不是只存在于 /data/user/0 里、只能靠"清除数据"处理)。
+    """
     if _saveDir:
         return _saveDir
     return GetExternalDir()
+
+
+# 内部私有存储前缀：用户/文件管理器看不到，系统"清理缓存"也不会动
+_InternalDataPrefixes = ("/data/user/0/", "/data/data/", "/data/user_de/0/")
+
+
+def NormalizeLocalPath(path):
+    """ 规范化本地路径：去空白、展开 ~、折叠 "." 与 ".."
+
+    * 空串 / 相对路径返回 "" —— 下载与缓存目录必须是绝对路径，否则运行时
+      工作目录一变(Android 上是 "/")就会写到意料之外的地方
+    * `saf://...` 原样返回(它不是文件系统路径，交给 tools/vfs.py 处理)
+    """
+    text = str(path or "").strip()
+    if not text:
+        return ""
+    if text.startswith("saf://"):
+        return text
+    text = os.path.expanduser(text)
+    if not os.path.isabs(text):
+        return ""
+    return os.path.normpath(text)
+
+
+def IsInternalDataPath(path):
+    """ 是否位于应用内部私有存储(/data/user/0/<包名>/…)
+
+    这类目录只有应用自己看得到：文件管理器进不去、系统"清理缓存"不显示，
+    只有"清除数据/卸载"才会删 —— 所以下载与缓存默认值必须避开。
+    """
+    p = NormalizeLocalPath(path)
+    if not p:
+        return False
+    return any(p.startswith(prefix) for prefix in _InternalDataPrefixes)
+
+
+def EnsureWritableDir(path, probeName=".jm_write_probe"):
+    """ 确认目录存在且真能写(建目录 + 写探针文件 + 删除)，返回 (ok, reason)
+
+    不用 os.access：Android 的外部存储是 FUSE，权限位看不出来是否可写，
+    真正写一次才知道；同时也能提前发现"目录被同名文件占了"这种脏状态。
+    """
+    p = NormalizeLocalPath(path)
+    if not p or p.startswith("saf://"):
+        return False, "invalid path"
+    try:
+        os.makedirs(p, exist_ok=True)
+    except Exception as es:
+        return False, "makedirs: {}".format(es)
+    probe = os.path.join(p, probeName)
+    try:
+        with open(probe, "wb") as f:
+            f.write(b"jm")
+        os.remove(probe)
+        return True, ""
+    except Exception as es:
+        return False, "write: {}".format(es)
+
+
+def NormalizeAndroidSavePath(path, external=None):
+    """ 规范 Android 下载根目录，返回 (路径, 是否改动)
+
+    老配置里的 SavePath 可能落在内部私有目录(/data/user/0/<包名>/files 或
+    …/files/JMComic)：用户看不见、卸载即没，也谈不上"自己清理"。这种历史值
+    统一改成应用外部私有目录(/storage/emulated/0/Android/data/<包名>/files)。
+    外部目录取不到时保留原值，保证功能还能用。
+    """
+    ext = NormalizeLocalPath(external) or NormalizeLocalPath(GetExternalDir())
+    current = NormalizeLocalPath(path)
+    if not current:
+        return ext, bool(ext)
+    legacy = IsInternalDataPath(current)
+    root = NormalizeLocalPath(GetAppDataDir())
+    if root and (current == root or current.startswith(root + os.sep)):
+        legacy = True
+    if legacy and ext and current != ext:
+        return ext, True
+    return current, False
 
 
 def GetAndroidPackage():
@@ -242,6 +331,107 @@ def GetAndroidPackage():
     return ""
 
 
+def _LogMigrate(msg):
+    """ 搬迁日志
+
+    别用 Log.Warn/Info/Error 那组静态方法：它们一律 exc_info=True，不在
+    except 块里调用会往日志里喷一段 "NoneType: None" 的假堆栈。
+    """
+    try:
+        from tools.log import Log
+        Log.logger.warning(msg)
+    except Exception:
+        try:
+            print(msg, flush=True)
+        except Exception:
+            pass
+
+
+def _MergeMove(src, dst):
+    """ 递归把 src 里"dst 还没有"的条目搬过去(文件级不覆盖)
+
+    只按顶层条目跳过会把"同一本书的新旧页"整个跳过、白丢一批缓存，
+    所以必须递归到文件。
+    """
+    import shutil
+
+    os.makedirs(dst, exist_ok=True)
+    for name in os.listdir(src):
+        source = os.path.join(src, name)
+        target = os.path.join(dst, name)
+        if os.path.isdir(source):
+            _MergeMove(source, target)
+        elif not os.path.exists(target):
+            shutil.move(source, target)
+
+
+def _MigrateWork(oldDir, newDir, label):
+    """ 把 oldDir 的内容搬到 newDir；全部成功才删 oldDir(失败保留旧的，不丢数据) """
+    import shutil
+
+    try:
+        if not os.path.isdir(oldDir):
+            return
+        try:
+            if os.path.realpath(oldDir) == os.path.realpath(newDir):
+                return
+        except Exception:
+            return
+        if not os.path.isdir(newDir) or not os.listdir(newDir):
+            # 新目录不存在或还是空的：整体搬过去(同分区是 rename，瞬时的)
+            os.makedirs(os.path.dirname(newDir), exist_ok=True)
+            if os.path.isdir(newDir):
+                shutil.rmtree(newDir, ignore_errors=True)
+            shutil.move(oldDir, newDir)
+        else:
+            _MergeMove(oldDir, newDir)
+            shutil.rmtree(oldDir, ignore_errors=True)
+        _LogMigrate("{}: 已迁到 {}".format(label, newDir))
+    except Exception as es:
+        _LogMigrate("{}: 搬迁失败(保留原目录): {} ({})".format(label, es, oldDir))
+
+
+def MigrateDirAsync(oldDir, newDir, label="dir", waitFirst=False):
+    """ 后台搬目录(跨分区只能拷贝+删除，不能卡启动/界面)
+
+    :param waitFirst: 先等此前启动的搬迁结束 —— "默认缓存目录 → 自定义缓存目录"
+        必须排在启动时"内部私有目录 → 默认缓存目录"之后，否则会看到默认目录
+        还没建好就直接跳过，留下一份谁也不会再用的旧缓存。
+    """
+    import threading
+
+    previous = list(_migrateThreads) if waitFirst else []
+
+    def _Work():
+        for thread in previous:
+            try:
+                thread.join(60.0)
+            except Exception:
+                pass
+        _MigrateWork(oldDir, newDir, label)
+
+    thread = threading.Thread(target=_Work, name="jm-migrate", daemon=True)
+    _migrateThreads.append(thread)
+    thread.start()
+    return thread
+
+
+def WaitDirMigrate(timeout=30.0):
+    """ 等所有搬迁线程结束(测试/退出前用)；没有搬运过直接返回 True """
+    import time as _time
+
+    threads = list(_migrateThreads)
+    deadline = _time.time() + max(0.0, float(timeout))
+    for thread in threads:
+        try:
+            thread.join(max(0.0, deadline - _time.time()))
+        except Exception:
+            pass
+    alive = [t for t in _migrateThreads if t.is_alive()]
+    _migrateThreads[:] = alive
+    return not alive
+
+
 def _MigrateCacheToExternal(root, cacheBase):
     """ 把老版本放在内部私有目录的缓存搬到外部缓存目录(见 InitAndroidEnv)
 
@@ -250,71 +440,61 @@ def _MigrateCacheToExternal(root, cacheBase):
     缓存(waifu2x-cache)不搬 —— 它们不是用户可清理的缓存，重新下载/编译代价大。
     同分区 rename 是瞬时的；内部→外部跨分区只能拷贝+删除，所以放后台线程。
     """
-    import shutil
-
     oldDir = os.path.join(root, "cache", "jmcomic-qt")
     newDir = os.path.join(cacheBase, "jmcomic-qt")
-    try:
-        if not os.path.isdir(oldDir):
-            return
-        if os.path.realpath(oldDir) == os.path.realpath(newDir):
-            return
-    except Exception:
-        return
-
-    def _Log(msg):
-        # 注意别用 Log.Warn/Info/Error 那组静态方法：它们一律 exc_info=True，
-        # 不在 except 块里调用会往日志里喷一段 "NoneType: None" 的假堆栈
-        try:
-            from tools.log import Log
-            Log.logger.warning(msg)
-        except Exception:
-            try:
-                print(msg, flush=True)
-            except Exception:
-                pass
-
-    def _Work():
-        try:
-            if not os.path.isdir(newDir) or not os.listdir(newDir):
-                # 新目录不存在或还是空的：整体搬过去
-                os.makedirs(os.path.dirname(newDir), exist_ok=True)
-                if os.path.isdir(newDir):
-                    shutil.rmtree(newDir, ignore_errors=True)
-                shutil.move(oldDir, newDir)
-            else:
-                # 新目录已经有内容(新版本已经跑过)：递归合并，**文件级**不覆盖
-                # (只按顶层条目跳过会把"同一本书的新旧页"整个跳过，白丢一批缓存)
-                def _Merge(src, dst):
-                    os.makedirs(dst, exist_ok=True)
-                    for name in os.listdir(src):
-                        source = os.path.join(src, name)
-                        target = os.path.join(dst, name)
-                        if os.path.isdir(source):
-                            _Merge(source, target)
-                        elif not os.path.exists(target):
-                            shutil.move(source, target)
-
-                _Merge(oldDir, newDir)
-                shutil.rmtree(oldDir, ignore_errors=True)
-            _Log("cache: 旧缓存已迁到外部缓存目录 -> {}".format(newDir))
-        except Exception as es:
-            _Log("cache: 旧缓存搬迁失败(保留原目录): {} ({})".format(es, oldDir))
-
-    import threading
-    global _cacheMigrateThread
-    _cacheMigrateThread = threading.Thread(target=_Work, name="cache-migrate", daemon=True)
-    _cacheMigrateThread.start()
-    return
+    return MigrateDirAsync(oldDir, newDir, "cache")
 
 
 def WaitCacheMigrate(timeout=30.0):
-    """ 等旧缓存搬迁线程结束(测试/退出前用)；没启动过就直接返回 True """
-    thread = _cacheMigrateThread
-    if thread is None:
-        return True
-    thread.join(timeout)
-    return not thread.is_alive()
+    """ 兼容旧名字：等所有缓存/目录搬迁结束 """
+    return WaitDirMigrate(timeout)
+
+
+def ApplyAndroidPathDefaults():
+    """ 设置读完之后校正 Android 的下载/缓存目录，并把旧位置的内容搬过去
+
+    在 Setting.InitLoadSetting() 末尾调用(必须在配置读完之后)：
+      1. 历史遗留的内部私有下载目录(/data/...) → 外部私有目录；已下载的
+         `commies` 内容在后台搬过去，之后新下载直接写外部目录；
+      2. 设置了自定义缓存目录时，把默认缓存目录里残留的内容补搬过去 ——
+         正常在设置页改目录时已经搬过，这里只兜底"改完立刻被杀进程"的情况。
+    """
+    if not IsAndroid():
+        return
+    from config import config
+    from config.setting import Setting
+
+    current = NormalizeLocalPath(Setting.SavePath.value)
+    target, changed = NormalizeAndroidSavePath(current)
+    if target:
+        # 目录被删/存储卡拔掉时 makedirs 会失败：退到应用外部目录，别让整个
+        # 下载链在第一次写文件时才报错
+        ok, _ = EnsureWritableDir(target)
+        if not ok:
+            fallback = NormalizeLocalPath(GetExternalDir())
+            if fallback and fallback != target:
+                target, changed = fallback, True
+                ok, _ = EnsureWritableDir(target)
+        try:
+            os.makedirs(os.path.join(target, config.SavePathDir), exist_ok=True)
+        except Exception:
+            pass
+        if changed:
+            Setting.SavePath.SetValue(target)
+            oldRoot = os.path.join(current, config.SavePathDir) if current else ""
+            newRoot = os.path.join(target, config.SavePathDir)
+            if oldRoot and os.path.isdir(oldRoot):
+                MigrateDirAsync(oldRoot, newRoot, "download")
+
+    try:
+        effective = NormalizeLocalPath(Setting.GetCachePath())
+        default = NormalizeLocalPath(Setting.GetDefaultCachePath())
+        if effective and default and effective != default:
+            # 不在这里判断默认目录是否非空：启动时"内部→默认"的搬迁可能还在跑，
+            # 交给后台线程(先等前一个搬完)再判断；没有可搬的东西就是空转一次
+            MigrateDirAsync(default, effective, "cache", waitFirst=True)
+    except Exception:
+        pass
 
 
 def InitAndroidEnv(app=None):
