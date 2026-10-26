@@ -18,6 +18,7 @@ echo
 echo "===== 1. 语法编译(目标版本语法) ====="
 "$PY" -m py_compile \
     src/tools/platform_mobile.py \
+    src/tools/cache_path.py \
     src/tools/mobile_ui.py \
     src/tools/mobile_ui_base.py \
     src/tools/mobile_ui_hooks.py \

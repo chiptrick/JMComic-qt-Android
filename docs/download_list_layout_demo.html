@@ -1,0 +1,571 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>下载列表排版重构 · Demo</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: radial-gradient(1100px 620px at 18% -12%, #24262c 0%, #17181c 58%, #121316 100%);
+    color: #e7eaee;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+    -webkit-font-smoothing: antialiased;
+    min-height: 100vh;
+  }
+  body::before {
+    content: "";
+    position: fixed; inset: 0; pointer-events: none;
+    background-image: linear-gradient(rgba(255,255,255,.022) 1px, transparent 1px),
+                      linear-gradient(90deg, rgba(255,255,255,.022) 1px, transparent 1px);
+    background-size: 32px 32px;
+    mask-image: radial-gradient(800px 500px at 50% 0%, #000 20%, transparent 80%);
+  }
+
+  .wrap { position: relative; display: flex; gap: 24px; padding: 26px 26px 48px; align-items: flex-start; max-width: 1340px; margin: 0 auto; }
+
+  /* ---------------- 左侧面板 ---------------- */
+  .side { width: 396px; flex: none; }
+  .side h1 { font-size: 20px; line-height: 1.35; margin: 0 0 6px; letter-spacing: .2px; }
+  .side h1 em { font-style: normal; color: #ef8b45; }
+  .side .sub { margin: 0 0 18px; font-size: 12.5px; color: #969da7; line-height: 1.65; }
+  .badge-tip {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 11px; color: #9ad0b2; background: rgba(92,189,143,.1);
+    border: 1px solid rgba(92,189,143,.28); border-radius: 999px; padding: 3px 9px; margin-bottom: 16px;
+  }
+  .badge-tip::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: #5cbd8f; }
+
+  .block { background: rgba(255,255,255,.028); border: 1px solid rgba(255,255,255,.06); border-radius: 10px; padding: 12px 13px; margin-bottom: 12px; }
+  .block > h2 {
+    font-size: 11px; font-weight: 600; letter-spacing: .12em; color: #79818b;
+    margin: 0 0 10px; text-transform: uppercase;
+  }
+
+  .seg { display: flex; gap: 6px; }
+  .seg button {
+    flex: 1; appearance: none; cursor: pointer;
+    background: #1d1f24; border: 1px solid #34383f; color: #b3bac3;
+    font-size: 12px; padding: 8px 4px; border-radius: 7px; font-family: inherit;
+    transition: .15s; line-height: 1.25;
+  }
+  .seg button:hover { border-color: #4a5058; color: #dfe4ea; }
+  .seg button.on { background: rgba(224,118,42,.14); border-color: #e0762a; color: #f2a061; font-weight: 600; }
+  .seg button span { display: block; font-size: 9.5px; color: #7d848d; font-weight: 400; margin-top: 2px; }
+  .seg button.on span { color: #c98a5a; }
+
+  .sw { display: flex; align-items: center; gap: 9px; padding: 6px 0; font-size: 13px; color: #c8cfd7; cursor: pointer; user-select: none; }
+  .sw input { appearance: none; width: 14px; height: 14px; border: 1px solid #565d66; border-radius: 3px; background: #1b1d21; cursor: pointer; position: relative; flex: none; }
+  .sw input:checked { background: #e0762a; border-color: #e0762a; }
+  .sw input:checked::after { content: ""; position: absolute; left: 4px; top: 1px; width: 4px; height: 8px; border: solid #1b1d21; border-width: 0 2px 2px 0; transform: rotate(42deg); }
+  .sw small { color: #7d848d; font-size: 10.5px; }
+
+  .fields { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 4px 10px; }
+  .fields li { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #bcc3cc; }
+  .fields li .tick { width: 12px; height: 12px; border-radius: 3px; background: rgba(92,189,143,.16); color: #67c795; font-size: 9px; display: flex; align-items: center; justify-content: center; flex: none; }
+  .fields li.off { color: #6d747d; text-decoration: line-through; text-decoration-color: #5a6068; }
+  .fields li.off .tick { background: rgba(224,103,92,.14); color: #cf6e64; }
+  .fields li em { font-style: normal; font-size: 9.5px; color: #6d747d; margin-left: auto; }
+
+  .notes { margin: 0; padding-left: 16px; font-size: 12.5px; line-height: 1.72; color: #b4bbc4; }
+  .notes li { margin-bottom: 5px; }
+  .notes b { color: #e3e8ee; font-weight: 600; }
+  .notes code { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 10.5px; background: rgba(255,255,255,.06); padding: 1px 4px; border-radius: 3px; color: #d7b892; }
+
+  /* ---------------- 手机外壳 ---------------- */
+  .stage { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 12px; min-width: 0; }
+  .phone {
+    width: 496px; height: 1000px; padding: 9px; border-radius: 30px;
+    background: linear-gradient(180deg, #101114, #0a0b0d);
+    box-shadow: 0 30px 70px -20px rgba(0,0,0,.85), 0 0 0 1px rgba(255,255,255,.05), inset 0 0 0 1px rgba(255,255,255,.02);
+  }
+  .screen {
+    width: 478px; height: 982px; border-radius: 23px; overflow: hidden;
+    background: #32353a; display: flex; flex-direction: column; position: relative;
+  }
+  .hint { font-size: 11.5px; color: #79818b; text-align: center; max-width: 480px; line-height: 1.6; }
+  .hint kbd { font-family: inherit; background: rgba(255,255,255,.07); border: 1px solid rgba(255,255,255,.1); border-radius: 4px; padding: 0 4px; font-size: 10.5px; }
+
+  /* ---------------- 应用内：导航 ---------------- */
+  .nav { height: 46px; flex: none; display: flex; align-items: center; gap: 12px; padding: 0 13px; border-bottom: 1px solid #44484e; }
+  .nav .back { font-size: 14px; color: #e7eaee; }
+  .nav .crumb { display: flex; align-items: center; gap: 8px; margin-left: 6px; }
+  .nav .menu { padding: 3px 13px; border: 1px solid #e0762a; color: #f09a58; font-size: 13.5px; border-radius: 2px; }
+  .nav .arrow { color: #b9c0c8; font-size: 13px; }
+  .nav .cur { padding: 4px 14px; background: #43464c; color: #eef1f4; font-size: 13.5px; }
+
+  /* ---------------- 应用内：筛选区（重构后 3 行） ---------------- */
+  .toolbar { flex: none; padding: 9px 11px 8px; background: #25262a; border-bottom: 1px solid #44484e; }
+  .row1 { display: flex; gap: 8px; }
+  .select {
+    height: 31px; min-width: 92px; display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    padding: 0 9px; border: 1px solid #e0762a; background: #2c2d32; color: #e7eaee; font-size: 13px; border-radius: 2px;
+  }
+  .select svg { opacity: .8; }
+  .search { flex: 1; display: flex; align-items: center; gap: 6px; padding: 0 9px; border: 1px solid #4a4e55; background: #2c2d32; border-radius: 2px; min-width: 0; }
+  .search input { flex: 1; min-width: 0; background: none; border: none; outline: none; color: #e7eaee; font-size: 12.5px; font-family: inherit; height: 29px; }
+  .search input::placeholder { color: #767d86; }
+  .actions { display: flex; gap: 5px; margin-top: 8px; }
+  .chip {
+    flex: 1; appearance: none; cursor: pointer; font-family: inherit;
+    background: transparent; border: 1px solid #e0762a; color: #f09a58;
+    font-size: 11.5px; padding: 5px 2px; border-radius: 2px; white-space: nowrap; transition: .12s;
+  }
+  .chip:hover { background: rgba(224,118,42,.12); }
+  .chip:active { background: rgba(224,118,42,.24); }
+  .toggles { display: flex; gap: 5px; margin-top: 7px; flex-wrap: wrap; }
+  .tchip {
+    display: inline-flex; align-items: center; gap: 6px; cursor: pointer;
+    border: 1px solid #4a4e55; border-radius: 2px; padding: 3px 6px;
+    font-size: 10.5px; color: #a9b0b9; background: transparent; font-family: inherit;
+  }
+  .tchip .box { width: 9px; height: 9px; border: 1px solid #6d747d; flex: none; }
+  .tchip.on { color: #e6ebf0; border-color: #7d6a53; }
+  .tchip.on .box { background: #e0762a; border-color: #e0762a; }
+  .tchip .dot { width: 9px; height: 9px; border-radius: 50%; border: 1px solid #e0762a; flex: none; }
+  .tchip.on .dot { background: #e0762a; box-shadow: inset 0 0 0 2px #25262a; }
+
+  /* ---------------- 排序条 ---------------- */
+  .sortbar {
+    height: 26px; flex: none; display: flex; align-items: center; justify-content: space-between;
+    padding: 0 12px; background: #2c2f34; border-bottom: 1px solid #44484e;
+    font-size: 10.5px; color: #979ea7;
+  }
+  .sortbar b { color: #d8dde3; font-weight: 500; }
+  .sortbar .sort { display: inline-flex; align-items: center; gap: 4px; }
+
+  /* ---------------- 列表 ---------------- */
+  .list { flex: 1; overflow-y: auto; overflow-x: hidden; }
+  .list::-webkit-scrollbar { width: 3px; }
+  .list::-webkit-scrollbar-thumb { background: rgba(255,255,255,.16); border-radius: 2px; }
+
+  /* —— 方案 A：卡片 —— */
+  .card { padding: 8px 12px 9px; border-bottom: 1px solid #3e4248; position: relative; cursor: pointer; }
+  .card.sel { background: #8d5a2b; }
+  .card.sel .c-id, .card.sel .c-k { color: #f2d3b6; }
+  .card.sel .c-v { color: #fff6ee; }
+  .card.sel .c-title { color: #fff; }
+  .c-title {
+    font-size: 14.5px; line-height: 21px; font-weight: 600; color: #edf1f5; letter-spacing: .1px;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+    word-break: break-word;
+  }
+  .card.expanded .c-title { -webkit-line-clamp: unset; display: block; }
+  .c-meta { display: flex; align-items: center; gap: 6px; margin-top: 1px; min-height: 14px; }
+  .c-id { font-size: 10px; color: #8d959e; font-variant-numeric: tabular-nums; letter-spacing: .02em; white-space: nowrap; }
+  .c-id::before { content: "#"; opacity: .65; }
+  .c-time { font-size: 10px; color: #8b939c; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .c-dot { width: 2px; height: 2px; border-radius: 50%; background: #6b727b; flex: none; }
+  .c-spacer { flex: 1; }
+  .badge {
+    font-size: 9px; line-height: 13px; padding: 0 4px; border-radius: 2px; white-space: nowrap; flex: none;
+    border: 1px solid transparent; letter-spacing: .02em;
+  }
+  .b-ok   { color: #6cc99a; background: rgba(92,189,143,.13); border-color: rgba(92,189,143,.32); }
+  .b-run  { color: #f0a05c; background: rgba(224,118,42,.15); border-color: rgba(224,118,42,.38); }
+  .b-err  { color: #ec7a6d; background: rgba(224,103,92,.14); border-color: rgba(224,103,92,.36); }
+  .b-wait { color: #9aa2ac; background: rgba(255,255,255,.05); border-color: rgba(255,255,255,.12); }
+  .b-pause{ color: #cfae72; background: rgba(207,174,114,.12); border-color: rgba(207,174,114,.3); }
+  .card.sel .badge { background: rgba(0,0,0,.18); border-color: rgba(255,255,255,.28); color: #fff; }
+
+  .m { display: grid; grid-template-columns: 1.05fr .8fr 1.06fr 48px; column-gap: 7px; margin-top: 2px; }
+  .m .kv { display: flex; align-items: center; gap: 5px; min-width: 0; height: 18px; }
+  .m .st { display: flex; justify-content: flex-end; align-items: center; }
+  .c-k { font-size: 10px; color: #98a1aa; flex: none; letter-spacing: .02em; position: relative; top: -.5px; }
+  .c-v {
+    font-size: 12px; font-weight: 500; color: #e3e8ee; font-variant-numeric: tabular-nums;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0;
+  }
+  .c-v.dim { color: #868d96; }
+  .c-v.ok { color: #6cc99a; }
+  .c-v.err { color: #ec7a6d; }
+  .c-v.run { color: #f0a05c; }
+  .bar { height: 2px; background: #454a51; border-radius: 1px; margin-top: 5px; overflow: hidden; }
+  .bar > i { display: block; height: 100%; background: linear-gradient(90deg, #d96d24, #f0a05c); }
+  .card.sel .bar { background: rgba(255,255,255,.22); }
+  .card.sel .bar > i { background: #fff2e6; }
+
+  /* —— 方案 B：分组三列 —— */
+  .bhead {
+    display: flex; height: 25px; align-items: center; background: #3c3f45; border-bottom: 1px solid #4a4e55;
+    font-size: 10px; color: #a6adb6; letter-spacing: .04em;
+  }
+  .bhead div { padding: 0 8px; }
+  .bhead .bh-t { flex: 1; }
+  .bhead .bh-g { width: 132px; border-left: 1px solid #4a4e55; }
+  .brow { display: flex; align-items: stretch; border-bottom: 1px solid #3e4248; cursor: pointer; padding: 4px 0; }
+  .brow.sel { background: #8d5a2b; }
+  .bt { flex: 1; min-width: 0; padding: 0 8px 0 12px; }
+  .bt-t {
+    font-size: 13px; line-height: 16px; font-weight: 600; color: #ecf0f4;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; word-break: break-word;
+  }
+  .bt-id { font-size: 9.5px; color: #8b939c; margin-top: 1px; font-variant-numeric: tabular-nums; }
+  .bg { width: 132px; flex: none; border-left: 1px solid #3e4248; padding: 1px 8px 0; min-width: 0; }
+  .bg .l { display: flex; align-items: center; gap: 4px; height: 14px; min-width: 0; }
+  .bg .l .k { font-size: 9.5px; color: #8b939c; flex: none; }
+  .bg .l .v { font-size: 11px; font-weight: 500; color: #dfe4ea; font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .bg .l .v.ok { color: #6cc99a; } .bg .l .v.err { color: #ec7a6d; } .bg .l .v.run { color: #f0a05c; }
+  .brow .badge { margin-top: 1px; display: inline-block; }
+  .brow.sel .bt-t, .brow.sel .bg .l .v { color: #fff6ee; }
+  .brow.sel .bt-id, .brow.sel .bg .l .k { color: #f2d3b6; }
+  .brow.sel .bg .l .v.ok { color: #d8f5e6; }
+  .brow.sel .bg .l .v.run { color: #ffe0c4; }
+  .brow.sel .badge { background: rgba(0,0,0,.18); border-color: rgba(255,255,255,.28); color: #fff; }
+
+  /* —— 旧版：复刻截图缺陷 —— */
+  .oldnote {
+    display: flex; gap: 7px; align-items: baseline; padding: 7px 11px;
+    background: rgba(224,103,92,.1); border-bottom: 1px solid rgba(224,103,92,.28);
+    font-size: 10.5px; line-height: 1.55; color: #e08b80;
+  }
+  .oldnote b { color: #f0a49a; flex: none; }
+  .oldnote span { flex: 1; min-width: 0; }
+  .oldscroll { overflow-x: auto; overflow-y: auto; flex: 1; }
+  .oldscroll::-webkit-scrollbar { height: 12px; width: 3px; }
+  .oldscroll::-webkit-scrollbar-thumb { background: #6a7079; }
+  .oldtbl { table-layout: fixed; width: 512px; border-collapse: collapse; font-size: 12.5px; }
+  .oldtbl th, .oldtbl td {
+    height: 41px; padding: 0 5px; border-right: 1px solid #4a4e55; border-bottom: 1px solid #4a4e55;
+    overflow: hidden; text-overflow: clip; white-space: nowrap; text-align: left; font-weight: 400;
+  }
+  .oldtbl thead th { background: #43464c; color: #cfd4da; font-size: 14.5px; height: 34px; padding-right: 26px; }
+  .oldtbl .vh { width: 27px; background: #43464c; color: #a9b0b9; font-size: 10px; text-align: center; padding: 0; }
+  .oldtbl .ct { width: 65px; }
+  .oldtbl .cs { width: 84px; }
+  .oldtbl tbody tr.sel td { background: #8d5a2b; color: #fff6ee; }
+  .oldtbl td.num { font-variant-numeric: tabular-nums; }
+  .cliphint { position: relative; }
+  .cliphint::after {
+    content: ""; position: absolute; right: 0; top: 0; bottom: 0; width: 10px;
+    background: linear-gradient(90deg, transparent, rgba(67,70,76,.95));
+  }
+  .cliphint.dark::after { background: linear-gradient(90deg, transparent, rgba(50,53,58,.95)); }
+  .cliphint.selc::after { background: linear-gradient(90deg, transparent, rgba(141,90,43,.95)); }
+  .empty { padding: 26px 14px; text-align: center; font-size: 11.5px; color: #7d848d; }
+
+  /* —— 紧凑密度 —— */
+  body.dense .card { padding: 5px 12px 6px; }
+  body.dense .c-title { font-size: 13.5px; line-height: 18px; }
+  body.dense .c-v { font-size: 11px; }
+  body.dense .m { margin-top: 2px; }
+  body.dense .brow { padding: 3px 0; }
+  body.dense .oldtbl th, body.dense .oldtbl td { height: 36px; }
+
+  @media (max-width: 1040px) {
+    .wrap { flex-direction: column; align-items: center; }
+    .side { width: 100%; max-width: 520px; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <aside class="side">
+    <h1>下载列表 · 排版重构 <em>Demo</em></h1>
+    <p class="sub">按真机截图复刻的竖屏界面（逻辑尺寸 478×982）。<br>本页是独立静态预览，未改动仓库任何代码。</p>
+    <div class="badge-tip">三种布局共用同一份数据，可随时切换对比</div>
+
+    <section class="block">
+      <h2>布局方案</h2>
+      <div class="seg" id="seg">
+        <button data-view="old">旧版（现状）<span>复刻截图缺陷</span></button>
+        <button data-view="a" class="on">方案 A<span>卡片式 · 推荐</span></button>
+        <button data-view="b">方案 B<span>分组三列 · 紧凑</span></button>
+      </div>
+    </section>
+
+    <section class="block">
+      <h2>数据与显示</h2>
+      <label class="sw"><input type="checkbox" id="optExtreme"><span>极端数据 <small>超长标题 / 长 ID / 5 位数字 / 超大速度</small></span></label>
+      <label class="sw"><input type="checkbox" id="optTime"><span>保留「时间」列 <small>默认删除，勾选后看排布</small></span></label>
+      <label class="sw"><input type="checkbox" id="optDense"><span>紧凑密度 <small>行高 -10%，字号 -0.5px</small></span></label>
+    </section>
+
+    <section class="block">
+      <h2>字段覆盖（10 项全可见）</h2>
+      <ul class="fields">
+        <li><span class="tick">✓</span>漫画 ID</li>
+        <li><span class="tick">✓</span>标题</li>
+        <li><span class="tick">✓</span>下载进度</li>
+        <li><span class="tick">✓</span>下载章节</li>
+        <li><span class="tick">✓</span>下载速度</li>
+        <li><span class="tick">✓</span>下载状态</li>
+        <li><span class="tick">✓</span>转换进度</li>
+        <li><span class="tick">✓</span>转换章节</li>
+        <li><span class="tick">✓</span>转换耗时</li>
+        <li><span class="tick">✓</span>转换状态</li>
+        <li class="off"><span class="tick">×</span>下载时间<em>可删</em></li>
+      </ul>
+    </section>
+
+    <section class="block">
+      <h2>设计要点</h2>
+      <ol class="notes">
+        <li><b>标题吃满整行</b>：14.5px / 600 字重，最多 2 行（超出省略），点标题可展开全文，不再出现「[萧…」。</li>
+        <li><b>字段改为「标签 + 值」成组</b>：下载组（进度·章节·速度）与转换组（进度·章节·耗时）各占一行，标签 10px 灰、值 12px 等宽数字，三列固定比例对齐，行与行之间列位一致。</li>
+        <li><b>状态用徽章代替文字列</b>：完成绿 / 进行中橙 / 等待灰 / 失败红，固定在每行最右侧成一列，既不挤占标题宽度，也不用再单开「下载状态 / 转换状态」两列。</li>
+        <li><b>顶部筛选区压缩</b>：下拉 + 搜索并排、5 个动作按钮压成一行、3 个复选 + 1 个单选合成一行，比现状少约 60px 高度，且「超分跳过损坏」不再被右边缘裁掉。</li>
+        <li><b>排序移出表头</b>：改为右侧「排序：添加时间」小控件，去掉 11 个表头占用的 34px 高度。</li>
+        <li><b>不再横向滚动</b>：所有列在 478px 内排完，极端数据只在单元格内省略（悬停/长按看全文），不会整列跑出屏幕。</li>
+      </ol>
+    </section>
+
+    <section class="block">
+      <h2>两方案取舍</h2>
+      <ol class="notes">
+        <li><b>A 卡片式</b>：标题可读性最好，双行标题 + 两行指标，一屏约 8 项。适合「看清单、找某本」。</li>
+        <li><b>B 分组三列</b>：标题列 2 行但更窄，下载/转换各一列竖排「进度 / 章节 / 速度(耗时) / 状态」，一屏约 11 项。适合「盯进度、批量操作」。</li>
+        <li>两者都能直接落到 <code>QTableWidget</code>（把 2~3 行文本塞进一个单元格 + 固定行高）或换成 <code>QListWidget</code> + 自定义 item widget。</li>
+      </ol>
+    </section>
+  </aside>
+
+  <main class="stage">
+    <div class="phone">
+      <div class="screen">
+        <header class="nav">
+          <span class="back">返回</span>
+          <div class="crumb">
+            <span class="menu">菜单</span>
+            <span class="arrow">›</span>
+            <span class="cur">下载</span>
+          </div>
+        </header>
+
+        <div class="toolbar">
+          <div class="row1">
+            <div class="select">全部
+              <svg width="9" height="6" viewBox="0 0 9 6" fill="none"><path d="M1 1l3.5 3.5L8 1" stroke="#e0762a" stroke-width="1.3" stroke-linecap="round"/></svg>
+            </div>
+            <div class="search">
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><circle cx="5" cy="5" r="3.6" stroke="#767d86" stroke-width="1.2"/><path d="M7.8 7.8L10.5 10.5" stroke="#767d86" stroke-width="1.2" stroke-linecap="round"/></svg>
+              <input placeholder="搜索标题 / ID" readonly>
+            </div>
+          </div>
+          <div class="actions">
+            <button class="chip">批量下载</button>
+            <button class="chip">全部开始</button>
+            <button class="chip">全部暂停</button>
+            <button class="chip">开始转换</button>
+            <button class="chip">暂停转换</button>
+          </div>
+          <div class="toggles">
+            <button class="tchip on"><span class="box"></span>Webp转Png</button>
+            <button class="tchip"><span class="box"></span>失败后自动重试</button>
+            <button class="tchip"><span class="box"></span>超分跳过损坏</button>
+            <button class="tchip on"><span class="dot"></span>下载自动超分</button>
+          </div>
+        </div>
+
+        <div class="sortbar">
+          <span id="count">共 8 项</span>
+          <span class="sort">排序：<b>添加时间</b>
+            <svg width="7" height="5" viewBox="0 0 7 5" fill="none"><path d="M1 1l2.5 2.5L6 1" stroke="#979ea7" stroke-width="1.1" stroke-linecap="round"/></svg>
+          </span>
+        </div>
+
+        <div class="list" id="list"></div>
+      </div>
+    </div>
+    <p class="hint">点行可选中（橙色高亮，同真机）· 点标题可展开/收起全文 · 切换左侧方案即时对比</p>
+  </main>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  var DATA_NORMAL = [
+    { id: "422231", title: "【蕭敬騰】163話 完整版合集（含番外・全彩）", time: "2026-10-26 19:07", dl: [163, 163], eps: [1, 1], speed: "1.2 MB/s", dls: "下载完成", cv: [163, 163], ceps: [1, 1], ctime: "12s", cvs: "转换完成" },
+    { id: "422188", title: "【合集】短篇作品集 188話", time: "2026-10-26 18:52", dl: [188, 188], eps: [1, 1], speed: "—", dls: "下载完成", cv: [188, 188], ceps: [1, 1], ctime: "8s", cvs: "转换完成" },
+    { id: "421902", title: "【萧】作品 104話 连载中", time: "2026-10-26 18:20", dl: [104, 104], eps: [1, 1], speed: "512.4 KB/s", dls: "下载完成", cv: [104, 104], ceps: [1, 1], ctime: "6s", cvs: "转换完成" },
+    { id: "421776", title: "【禁】31話", time: "2026-10-26 17:44", dl: [31, 31], eps: [1, 1], speed: "—", dls: "下载完成", cv: [28, 31], ceps: [1, 1], ctime: "—", cvs: "转换失败" },
+    { id: "421520", title: "对魔忍 15話", time: "2026-10-26 16:31", dl: [15, 15], eps: [1, 1], speed: "—", dls: "下载完成", cv: [15, 15], ceps: [1, 1], ctime: "2s", cvs: "转换完成" },
+    { id: "421301", title: "(C99) 同人志 25話", time: "2026-10-26 15:12", dl: [25, 25], eps: [1, 1], speed: "—", dls: "下载完成", cv: [25, 25], ceps: [1, 1], ctime: "4s", cvs: "转换暂停" },
+    { id: "420870", title: "对魔忍 16話", time: "2026-10-26 14:03", dl: [16, 16], eps: [1, 1], speed: "—", dls: "下载完成", cv: [16, 16], ceps: [1, 1], ctime: "2s", cvs: "转换完成" },
+    { id: "422355", title: "[Pixiv] 作者精选合集 84話", time: "2026-10-26 19:21", dl: [62, 84], eps: [1, 1], speed: "866.1 KB/s", dls: "下载中", cv: [40, 84], ceps: [1, 1], ctime: "—", cvs: "转换中" }
+  ];
+
+  var EXTREME_PATCH = {
+    0: { id: "1234567890", title: "【测试】这是一个非常非常长的标题，用来验证两行截断、换行与三列对齐在各种长度下是否依然稳定（第 12 卷 特装版 + 全彩番外）", dl: [12345, 12345], eps: [128, 256], speed: "1023.4 MB/s", dls: "下载中", cv: [12345, 12345], ceps: [128, 256], ctime: "4321s", cvs: "转换完成" },
+    2: { id: "98765", title: "短", dl: [0, 0], eps: [0, 0], speed: "—", dls: "等待中", cv: [0, 0], ceps: [0, 0], ctime: "—", cvs: "等待中" },
+    5: { id: "421301", title: "【超长】这个条目标题也很长但是没有第一条那么夸张，主要测试折行位置", dl: [9876, 9876], eps: [999, 999], speed: "999.9 KB/s", dls: "下载完成", cv: [9876, 9876], ceps: [999, 999], ctime: "999s", cvs: "转换完成" }
+  };
+
+  var state = { view: "a", extreme: false, time: false, dense: false, sel: 0 };
+
+  function dataset() {
+    var base = DATA_NORMAL.map(function (d) { return JSON.parse(JSON.stringify(d)); });
+    if (!state.extreme) return base;
+    Object.keys(EXTREME_PATCH).forEach(function (k) {
+      var i = parseInt(k, 10);
+      if (base[i]) Object.assign(base[i], EXTREME_PATCH[k]);
+    });
+    return base;
+  }
+
+  function kind(s) {
+    if (s.indexOf("完成") >= 0) return "ok";
+    if (s.indexOf("失败") >= 0) return "err";
+    if (s.indexOf("暂停") >= 0) return "pause";
+    if (s.indexOf("等待") >= 0) return "wait";
+    if (s.indexOf("中") >= 0) return "run";
+    return "wait";
+  }
+  var CLS = { ok: "b-ok", run: "b-run", err: "b-err", wait: "b-wait", pause: "b-pause" };
+  var TXT = { ok: "ok", run: "run", err: "err" };
+
+  function esc(s) {
+    return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  }
+  function pct(c, m) { return m > 0 ? Math.max(0, Math.min(100, c / m * 100)) : 0; }
+  function pair(a) { return a[0] + "/" + a[1]; }
+
+  /* ---------- 方案 A ---------- */
+  function rowA(d, i) {
+    var dk = kind(d.dls), ck = kind(d.cvs);
+    var running = d.dl[0] < d.dl[1];
+    var h = '<div class="card' + (state.sel === i ? " sel" : "") + '" data-i="' + i + '">';
+    h += '<div class="c-title" title="' + esc(d.title) + '">' + esc(d.title) + '</div>';
+    h += '<div class="c-meta">';
+    h += '<span class="c-id">' + esc(d.id) + '</span>';
+    if (state.time) { h += '<span class="c-dot"></span><span class="c-time">' + esc(d.time) + '</span>'; }
+    h += '</div>';
+
+    h += '<div class="m">';
+    h += '<span class="kv"><i class="c-k">下载</i><span class="c-v">' + pair(d.dl) + '</span></span>';
+    h += '<span class="kv"><i class="c-k">章节</i><span class="c-v">' + pair(d.eps) + '</span></span>';
+    h += '<span class="kv"><i class="c-k">速度</i><span class="c-v' + (d.speed === "\u2014" ? " dim" : "") + '">' + esc(d.speed) + '</span></span>';
+    h += '<span class="st"><span class="badge ' + CLS[dk] + '">' + esc(d.dls) + '</span></span>';
+    h += '</div>';
+    h += '<div class="m">';
+    h += '<span class="kv"><i class="c-k">转换</i><span class="c-v' + (ck === "ok" ? "" : " " + (TXT[ck] || "")) + '">' + pair(d.cv) + '</span></span>';
+    h += '<span class="kv"><i class="c-k">章节</i><span class="c-v">' + pair(d.ceps) + '</span></span>';
+    h += '<span class="kv"><i class="c-k">耗时</i><span class="c-v' + (d.ctime === "\u2014" ? " dim" : "") + '">' + esc(d.ctime) + '</span></span>';
+    h += '<span class="st"><span class="badge ' + CLS[ck] + '">' + esc(d.cvs) + '</span></span>';
+    h += '</div>';
+    if (running) h += '<div class="bar"><i style="width:' + pct(d.dl[0], d.dl[1]).toFixed(1) + '%"></i></div>';
+    h += '</div>';
+    return h;
+  }
+
+  /* ---------- 方案 B ---------- */
+  function rowB(d, i) {
+    var dk = kind(d.dls), ck = kind(d.cvs);
+    var h = '<div class="brow' + (state.sel === i ? " sel" : "") + '" data-i="' + i + '">';
+    h += '<div class="bt"><div class="bt-t" title="' + esc(d.title) + '">' + esc(d.title) + '</div>';
+    h += '<div class="bt-id">#' + esc(d.id) + (state.time ? " · " + esc(d.time) : "") + '</div></div>';
+
+    h += '<div class="bg">';
+    h += '<div class="l"><span class="k">下载</span><span class="v">' + pair(d.dl) + '</span></div>';
+    h += '<div class="l"><span class="k">章节</span><span class="v">' + pair(d.eps) + '</span></div>';
+    h += '<div class="l"><span class="k">速度</span><span class="v">' + esc(d.speed) + '</span></div>';
+    h += '<span class="badge ' + CLS[dk] + '">' + esc(d.dls) + '</span>';
+    h += '</div>';
+
+    h += '<div class="bg">';
+    h += '<div class="l"><span class="k">转换</span><span class="v">' + pair(d.cv) + '</span></div>';
+    h += '<div class="l"><span class="k">章节</span><span class="v">' + pair(d.ceps) + '</span></div>';
+    h += '<div class="l"><span class="k">耗时</span><span class="v">' + esc(d.ctime) + '</span></div>';
+    h += '<span class="badge ' + CLS[ck] + '">' + esc(d.cvs) + '</span>';
+    h += '</div>';
+    h += '</div>';
+    return h;
+  }
+
+  /* ---------- 旧版 ---------- */
+  function oldTable(data) {
+    var h = "";
+    h += '<div class="oldnote"><b>现状</b><span>标题只剩 2–3 字 · 表头被裁切 · id / 速度 / 转换章节 / 转换耗时 4 列被隐藏 · 仍需横向滚动才能看全</span></div>';
+    h += '<div class="oldscroll"><table class="oldtbl"><thead><tr>';
+    h += '<th class="vh"></th><th class="ct">标题</th><th class="cs">下载进度</th><th class="cs">下载章节</th><th class="cs">下载状态</th><th class="cs">转换进度</th><th class="cs">转换状态</th>';
+    h += '</tr></thead><tbody>';
+    data.forEach(function (d, i) {
+      var dk = kind(d.dls), ck = kind(d.cvs);
+      h += '<tr' + (state.sel === i ? ' class="sel"' : '') + ' data-i="' + i + '">';
+      h += '<td class="vh">' + (i + 1) + '</td>';
+      h += '<td class="cliphint' + (state.sel === i ? " selc" : " dark") + '" title="' + esc(d.title) + '">' + esc(d.title) + '</td>';
+      h += '<td class="num cliphint' + (state.sel === i ? " selc" : " dark") + '">' + pair(d.dl) + '</td>';
+      h += '<td class="num">' + pair(d.eps) + '</td>';
+      h += '<td>' + esc(d.dls) + '</td>';
+      h += '<td class="num cliphint' + (state.sel === i ? " selc" : " dark") + '">' + pair(d.cv) + '</td>';
+      h += '<td class="cliphint' + (state.sel === i ? " selc" : " dark") + '">' + esc(d.cvs) + '</td>';
+      h += '</tr>';
+    });
+    h += '</tbody></table></div>';
+    return h;
+  }
+
+  /* ---------- 渲染 ---------- */
+  var list = document.getElementById("list");
+  var countEl = document.getElementById("count");
+
+  function render() {
+    var data = dataset();
+    document.body.classList.toggle("dense", state.dense);
+    if (state.view === "old") {
+      list.innerHTML = oldTable(data);
+      countEl.textContent = "共 " + data.length + " 项 · 6 / 11 列可见";
+    } else if (state.view === "b") {
+      var hh = '<div class="bhead"><div class="bh-t">标题 / ID</div><div class="bh-g">下载</div><div class="bh-g">转换</div></div>';
+      list.innerHTML = hh + data.map(rowB).join("");
+      countEl.textContent = "共 " + data.length + " 项 · 同屏约 11 项";
+    } else {
+      list.innerHTML = data.map(rowA).join("");
+      countEl.textContent = "共 " + data.length + " 项 · 同屏 8 项";
+    }
+  }
+
+  /* ---------- 交互 ---------- */
+  document.getElementById("seg").addEventListener("click", function (e) {
+    var btn = e.target.closest("button[data-view]");
+    if (!btn) return;
+    state.view = btn.getAttribute("data-view");
+    Array.prototype.forEach.call(this.querySelectorAll("button"), function (b) { b.classList.remove("on"); });
+    btn.classList.add("on");
+    location.hash = state.view;
+    render();
+  });
+
+  ["optExtreme", "optTime", "optDense"].forEach(function (id) {
+    document.getElementById(id).addEventListener("change", function (e) {
+      state[id === "optExtreme" ? "extreme" : id === "optTime" ? "time" : "dense"] = e.target.checked;
+      render();
+    });
+  });
+
+  list.addEventListener("click", function (e) {
+    var row = e.target.closest("[data-i]");
+    if (!row) return;
+    var i = parseInt(row.getAttribute("data-i"), 10);
+    if (e.target.classList.contains("c-title") && e.target.scrollHeight > e.target.clientHeight + 1) {
+      row.classList.toggle("expanded");
+      return;
+    }
+    state.sel = (state.sel === i ? -1 : i);
+    render();
+  });
+
+  var q = {};
+  (location.search || "").replace(/^\?/, "").split("&").forEach(function (kv) {
+    var a = kv.split("=");
+    if (a[0]) q[a[0]] = a[1];
+  });
+  if (q.extreme === "1") { state.extreme = true; document.getElementById("optExtreme").checked = true; }
+  if (q.time === "1") { state.time = true; document.getElementById("optTime").checked = true; }
+  if (q.dense === "1") { state.dense = true; document.getElementById("optDense").checked = true; }
+
+  var init = (location.hash || "").replace("#", "");
+  if (init === "old" || init === "a" || init === "b") {
+    state.view = init;
+    Array.prototype.forEach.call(document.querySelectorAll("#seg button"), function (b) {
+      b.classList.toggle("on", b.getAttribute("data-view") === init);
+    });
+  }
+  render();
+})();
+</script>
+</body>
+</html>

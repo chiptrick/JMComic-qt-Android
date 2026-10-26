@@ -57,6 +57,7 @@ ComponentsXml = """        <service android:name="org.jmcomic.SafService"
         <activity android:name="org.jmcomic.SafPickActivity"
                   android:exported="false"
                   android:process=":saf"
+                  android:taskAffinity=""
                   android:theme="@android:style/Theme.Translucent.NoTitleBar"
                   android:excludeFromRecents="true"
                   android:configChanges="orientation|screenSize|keyboardHidden|uiMode" />
@@ -130,21 +131,97 @@ def InsertComponents(text, anchor=None):
 
 
 def PatchManifest(path):
-    """ 渲染出来的 manifest：加组件 + 去权限 """
+    """ 渲染出来的 manifest：加组件 + 去权限(+ 顺手补窗口背景主题) """
     text = _Read(path)
     text, inserted = InsertComponents(text)
     text, removed = DropStoragePermissions(text)
     _Write(path, text)
+    # 同目录下的 res/values/strings.xml 里是 Activity 的主题定义
+    PatchThemeFile(os.path.join(os.path.dirname(path), "res", "values", "strings.xml"))
+    WriteWindowBackgroundDrawable(os.path.join(os.path.dirname(path), "res", "drawable"))
     return inserted, removed
 
 
 def PatchTemplate(path):
-    """ p4a 模板：只在 extra_manifest_application_xml 那行之前插组件 """
+    """ p4a 模板：只在 extra_manifest_application_xml 那行之前插组件
+
+    顺带把同目录的 strings.tmpl.xml(主题)补上窗口背景，并把 drawable 写进
+    bootstrap 的 src/main/res/drawable —— 每次构建都会从那里拷进 dist。
+    """
     text = _Read(path)
     text, inserted = InsertComponents(text, "{{ args.extra_manifest_application_xml }}")
     if inserted:
         _Write(path, text)
+    tplDir = os.path.dirname(path)
+    PatchThemeFile(os.path.join(tplDir, "strings.tmpl.xml"))
+    # <bootstrap>/build/templates -> <bootstrap>/build/src/main/res/drawable
+    buildDir = os.path.dirname(tplDir)
+    WriteWindowBackgroundDrawable(os.path.join(buildDir, "src", "main", "res", "drawable"))
     return inserted
+
+
+# ---------------------------------------------------------------------------
+# 窗口背景(主题)：让"Qt 首帧之前"的窗口也是应用自己的画面
+# ---------------------------------------------------------------------------
+#
+# 真机问题：多任务界面里看不到本应用的画面。
+# 机制：Android 在应用**离开前台那一刻**抓任务快照，抓的是窗口里的最后一帧；
+#   而 Qt 首帧之前的窗口只有主题背景色(默认浅色) —— 这时按 HOME，快照就是一片空白，
+#   而且**这个空快照会一直留在这个任务上**(除非再"前台 -> 后台"一次)。
+#   除了把首帧提前(android/main.py 的 DeferredStartup)，再把主题背景换成一个
+#   "深色 + 居中应用图标"的图层：任何时刻被截到，都是应用自己的画面，不是白块。
+WindowBackgroundDrawableName = "jm_window_bg"
+WindowBackgroundColor = "#FF141414"
+WindowBackgroundItem = ('<item name="android:windowBackground">'
+                        '@drawable/{}</item>').format(WindowBackgroundDrawableName)
+
+WindowBackgroundXml = """<?xml version="1.0" encoding="utf-8"?>
+<!-- 由 android/tools/patch_android_manifest.py 生成：Qt 首帧之前的窗口背景 -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item>
+        <shape android:shape="rectangle">
+            <solid android:color="{color}" />
+        </shape>
+    </item>
+    <!-- 图标别铺满整屏(默认 <bitmap> 会按屏幕密度放大到全宽)：
+         固定 180dp 居中，看着像一张启动图 -->
+    <item android:gravity="center" android:width="180dp" android:height="180dp">
+        <bitmap android:gravity="fill" android:src="@mipmap/icon" />
+    </item>
+</layer-list>
+""".format(color=WindowBackgroundColor)
+
+
+def WriteWindowBackgroundDrawable(resDrawableDir):
+    """ 写 res/drawable/jm_window_bg.xml(幂等)；目录不存在就跳过 """
+    if not resDrawableDir or not os.path.isdir(resDrawableDir):
+        return False
+    path = os.path.join(resDrawableDir, WindowBackgroundDrawableName + ".xml")
+    try:
+        if os.path.exists(path) and _Read(path) == WindowBackgroundXml:
+            return False
+        _Write(path, WindowBackgroundXml)
+        return True
+    except Exception:
+        return False
+
+
+def PatchThemeFile(path):
+    """ 给 Activity 主题补 android:windowBackground(幂等)；文件不存在就跳过 """
+    if not path or not os.path.exists(path):
+        return False
+    try:
+        text = _Read(path)
+        if "android:windowBackground" in text:
+            return False
+        anchor = '<item name="android:windowNoTitle">true</item>'
+        if anchor not in text:
+            return False
+        text = text.replace(anchor, anchor + "\n        " + WindowBackgroundItem, 1)
+        _Write(path, text)
+        return True
+    except Exception:
+        return False
 
 
 def CopyJava(sourceDir, destDirs):

@@ -1,0 +1,1055 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>分流节点列表 · 排版重构 Demo</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: radial-gradient(1100px 620px at 18% -12%, #24262c 0%, #17181c 58%, #121316 100%);
+    color: #e7eaee;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+    -webkit-font-smoothing: antialiased;
+    min-height: 100vh;
+  }
+  body::before {
+    content: "";
+    position: fixed; inset: 0; pointer-events: none;
+    background-image: linear-gradient(rgba(255,255,255,.022) 1px, transparent 1px),
+                      linear-gradient(90deg, rgba(255,255,255,.022) 1px, transparent 1px);
+    background-size: 32px 32px;
+    -webkit-mask-image: radial-gradient(800px 500px at 50% 0%, #000 20%, transparent 80%);
+    mask-image: radial-gradient(800px 500px at 50% 0%, #000 20%, transparent 80%);
+  }
+
+  .wrap { position: relative; display: flex; gap: 24px; padding: 26px 26px 48px; align-items: flex-start; max-width: 1380px; margin: 0 auto; }
+
+  /* ---------------- 左侧面板 ---------------- */
+  .side { width: 404px; flex: none; }
+  .side h1 { font-size: 20px; line-height: 1.35; margin: 0 0 6px; letter-spacing: .2px; }
+  .side h1 em { font-style: normal; color: #ef8b45; }
+  .side .sub { margin: 0 0 14px; font-size: 12.5px; color: #969da7; line-height: 1.65; }
+  .badge-tip {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 11px; color: #9ad0b2; background: rgba(92,189,143,.1);
+    border: 1px solid rgba(92,189,143,.28); border-radius: 999px; padding: 3px 9px; margin-bottom: 16px;
+  }
+  .badge-tip::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: #5cbd8f; }
+
+  .block { background: rgba(255,255,255,.028); border: 1px solid rgba(255,255,255,.06); border-radius: 10px; padding: 12px 13px; margin-bottom: 12px; }
+  .block > h2 {
+    font-size: 11px; font-weight: 600; letter-spacing: .12em; color: #79818b;
+    margin: 0 0 10px; text-transform: uppercase;
+  }
+
+  .seg { display: flex; gap: 6px; }
+  .seg button {
+    flex: 1; appearance: none; cursor: pointer;
+    background: #1d1f24; border: 1px solid #34383f; color: #b3bac3;
+    font-size: 12px; padding: 8px 4px; border-radius: 7px; font-family: inherit;
+    transition: .15s; line-height: 1.25;
+  }
+  .seg button:hover { border-color: #4a5058; color: #dfe4ea; }
+  .seg button.on { background: rgba(224,118,42,.14); border-color: #e0762a; color: #f2a061; font-weight: 600; }
+  .seg button span { display: block; font-size: 9.5px; color: #7d848d; font-weight: 400; margin-top: 2px; }
+  .seg button.on span { color: #c98a5a; }
+
+  .sw { display: flex; align-items: center; gap: 9px; padding: 6px 0; font-size: 13px; color: #c8cfd7; cursor: pointer; user-select: none; }
+  .sw input { appearance: none; width: 14px; height: 14px; border: 1px solid #565d66; border-radius: 3px; background: #1b1d21; cursor: pointer; position: relative; flex: none; }
+  .sw input:checked { background: #e0762a; border-color: #e0762a; }
+  .sw input:checked::after { content: ""; position: absolute; left: 4px; top: 1px; width: 4px; height: 8px; border: solid #1b1d21; border-width: 0 2px 2px 0; transform: rotate(42deg); }
+  .sw small { color: #7d848d; font-size: 10.5px; }
+
+  .budget { width: 100%; border-collapse: collapse; font-size: 11.5px; }
+  .budget th { text-align: left; font-weight: 500; font-size: 10px; color: #79818b; letter-spacing: .06em; padding: 0 0 6px; }
+  .budget th:last-child, .budget td:last-child { text-align: right; }
+  .budget td { padding: 3.5px 0; border-top: 1px solid rgba(255,255,255,.05); color: #b4bbc4; }
+  .budget tr.total td { border-top: 1px solid rgba(255,255,255,.14); color: #e8edf2; font-weight: 600; padding-top: 7px; }
+  .budget td.old { color: #8d949d; }
+  .budget .ok { color: #6cc99a; }
+
+  .notes { margin: 0; padding-left: 16px; font-size: 12.5px; line-height: 1.72; color: #b4bbc4; }
+  .notes li { margin-bottom: 6px; }
+  .notes b { color: #e3e8ee; font-weight: 600; }
+  .notes code { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 10.5px; background: rgba(255,255,255,.06); padding: 1px 4px; border-radius: 3px; color: #d7b892; }
+
+  .fixlist { list-style: none; margin: 0; padding: 0; font-size: 12px; line-height: 1.6; }
+  .fixlist li { display: flex; gap: 8px; padding: 5px 0; border-top: 1px solid rgba(255,255,255,.05); }
+  .fixlist li:first-child { border-top: none; padding-top: 0; }
+  .fixlist .x { color: #cf6e64; flex: none; font-size: 10.5px; padding-top: 2px; width: 12px; }
+  .fixlist .v { color: #67c795; flex: none; font-size: 10.5px; padding-top: 2px; width: 12px; }
+  .fixlist .t { color: #b4bbc4; }
+  .fixlist .t b { color: #e3e8ee; font-weight: 600; }
+  .fixlist .t s { display: block; color: #868d96; text-decoration: none; font-size: 11px; margin-top: 2px; }
+
+  /* ---------------- 手机外壳 ---------------- */
+  .stage { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 12px; min-width: 0; }
+  .phone {
+    padding: 9px; border-radius: 30px;
+    background: linear-gradient(180deg, #101114, #0a0b0d);
+    box-shadow: 0 30px 70px -20px rgba(0,0,0,.85), 0 0 0 1px rgba(255,255,255,.05);
+    transition: width .18s;
+  }
+  .screen {
+    border-radius: 23px; overflow: hidden;
+    background: #32353a; display: flex; flex-direction: column; position: relative;
+  }
+  .hint { font-size: 11.5px; color: #79818b; text-align: center; max-width: 520px; line-height: 1.6; }
+  .hint kbd { font-family: inherit; background: rgba(255,255,255,.07); border: 1px solid rgba(255,255,255,.1); border-radius: 4px; padding: 0 4px; font-size: 10.5px; }
+
+  /* ---------------- 应用内：导航 ---------------- */
+  .nav { height: 46px; flex: none; display: flex; align-items: center; gap: 10px; padding: 0 13px; border-bottom: 1px solid #44484e; background: #2f3237; }
+  .nav .back { font-size: 13px; color: #c8cfd7; }
+  .nav .crumb { display: flex; align-items: center; gap: 7px; }
+  .nav .menu { padding: 3px 12px; border: 1px solid #e0762a; color: #f09a58; font-size: 12.5px; border-radius: 2px; }
+  .nav .arrow { color: #9198a1; font-size: 12px; }
+  .nav .cur { padding: 4px 12px; background: #43464c; color: #eef1f4; font-size: 12.5px; }
+  .nav .sp { flex: 1; }
+  .nav .doc { font-size: 11.5px; color: #9aa2ac; border-bottom: 1px dashed #5d646d; padding-bottom: 1px; }
+
+  /* ---------------- 区块 ---------------- */
+  .sec { flex: none; padding: 9px 11px; border-bottom: 1px solid #44484e; }
+  .sec-cap { display: flex; align-items: center; gap: 6px; font-size: 10px; letter-spacing: .08em; color: #79818b; margin-bottom: 5px; }
+  .sec-cap .unit { margin-left: auto; letter-spacing: 0; font-size: 9.5px; color: #6d747d; }
+
+  /* 代理通道 */
+  .seg3 { display: flex; height: 30px; border: 1px solid #4a4e55; border-radius: 3px; overflow: hidden; }
+  .seg3 button {
+    flex: 1; appearance: none; background: #2c2d32; border: none; border-right: 1px solid #4a4e55;
+    color: #b3bac3; font-size: 12px; font-family: inherit; cursor: pointer; padding: 0; transition: .12s;
+  }
+  .seg3 button:last-child { border-right: none; }
+  .seg3 button.on { background: rgba(224,118,42,.16); color: #f2a061; font-weight: 600; box-shadow: inset 0 -2px 0 #e0762a; }
+  .addr { display: flex; align-items: center; gap: 7px; margin-top: 6px; }
+  .addr .k { font-size: 11px; color: #98a1aa; flex: none; width: 50px; }
+  .addr .inp {
+    flex: 1; min-width: 0; height: 30px; background: #2c2d32; border: 1px solid #4a4e55; border-radius: 3px;
+    display: flex; align-items: center; padding: 0 8px; font-size: 11.5px; color: #dfe4ea;
+    font-family: ui-monospace, SFMono-Regular, Consolas, monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .addr.off { opacity: .42; }
+
+  /* 线路测速 */
+  .speed { display: flex; gap: 8px; align-items: stretch; }
+  .speedbtn {
+    width: 46px; flex: none; border: 1px solid #e0762a; background: rgba(224,118,42,.1); color: #f09a58;
+    font-size: 12px; border-radius: 3px; cursor: pointer; font-family: inherit; transition: .12s;
+  }
+  .speedbtn:hover { background: rgba(224,118,42,.2); }
+  .lines { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; justify-content: center; }
+  .line { display: flex; align-items: center; gap: 5px; min-width: 0; }
+  .lk { font-size: 9px; color: #7d848d; width: 21px; flex: none; letter-spacing: .04em; }
+  .lchips { display: flex; gap: 4px; flex: 1; min-width: 0; }
+  .lchip {
+    flex: 1 1 0; min-width: 0; height: 26px; display: flex; align-items: center; justify-content: center; gap: 3px;
+    border: 1px solid #4a4e55; border-radius: 3px; font-size: 11px; color: #b3bac3; background: #2c2d32;
+    font-variant-numeric: tabular-nums; cursor: pointer; transition: .12s; overflow: hidden;
+  }
+  .lchip b { font-weight: 500; }
+  .lchip i { font-style: normal; font-size: 9.5px; color: #7d848d; }
+  .lchip.on { border-color: #e0762a; background: rgba(224,118,42,.14); color: #f2a061; }
+  .lchip.on i { color: #c98a5a; }
+  .lchip.mk { color: #7d848d; border-style: dashed; font-size: 10px; }
+
+  /* ---------------- 列表 ---------------- */
+  .listwrap { flex: 1; min-height: 0; display: flex; flex-direction: column; position: relative; background: #2f3237; }
+  .lhead { height: 32px; flex: none; display: flex; align-items: center; gap: 7px; padding: 0 11px; }
+  .lt { font-size: 12.5px; font-weight: 600; color: #eef1f4; }
+  .lcount { font-size: 10.5px; color: #8b939c; font-variant-numeric: tabular-nums; }
+  .lhead .sp { flex: 1; }
+  .sortbtn {
+    appearance: none; background: transparent; border: 1px solid #4a4e55; border-radius: 3px;
+    color: #a9b0b9; font-size: 10px; padding: 2px 6px; font-family: inherit; cursor: pointer; white-space: nowrap;
+  }
+  .sortbtn:hover { border-color: #6d747d; color: #dfe4ea; }
+  .densbtn {
+    appearance: none; background: transparent; border: 1px solid #4a4e55; border-radius: 3px; color: #a9b0b9;
+    width: 24px; height: 20px; font-size: 11px; cursor: pointer; line-height: 1; padding: 0; font-family: inherit;
+  }
+  .densbtn.on { border-color: #e0762a; color: #f2a061; }
+
+  .filters { height: 30px; flex: none; display: flex; align-items: center; gap: 5px; padding: 0 11px; }
+  .fchip {
+    appearance: none; height: 21px; padding: 0 8px; border-radius: 10px; border: 1px solid #4a4e55;
+    background: transparent; color: #a9b0b9; font-size: 10.5px; font-family: inherit; cursor: pointer;
+    white-space: nowrap; font-variant-numeric: tabular-nums;
+  }
+  .fchip.on { border-color: #e0762a; background: rgba(224,118,42,.14); color: #f2a061; }
+  .filters .sp { flex: 1; }
+  .cutnote { font-size: 9.5px; color: #6d747d; letter-spacing: .02em; white-space: nowrap; }
+  .cutnote b { color: #cf6e64; font-weight: 500; }
+
+  .colhead {
+    height: 22px; flex: none; display: grid; column-gap: 10px; align-items: center; padding: 0 var(--pad, 11px);
+    background: #3a3e44; border-top: 1px solid #44484e; border-bottom: 1px solid #44484e;
+    font-size: 9.5px; color: #9aa2ac; letter-spacing: .04em;
+  }
+  .colhead .cs { text-align: right; }
+  .listwrap.a .colhead { grid-template-columns: 18px minmax(0,1fr) var(--spd, 86px); }
+  .listwrap.b .colhead { grid-template-columns: 18px var(--ipcol, 118px) minmax(0,1fr) var(--spd2, 78px); }
+
+  .list { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; position: relative; }
+  .list::-webkit-scrollbar { width: 3px; }
+  .list::-webkit-scrollbar-thumb { background: rgba(255,255,255,.16); border-radius: 2px; }
+
+  /* 行：单选点 */
+  .radio {
+    width: 15px; height: 15px; border-radius: 50%; border: 1.5px solid #6d747d;
+    flex: none; position: relative; transition: .12s;
+  }
+  .sel .radio { border-color: #f0a05c; }
+  .sel .radio::after { content: ""; position: absolute; inset: 2px; border-radius: 50%; background: #f0a05c; }
+
+  /* —— 方案 A：两行卡片 —— */
+  .row {
+    display: grid; column-gap: 10px; align-items: center; height: 62px; padding: 0 var(--pad, 11px);
+    border-bottom: 1px solid #3e4248; cursor: pointer; position: relative;
+  }
+  .listwrap.a .row { grid-template-columns: 18px minmax(0,1fr); }
+  .row:hover { background: rgba(255,255,255,.028); }
+  .row.sel { background: #8d5a2b; }
+  .r-main { min-width: 0; }
+  .r-top { display: grid; grid-template-columns: minmax(0,1fr) var(--spd, 86px); column-gap: 8px; align-items: baseline; }
+  .r-sub { display: flex; align-items: center; gap: 6px; margin-top: 3px; min-width: 0; }
+  .ip {
+    font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: var(--ipf, 12.5px); color: #e7eaee;
+    letter-spacing: .005em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0;
+  }
+  .tag {
+    flex: none; font-size: 9px; line-height: 14px; padding: 0 4px; border-radius: 2px; letter-spacing: .02em;
+    border: 1px solid rgba(224,118,42,.4); color: #e0955c; background: rgba(224,118,42,.1); white-space: nowrap;
+  }
+  .tag.t-cf { border-color: rgba(122,167,214,.38); color: #9dc0e0; background: rgba(122,167,214,.09); }
+  .tag.t-self { border-color: rgba(148,148,158,.4); color: #b3bac3; background: rgba(255,255,255,.05); }
+  .geo { font-size: 11px; color: #98a1aa; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  .geo .sep { color: #6d747d; margin: 0 1px; }
+
+  /* —— 方案 B：单行高密度 —— */
+  .brow {
+    display: grid; column-gap: 9px; align-items: center; height: 46px; padding: 0 var(--pad, 11px);
+    border-bottom: 1px solid #3e4248; cursor: pointer;
+  }
+  .listwrap.b .brow { grid-template-columns: 18px var(--ipcol, 118px) minmax(0,1fr) var(--spd2, 78px); }
+  .brow:hover { background: rgba(255,255,255,.028); }
+  .brow.sel { background: #8d5a2b; }
+  .brow .ip { font-size: 11.5px; }
+
+  /* 速度列 */
+  .spd {
+    font-variant-numeric: tabular-nums; text-align: right; font-size: 11.5px; white-space: nowrap;
+    color: #cfd5dc; overflow: hidden; text-overflow: ellipsis;
+  }
+  .spd b { font-weight: 600; }
+  .spd .ok { color: #6cc99a; }
+  .spd .mid { color: #e8b96a; }
+  .spd .slow { color: #ec9a7d; }
+  .spd .bad { color: #ec7a6d; font-size: 10.5px; font-weight: 400; }
+  .spd .dash { color: #6d747d; font-style: normal; }
+  .spd u { text-decoration: none; color: #6d747d; margin: 0 1px; }
+  .spd em { font-style: normal; color: #a9b0b9; }
+
+  .sel .ip { color: #fff; }
+  .sel .geo { color: #f2d3b6; }
+  .sel .spd { color: #fff6ee; }
+  .sel .spd .ok, .sel .spd .mid, .sel .spd .slow { color: #eafff4; }
+  .sel .spd em { color: #f6e2cd; }
+  .sel .spd u { color: #d9b795; }
+  .sel .tag { border-color: rgba(255,255,255,.32); background: rgba(0,0,0,.16); color: #fff; }
+  .sel .radio { border-color: #fff; }
+  .sel .radio::after { background: #fff; }
+
+  /* 对齐标尺 */
+  .guide { position: absolute; left: 0; right: 0; top: 0; bottom: 0; pointer-events: none; display: none; z-index: 3; }
+  .guide i { position: absolute; top: 0; bottom: 0; border-left: 1px dashed rgba(224,118,42,.5); }
+  .guides .guide { display: block; }
+  .guides .ell.cut { outline: 1px dashed rgba(236,122,109,.85); outline-offset: 1px; }
+
+  /* ---------------- 底栏 ---------------- */
+  .foot {
+    height: 56px; flex: none; display: flex; align-items: center; gap: 8px; padding: 0 11px;
+    border-top: 1px solid #44484e; background: #25262a;
+  }
+  .fstat { flex: 1; min-width: 0; font-size: 10.5px; color: #98a1aa; line-height: 1.5; }
+  .fstat b { color: #e7eaee; font-weight: 600; }
+  .fstat .g { color: #6cc99a; }
+  .ghost {
+    appearance: none; height: 30px; padding: 0 10px; border: 1px solid #4a4e55; background: transparent;
+    color: #b3bac3; font-size: 11.5px; border-radius: 3px; font-family: inherit; cursor: pointer; flex: none;
+  }
+  .ghost:hover { border-color: #6d747d; color: #e7eaee; }
+  .primary {
+    appearance: none; height: 30px; padding: 0 12px; border: 1px solid #e0762a; background: rgba(224,118,42,.16);
+    color: #f2a061; font-size: 11.5px; border-radius: 3px; font-family: inherit; cursor: pointer; flex: none; font-weight: 600;
+  }
+  .primary:hover { background: rgba(224,118,42,.26); }
+
+  /* ---------------- 高级面板 ---------------- */
+  .sheet { position: absolute; inset: 0; display: none; z-index: 20; }
+  .sheet.open { display: block; }
+  .sheet .bd { position: absolute; inset: 0; background: rgba(0,0,0,.5); }
+  .sheet .panel {
+    position: absolute; left: 0; right: 0; bottom: 0; background: #2b2e33; border-top: 1px solid #4a4e55;
+    border-radius: 12px 12px 0 0; padding: 10px 12px 12px; box-shadow: 0 -18px 40px rgba(0,0,0,.5);
+  }
+  .sheet h3 { margin: 0 0 8px; font-size: 12px; color: #eef1f4; font-weight: 600; display: flex; }
+  .sheet h3 span { margin-left: auto; font-size: 10.5px; color: #8b939c; font-weight: 400; cursor: pointer; }
+  .srow { display: flex; align-items: center; gap: 8px; height: 34px; border-top: 1px solid #3a3e44; font-size: 11px; color: #a9b0b9; }
+  .srow .k { width: 84px; flex: none; }
+  .srow .mini {
+    height: 24px; border: 1px solid #4a4e55; background: #2c2d32; border-radius: 3px; display: flex; align-items: center;
+    padding: 0 7px; font-size: 10.5px; color: #dfe4ea; font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+    min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .srow .mini.flex { flex: 1; }
+  .srow .mini.sel2 { width: 56px; flex: none; font-family: inherit; justify-content: space-between; }
+  .srow .tick { color: #6cc99a; font-size: 11px; }
+
+  /* ---------------- 旧版复刻 ---------------- */
+  .oldview { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; background: #32353a; position: relative; }
+  .oldview::-webkit-scrollbar { width: 4px; }
+  .oldview::-webkit-scrollbar-thumb { background: #6a7079; }
+  .oldnote {
+    display: flex; gap: 7px; align-items: baseline; padding: 8px 11px;
+    background: rgba(224,103,92,.12); border-bottom: 1px solid rgba(224,103,92,.3);
+    font-size: 10.5px; line-height: 1.55; color: #e08b80; position: sticky; top: 0; z-index: 5;
+  }
+  .oldnote b { color: #f0a49a; flex: none; }
+  .oldnote span { flex: 1; min-width: 0; }
+  .oldstack { padding: 6px 11px 0; }
+  .orow { display: flex; align-items: center; gap: 7px; height: 30px; font-size: 11.5px; color: #b9c0c8; }
+  .orow .rd { width: 13px; height: 13px; border-radius: 50%; border: 1px solid #6d747d; flex: none; }
+  .orow .rd.on::after { content: ""; display: block; width: 7px; height: 7px; margin: 2px; border-radius: 50%; background: #f0a05c; }
+  .orow .lbl { flex: none; color: #98a1aa; font-size: 11px; }
+  .orow .in { flex: 1; min-width: 0; height: 28px; border: 1px solid #4a4e55; background: #2c2d32; border-radius: 2px; display: flex; align-items: center; padding: 0 7px; font-size: 11px; color: #dfe4ea; font-family: ui-monospace, Consolas, monospace; white-space: nowrap; overflow: hidden; }
+  .orow .in.w60 { flex: none; width: 60px; }
+  .orow .cbx { width: 13px; height: 13px; border: 1px solid #6d747d; flex: none; }
+  .orow .cbx.on { background: #e0762a; border-color: #e0762a; }
+  .obtn { height: 28px; display: flex; align-items: center; justify-content: center; border: 1px solid #e0762a; color: #f09a58; font-size: 11.5px; border-radius: 2px; margin: 4px 0; }
+  .ogrid { display: grid; grid-template-columns: minmax(0,1fr) 54px minmax(0,1fr) 54px; gap: 3px 6px; align-items: center; font-size: 10.5px; color: #a9b0b9; padding: 2px 0; }
+  .ogrid .h { color: #98a1aa; text-align: center; font-size: 10px; }
+  .ogrid .rd2 { display: flex; align-items: center; gap: 3px; color: #c8cfd7; white-space: nowrap; min-width: 0; }
+  .ogrid .rd2 .rd { width: 11px; height: 11px; }
+  .ogrid .ms { text-align: center; font-variant-numeric: tabular-nums; font-size: 10px; }
+  .owarn { font-size: 10.5px; color: #e05252; padding: 3px 0 5px; }
+  .oldtotal {
+    margin: 8px 0 0; padding: 5px 8px; background: rgba(224,118,42,.1); border: 1px dashed rgba(224,118,42,.4);
+    border-radius: 3px; font-size: 10px; color: #e0a878; line-height: 1.5;
+  }
+
+  .oldtbl { table-layout: fixed; width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 4px; }
+  .oldtbl th {
+    height: 35px; padding: 0 20px; background: #43464c; color: #cfd4da; text-align: left; font-weight: 400;
+    border-right: 1px solid #4a4e55; border-bottom: 1px solid #4a4e55; white-space: nowrap; overflow: hidden;
+  }
+  .oldtbl td {
+    height: 51px; padding: 0 20px; border-right: 1px solid #4a4e55; border-bottom: 1px solid #4a4e55;
+    white-space: nowrap; overflow: hidden; text-overflow: clip; color: #dfe4ea; vertical-align: middle;
+  }
+  .oldtbl .vh { width: 27px; padding: 0; background: #43464c; color: #a9b0b9; font-size: 10px; text-align: center; }
+  .oldtbl td.ckcell { position: relative; }
+  .oldtbl .ck { display: inline-block; width: 18px; height: 18px; border: 1px solid #6d747d; vertical-align: -4px; margin-right: 5px; }
+  .oldtbl .ck.on { border-color: #f0a05c; }
+  .oldtbl .ck.on::after { content: ""; display: block; width: 10px; height: 10px; margin: 3px; background: #f0a05c; }
+  .oldtbl td.clip { position: relative; }
+  .oldtbl td.clip::after {
+    content: ""; position: absolute; right: 0; top: 0; bottom: 0; width: 14px;
+    background: linear-gradient(90deg, transparent, rgba(50,53,58,.96));
+  }
+  .oldtbl td.clip.hdr::after { background: linear-gradient(90deg, transparent, rgba(67,70,76,.96)); }
+  .oldtbl tr.sel td { background: #8d5a2b; color: #fff6ee; }
+  .oldlegend { font-size: 10px; color: #8d949d; padding: 6px 11px 10px; line-height: 1.6; }
+  .oldlegend b { color: #cf6e64; font-weight: 500; }
+
+  /* 窄屏（360）自适应：收紧内边距与速度列，让 32 字符的 IPv6 仍然放得下 */
+  .screen[data-w="360"] { --pad: 9px; --spd: 78px; --spd2: 72px; --ipcol: 104px; --ipf: 11px; }
+  .screen[data-w="360"] .ip { letter-spacing: 0; }
+  .screen[data-w="360"] .lchip { font-size: 10.5px; gap: 2px; }
+  .screen[data-w="360"] .tag { font-size: 8.5px; padding: 0 3px; }
+  .screen[data-w="360"] .geo { font-size: 10.5px; }
+
+  /* 紧凑密度 */
+  body.dense .row { height: 54px; }  body.dense .brow { height: 40px; }
+  body.dense .ip { font-size: 12px; }
+  body.dense .r-sub { margin-top: 1px; }
+  body.dense .sec { padding: 7px 11px; }
+  body.dense .lhead { height: 28px; }
+  body.dense .filters { height: 27px; }
+
+  @media (max-width: 1080px) {
+    .wrap { flex-direction: column; align-items: center; }
+    .side { width: 100%; max-width: 560px; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <aside class="side">
+    <h1>分流节点列表 · 排版重构 <em>Demo</em></h1>
+    <p class="sub">按真机竖屏复刻（逻辑尺寸 478×982）。三种视图共用同一份真实节点数据：26 个 ProxyIP + 24 个优选 IP，其中 9 个是 IPv6。<br>本页是独立静态预览，<b>未改动仓库任何文件</b>。</p>
+    <div class="badge-tip">列表区自适应剩余高度 · 行高固定 · 行数变化不再撑高页面</div>
+
+    <section class="block">
+      <h2>视图</h2>
+      <div class="seg" id="seg">
+        <button data-view="old">旧版（现状）<span>复刻裁切缺陷</span></button>
+        <button data-view="a" class="on">方案 A<span>两行 · 完整不省略</span></button>
+        <button data-view="b">方案 B<span>单行 · 高密度</span></button>
+      </div>
+    </section>
+
+    <section class="block">
+      <h2>数据与显示</h2>
+      <label class="sw"><input type="checkbox" id="optExtreme"><span>极端数据 <small>超长 ISP / 长地区 / 4 位延迟 / 未测</small></span></label>
+      <label class="sw"><input type="checkbox" id="optDense"><span>紧凑密度 <small>行高 −12%，一屏多看 1~2 项</small></span></label>
+      <label class="sw"><input type="checkbox" id="optGuides"><span>对齐标尺 <small>标出速度列边界与所有被省略的文字</small></span></label>
+    </section>
+
+    <section class="block">
+      <h2>屏幕宽度</h2>
+      <div class="seg" id="segw">
+        <button data-w="360">360<span>小屏</span></button>
+        <button data-w="478" class="on">478<span>现真机</span></button>
+        <button data-w="520">520<span>宽屏</span></button>
+      </div>
+    </section>
+
+    <section class="block">
+      <h2>一屏高度预算（实测）</h2>
+      <table class="budget">
+        <thead><tr><th>区块</th><th>现状</th><th>新方案</th></tr></thead>
+        <tbody>
+          <tr><td>顶部导航</td><td class="old">46</td><td id="b-nav">46</td></tr>
+          <tr><td>代理通道</td><td class="old">96</td><td id="b-sec1">—</td></tr>
+          <tr><td>选项 / 刷新输入</td><td class="old">304</td><td id="b-sec2">—</td></tr>
+          <tr><td>6 条分流线路</td><td class="old">240</td><td id="b-sec3">—</td></tr>
+          <tr><td>列表工具栏 + 表头</td><td class="old">35</td><td id="b-head">—</td></tr>
+          <tr><td>列表视口</td><td class="old">2560</td><td id="b-list" class="ok">—</td></tr>
+          <tr><td>底栏</td><td class="old">—</td><td id="b-foot">—</td></tr>
+          <tr class="total"><td>合计</td><td class="old">3281 px</td><td id="b-total">—</td></tr>
+        </tbody>
+      </table>
+      <div style="font-size:10.5px;color:#7d848d;line-height:1.6;margin-top:8px">
+        现状合计 = <code style="font-family:ui-monospace,Consolas,monospace">ui_login_new.ui</code> 里 scrollAreaWidgetContents_3 的实际内容高 3281px ≈ 3.3 屏；新方案右侧为当前视图实测值。
+      </div>
+    </section>
+
+    <section class="block">
+      <h2>现状问题 → 处理</h2>
+      <ul class="fixlist">
+        <li><span class="x">✕</span><div class="t"><b>名称列被裁</b>：QCheckBox 文本与勾选框挤在同一格，5 列均分后每列仅 ~50px 可用宽，"ProxyIP分流1" 必然截断。<s>→ 名称改为固定宽 62px 的组别标签 + 序号，放在第二行左侧，不再和 IP 抢宽度。</s></div></li>
+        <li><span class="x">✕</span><div class="t"><b>IP / 地区 / ISP 全都被裁</b>：单列 ~50px 放不下 15 字符 IPv4，9 个 32 字符的 IPv6 根本无解。<s>→ IP 独占第一行（等宽字体，478 宽下 32 字符完整显示）；地区 · ISP 移到第二行。</s></div></li>
+        <li><span class="x">✕</span><div class="t"><b>列表被 2560px 硬编码高度撑开</b>：整页 3281px，滚 3 屏才看得到列表尾巴，表格自身滚动条还被 × AlwaysOff 关掉。<s>→ 去掉 min-height，列表区 flex:1 吃掉剩余高度，内部滚动 + 吸顶表头。</s></div></li>
+        <li><span class="x">✕</span><div class="t"><b>行高 Stretch + resizeRowsToContents 相互打架</b>：行高随行数变化，50 项时每行 51px、7 项时每行 300px+。<s>→ 行高固定（62 / 紧凑 54 / 单行 46），行数只影响滚动条长度。</s></div></li>
+        <li><span class="x">✕</span><div class="t"><b>速度列宽度随内容跳动</b>："42ms" / "1204ms" / "连接超时" 混排。<s>→ 固定 86px 右对齐 + tabular-nums，主体只放数字。</s></div></li>
+      </ul>
+    </section>
+
+    <section class="block">
+      <h2>设计要点</h2>
+      <ol class="notes">
+        <li><b>两行结构，各字段都有主</b>：第一行 IP（12.5px 等宽）+ 右对齐速度；第二行「组别标签 · 地区 · ISP」。所有行共用同一网格，左边界与右边界逐行对齐。</li>
+        <li><b>表头只留 2 个真标题</b>：原 5 个汉字段（名称/IP/地区/ISP/速度）压成「节点 / 地区 · ISP」「延迟 / 下载」，不再为每个字段留一列。</li>
+        <li><b>3.3 屏 → 1 屏</b>：代理通道压成 1 段选择 + 1 个地址框；6 条线路从 6 行 radio 网格压成 2 行 chip（API / IMG 各一行）；超时、DoH、自定义地区、自定义 IP 收进「高级」抽屉。</li>
+        <li><b>列表永远是最大的一块</b>：标题 + 计数 + 排序 + 分组筛选（全部 / ProxyIP / 优选）一行搞定，剩余高度全部给列表，任何一项都能滚到，不会被裁在外。</li>
+        <li><b>51 项不可能在一屏铺完</b>：按 478×982 算，列表视口约 617px，两行式同屏约 10 项。所以策略是「一屏看全结构 + 列表内滚动看全内容」，配合筛选把 26 / 24 分组减半。</li>
+        <li><b>落到 Qt 的成本</b>：<code>QTableWidget</code> → <code>QListWidget</code> + 自定义 item widget（两个 QLabel，固定 <code>setFixedHeight</code>）；表头 QSS <code>padding: 0 20px</code> 改 <code>0 8px</code>；删掉 <code>min-height 2560</code>、<code>verticalHeader Stretch</code> 与两个 <code>ScrollBarAlwaysOff</code>。</li>
+      </ol>
+    </section>
+  </aside>
+
+  <main class="stage">
+    <div class="phone" id="phone">
+      <div class="screen" id="screen">
+
+        <header class="nav">
+          <span class="back">返回</span>
+          <div class="crumb">
+            <span class="menu">菜单</span>
+            <span class="arrow">›</span>
+            <span class="cur">分流设置</span>
+          </div>
+          <span class="sp"></span>
+          <span class="doc">说明</span>
+        </header>
+
+        <!-- ============ 新方案 ============ -->
+        <div id="newview" style="display:flex;flex-direction:column;flex:1;min-height:0">
+
+          <section class="sec" id="sec1">
+            <div class="seg3" id="proxySeg">
+              <button data-p="0" class="on">无代理</button>
+              <button data-p="1">HTTP 代理</button>
+              <button data-p="2">Socks5</button>
+            </div>
+            <div class="addr off" id="addrRow">
+              <span class="k">代理地址</span>
+              <div class="inp" id="addrInp">未启用代理</div>
+            </div>
+          </section>
+
+          <section class="sec" id="sec3">
+            <div class="sec-cap">线路测速<span class="unit">延迟 / 下载 · ms</span></div>
+            <div class="speed">
+              <button class="speedbtn" id="speedBtn">测速</button>
+              <div class="lines">
+                <div class="line">
+                  <span class="lk">API</span>
+                  <div class="lchips" data-kind="api">
+                    <div class="lchip" data-i="1"><b>1</b><i>96</i></div>
+                    <div class="lchip on" data-i="2"><b>2</b><i>118</i></div>
+                    <div class="lchip" data-i="3"><b>3</b><i>142</i></div>
+                    <div class="lchip" data-i="4"><b>4</b><i>205</i></div>
+                    <div class="lchip mk" data-i="5">IP</div>
+                    <div class="lchip" data-i="6"><b>6</b><i>310</i></div>
+                  </div>
+                </div>
+                <div class="line">
+                  <span class="lk">IMG</span>
+                  <div class="lchips" data-kind="img">
+                    <div class="lchip" data-i="1"><b>1</b><i>88</i></div>
+                    <div class="lchip on" data-i="2"><b>2</b><i>104</i></div>
+                    <div class="lchip" data-i="3"><b>3</b><i>131</i></div>
+                    <div class="lchip" data-i="4"><b>4</b><i>198</i></div>
+                    <div class="lchip mk" data-i="5">IP</div>
+                    <div class="lchip" data-i="6"><b>6</b><i>286</i></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <div class="listwrap a" id="listwrap">
+            <div class="lhead">
+              <span class="lt">节点列表</span>
+              <span class="lcount" id="count">—</span>
+              <span class="sp"></span>
+              <button class="sortbtn" id="sortBtn">智能排序 ▾</button>
+              <button class="densbtn" id="densBtn" title="切换行高">≡</button>
+            </div>
+            <div class="filters" id="filters">
+              <button class="fchip on" data-f="all">全部 <span data-n="all"></span></button>
+              <button class="fchip" data-f="proxy">ProxyIP <span data-n="proxy"></span></button>
+              <button class="fchip" data-f="cf">优选 <span data-n="cf"></span></button>
+              <span class="sp"></span>
+              <span class="cutnote" id="cutnote"></span>
+            </div>
+            <div class="colhead" id="colhead"></div>
+            <div class="list" id="list"></div>
+            <div class="guide" id="guide"></div>
+          </div>
+
+          <footer class="foot">
+            <div class="fstat" id="fstat">—</div>
+            <button class="ghost" id="advBtn">高级</button>
+            <button class="primary" id="testBtn">测试 IP 分流</button>
+          </footer>
+        </div>
+
+        <!-- ============ 旧版复刻 ============ -->
+        <div id="oldview" class="oldview" style="display:none"></div>
+
+        <!-- ============ 高级抽屉 ============ -->
+        <div class="sheet" id="sheet">
+          <div class="bd" data-close="1"></div>
+          <div class="panel">
+            <h3>高级设置<span data-close="1">收起</span></h3>
+            <div class="srow"><span class="k">超时</span><div class="mini sel2">API <b id="t1">10s</b></div><div class="mini sel2">图片 <b id="t2">15s</b></div></div>
+            <div class="srow"><span class="k">DOH 地址</span><div class="mini flex">https://dot.pub/dns-query</div><span class="tick">✓</span></div>
+            <div class="srow"><span class="k">ECH / HTTP3</span><div class="mini flex">已启用 ECH · 未启用 HTTP3</div></div>
+            <div class="srow"><span class="k">获取地区</span><div class="mini flex">JP,US,HK,SG,KR,GB</div><div class="mini sel2">获取</div></div>
+            <div class="srow"><span class="k">自定义 IP</span><div class="mini flex">104.18.40.104,172.64.229.155</div></div>
+            <div class="srow" style="border-bottom:none"><span class="k">说明</span><div class="mini flex">分流设置请看说明获取</div><div class="mini sel2">打开</div></div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+    <p class="hint">点行可选中 · 底部「高级」打开抽屉 · 左栏可切换视图 / 宽度 / 极端数据 · 开启「对齐标尺」后红色虚线框就是被省略的文字</p>
+  </main>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  /* ============================ 数据 ============================ */
+  // d = 延迟 ms，dd = 下载 ms，fail / dfail = 失败文案（0 且无 fail = 未测）
+  var NODES = [
+    { ip: "158.180.231.216", geo: "日本·东京", isp: "Oracle Corporation", d: 152, dd: 210 },
+    { ip: "163.47.42.64", geo: "澳大利亚·悉尼", isp: "Micron21 Pty Ltd", d: 318, dd: 402 },
+    { ip: "43.170.8.95", geo: "中国香港", isp: "Tencent Cloud LLC", d: 48, dd: 96 },
+    { ip: "150.136.219.11", geo: "美国·阿什本", isp: "Oracle Corporation", d: 186, dd: 240 },
+    { ip: "159.89.91.17", geo: "美国·旧金山", isp: "DigitalOcean, LLC", d: 132, dd: 188 },
+    { ip: "165.232.51.34", geo: "德国·法兰克福", isp: "DigitalOcean, LLC", d: 276, dd: 344 },
+    { ip: "172.174.11.248", geo: "印度·孟买", isp: "Microsoft Corporation", d: 0, dd: 0, fail: "连接超时" },
+    { ip: "198.199.84.192", geo: "美国·纽约", isp: "DigitalOcean, LLC", d: 168, dd: 205 },
+    { ip: "43.153.105.7", geo: "新加坡", isp: "Tencent Cloud LLC", d: 62, dd: 118 },
+    { ip: "43.170.25.96", geo: "中国香港", isp: "Tencent Cloud LLC", d: 44, dd: 88 },
+    { ip: "103.7.138.56", geo: "印度尼西亚·雅加达", isp: "PT Beon Intermedia", d: 420, dd: 0 },
+    { ip: "107.151.188.57", geo: "美国·洛杉矶", isp: "Zenlayer Inc", d: 388, dd: 0 },
+    { ip: "107.172.32.207", geo: "美国·洛杉矶", isp: "ColoCrossing", d: 340, dd: 0, dfail: "下载失败" },
+    { ip: "129.213.150.222", geo: "日本·大阪", isp: "Oracle Corporation", d: 118, dd: 164 },
+    { ip: "147.75.230.33", geo: "荷兰·阿姆斯特丹", isp: "Packet Host, Inc.", d: 310, dd: 0 },
+    { ip: "192.9.250.241", geo: "美国·圣何塞", isp: "Alibaba (US) Technology Co., Ltd.", d: 204, dd: 268 },
+    { ip: "47.251.95.178", geo: "美国·硅谷", isp: "Alibaba Cloud LLC", d: 190, dd: 254 },
+    { ip: "152.70.232.72", geo: "日本·东京", isp: "Oracle Corporation", d: 96, dd: 142 },
+    { ip: "95.216.46.85", geo: "芬兰·赫尔辛基", isp: "Hetzner Online GmbH", d: 356, dd: 0 },
+    { ip: "159.203.34.9", geo: "加拿大·多伦多", isp: "DigitalOcean, LLC", d: 212, dd: 288 },
+    { ip: "107.172.145.153", geo: "美国·洛杉矶", isp: "ColoCrossing", d: 366, dd: 0 },
+    { ip: "46.224.21.216", geo: "德国·法兰克福", isp: "Hetzner Online GmbH", d: 298, dd: 372 },
+    { ip: "91.99.20.251", geo: "德国·纽伦堡", isp: "netcup GmbH", d: 322, dd: 398 },
+    { ip: "159.60.146.82", geo: "美国·芝加哥", isp: "EGIHosting", d: 244, dd: 306 },
+    { ip: "204.168.238.95", geo: "美国·圣何塞", isp: "Hurricane Electric LLC", d: 176, dd: 228 },
+    { ip: "62.238.51.190", geo: "英国·伦敦", isp: "Iomart Cloud Services Ltd", d: 284, dd: 350 },
+
+    { ip: "104.18.40.104", geo: "美国·Anycast", isp: "Cloudflare, Inc.", d: 132, dd: 188, cf: 1 },
+    { ip: "172.64.229.155", geo: "中国香港", isp: "Cloudflare, Inc.", d: 68, dd: 124, cf: 1 },
+    { ip: "198.41.208.26", geo: "美国·Anycast", isp: "Cloudflare, Inc.", d: 140, dd: 196, cf: 1 },
+    { ip: "172.66.2.153", geo: "中国香港", isp: "Cloudflare, Inc.", d: 54, dd: 102, cf: 1 },
+    { ip: "8.35.211.230", geo: "美国·洛杉矶", isp: "Cloudflare, Inc.", d: 210, dd: 266, cf: 1 },
+    { ip: "172.66.0.115", geo: "中国香港", isp: "Cloudflare, Inc.", d: 60, dd: 110, cf: 1 },
+    { ip: "188.164.248.227", geo: "罗马尼亚·布加勒斯特", isp: "Cloudflare, Inc.", d: 0, dd: 0, fail: "连接超时", cf: 1 },
+    { ip: "104.26.10.124", geo: "中国香港", isp: "Cloudflare, Inc.", d: 72, dd: 130, cf: 1 },
+    { ip: "172.67.73.123", geo: "中国香港", isp: "Cloudflare, Inc.", d: 64, dd: 119, cf: 1 },
+    { ip: "104.26.11.206", geo: "中国香港", isp: "Cloudflare, Inc.", d: 58, dd: 108, cf: 1 },
+    { ip: "104.26.1.248", geo: "中国香港", isp: "Cloudflare, Inc.", d: 70, dd: 126, cf: 1 },
+    { ip: "104.17.189.152", geo: "中国香港", isp: "Cloudflare, Inc.", d: 46, dd: 92, cf: 1 },
+    { ip: "104.17.173.109", geo: "中国香港", isp: "Cloudflare, Inc.", d: 50, dd: 98, cf: 1 },
+    { ip: "91.193.58.106", geo: "中国香港", isp: "Cloudflare, Inc.", d: 88, dd: 150, cf: 1 },
+    { ip: "104.17.61.57", geo: "中国香港", isp: "Cloudflare, Inc.", d: 44, dd: 90, cf: 1 },
+
+    { ip: "2606:4700:0:f920:12e9:bef7:bd1b:bf3", geo: "新加坡·Anycast", isp: "Cloudflare, Inc.", d: 156, dd: 224, cf: 1 },
+    { ip: "2606:4700:0:77:ba66:ef50:489c:299d", geo: "新加坡·Anycast", isp: "Cloudflare, Inc.", d: 162, dd: 230, cf: 1 },
+    { ip: "2606:4700:0:a0:6574:f93:6c28:17c5", geo: "日本·东京", isp: "Cloudflare, Inc.", d: 148, dd: 212, cf: 1 },
+    { ip: "2606:4700::2d:a321:64d3", geo: "中国香港", isp: "Cloudflare, Inc.", d: 82, dd: 140, cf: 1 },
+    { ip: "2606:4700:0:a0:a55f:f7f9:5a17:8b8e", geo: "美国·洛杉矶", isp: "Cloudflare, Inc.", d: 172, dd: 240, cf: 1 },
+    { ip: "2606:4700:0:e0:9996:e26c:4b53:e69a", geo: "美国·Anycast", isp: "Cloudflare, Inc.", d: 166, dd: 234, cf: 1 },
+    { ip: "2606:4700:0:a0:65dc:517c:ad49:a2fd", geo: "德国·法兰克福", isp: "Cloudflare, Inc.", d: 286, dd: 0, cf: 1 },
+    { ip: "2606:4700:0:f920:12c2:bb61:198a:ca56", geo: "荷兰·阿姆斯特丹", isp: "Cloudflare, Inc.", d: 0, dd: 0, fail: "连接被重置", cf: 1 },
+    { ip: "2606:4700:0:e0:c653:a255:83dc:d0c", geo: "印度·孟买", isp: "Cloudflare, Inc.", d: 368, dd: 440, cf: 1 }
+  ];
+
+  // 极端数据：只改几条，用来看"变长之后还稳不稳"
+  var EXTREME = {
+    "192.9.250.241": { geo: "美利坚合众国·加利福尼亚州·圣何塞", isp: "Alibaba (US) Technology Co., Ltd. — Alibaba Cloud Global Network", d: 1204, dd: 1688 },
+    "2606:4700:0:f920:12e9:bef7:bd1b:bf3": { geo: "新加坡·樟宜数据中心·Anycast 全球广播", isp: "Cloudflare, Inc. (Cloudflare Global Anycast Network)", d: 1234, dd: 9876 },
+    "172.174.11.248": { geo: "印度·马哈拉施特拉邦·孟买", isp: "Microsoft Corporation (Azure India West)", d: 0, dd: 0, fail: "连接被重置" },
+    "43.170.25.96": { geo: "中国香港", isp: "Tencent Cloud LLC", d: 0, dd: 0 },
+    "163.47.42.64": { geo: "澳大利亚·新南威尔士州·悉尼", isp: "Micron21 Pty Ltd (AS38880)", d: 1042, dd: 1290 }
+  };
+
+  var state = {
+    view: "a", extreme: false, dense: false, guides: false,
+    width: 478, filter: "all", sort: "smart",
+    selIp: "43.170.8.95", proxyMode: 0, scrollTarget: null
+  };
+
+  var SCREEN_H = 982;
+
+  /* ============================ 工具 ============================ */
+  function esc(s) {
+    return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  }
+  function nodes() {
+    var out = NODES.map(function (n) {
+      var o = {};
+      for (var k in n) if (Object.prototype.hasOwnProperty.call(n, k)) o[k] = n[k];
+      if (state.extreme && EXTREME[n.ip]) {
+        for (var k2 in EXTREME[n.ip]) o[k2] = EXTREME[n.ip][k2];
+      }
+      o.name = o.cf ? "优选" + " " + 0 : "ProxyIP 0";
+      return o;
+    });
+    // 序号按分组各自从 1 开始（跟 IpItem 的 j 一致）
+    var p = 0, c = 0;
+    out.forEach(function (o) {
+      if (o.cf) { c += 1; o.idx = c; o.group = "cf"; }
+      else { p += 1; o.idx = p; o.group = "proxy"; }
+      o.name = (o.cf ? "优选" : "ProxyIP") + " " + o.idx;
+    });
+    return out;
+  }
+  function latCls(d) {
+    if (!d) return "bad";
+    if (d < 100) return "ok";
+    if (d < 250) return "mid";
+    return "slow";
+  }
+  function speedHTML(n) {
+    if (!n.d && !n.dd && (n.fail || n.dfail)) {
+      return '<i class="bad">' + esc(n.fail || n.dfail) + '</i>';
+    }
+    if (!n.d && !n.fail && !n.dfail) return '<i class="dash">—</i>';
+    if (!n.d) return '<i class="bad">' + esc(n.fail || "失败") + '</i>';
+    var s = '<b class="' + latCls(n.d) + '">' + n.d + '</b>';
+    if (n.dd) s += '<u>/</u><em>' + n.dd + '</em>';
+    else if (n.dfail) s += '<u>/</u><i class="bad">' + esc(n.dfail) + '</i>';
+    else s += '<u>/</u><i class="dash">—</i>';
+    return s;
+  }
+  function score(n) {
+    if (!n.d) return 1e9;
+    return n.d * 0.8 + (n.dd || n.d * 1.4) * 0.2;
+  }
+
+  function currentList() {
+    var arr = nodes();
+    if (state.filter === "proxy") arr = arr.filter(function (n) { return n.group === "proxy"; });
+    if (state.filter === "cf") arr = arr.filter(function (n) { return n.group === "cf"; });
+    arr.sort(function (a, b) {
+      if (state.sort === "lat") return (a.d || 1e9) - (b.d || 1e9);
+      if (state.sort === "dl") return (a.dd || 1e9) - (b.dd || 1e9);
+      return score(a) - score(b);
+    });
+    return arr;
+  }
+
+  /* ============================ 渲染：新方案 ============================ */
+  var listEl = document.getElementById("list");
+  var colheadEl = document.getElementById("colhead");
+  var wrapEl = document.getElementById("listwrap");
+  var countEl = document.getElementById("count");
+  var cutEl = document.getElementById("cutnote");
+  var fstatEl = document.getElementById("fstat");
+
+  function tagHTML(n) {
+    var cls = n.cf ? "tag t-cf" : "tag";
+    return '<span class="' + cls + '">' + esc(n.name) + '</span>';
+  }
+
+  function rowA(n) {
+    return '<div class="row' + (state.selIp === n.ip ? " sel" : "") + '" data-ip="' + esc(n.ip) + '">' +
+      '<span class="radio"></span>' +
+      '<div class="r-main">' +
+        '<div class="r-top">' +
+          '<span class="ip ell" title="' + esc(n.ip) + '">' + esc(n.ip) + '</span>' +
+          '<span class="spd">' + speedHTML(n) + '</span>' +
+        '</div>' +
+        '<div class="r-sub">' + tagHTML(n) +
+          '<span class="geo ell" title="' + esc(n.geo + " · " + n.isp) + '">' + esc(n.geo) +
+            '<span class="sep"> · </span>' + esc(n.isp) + '</span>' +
+        '</div>' +
+      '</div>' +
+    '</div>';
+  }
+
+  function rowB(n) {
+    return '<div class="brow' + (state.selIp === n.ip ? " sel" : "") + '" data-ip="' + esc(n.ip) + '">' +
+      '<span class="radio"></span>' +
+      '<span class="ip ell" title="' + esc(n.ip) + '">' + esc(n.ip) + '</span>' +
+      '<span class="geo ell" title="' + esc(n.geo + " · " + n.isp) + '">' + esc(n.geo) + ' · ' + esc(n.isp) + '</span>' +
+      '<span class="spd">' + speedHTML(n) + '</span>' +
+    '</div>';
+  }
+
+  function renderList() {
+    var arr = currentList();
+    var all = nodes();
+    var keepScroll = listEl.scrollTop;   // 选中/改排序时不要把人弹回列表顶部
+
+    // 分组计数
+    var nProxy = all.filter(function (n) { return n.group === "proxy"; }).length;
+    var nCf = all.filter(function (n) { return n.group === "cf"; }).length;
+    document.querySelectorAll(".fchip").forEach(function (b) {
+      var f = b.getAttribute("data-f");
+      var n = f === "all" ? all.length : f === "proxy" ? nProxy : nCf;
+      b.querySelector("[data-n]").textContent = n;
+      b.classList.toggle("on", state.filter === f);
+    });
+
+    var avail = arr.filter(function (n) { return n.d > 0; }).length;
+    var fail = arr.filter(function (n) { return !n.d && (n.fail || n.dfail); }).length;
+    countEl.textContent = "共 " + arr.length + " 项 · 可用 " + avail + (fail ? " · 异常 " + fail : "");
+
+    wrapEl.className = "listwrap " + state.view;
+    colheadEl.innerHTML = state.view === "b"
+      ? '<span></span><span>节点</span><span>地区 · ISP</span><span class="cs">延迟 / 下载</span>'
+      : '<span></span><span>节点 / 地区 · ISP</span><span class="cs">延迟 / 下载</span>';
+
+    listEl.innerHTML = arr.map(state.view === "b" ? rowB : rowA).join("");
+
+    // 选中项信息
+    var sel = all.filter(function (n) { return n.ip === state.selIp; })[0];
+    if (sel) {
+      fstatEl.innerHTML = '已选 <b>' + esc(sel.name) + '</b> · ' + esc(sel.ip) +
+        '<br><span class="' + (sel.d ? "g" : "") + '">' + (sel.d ? sel.d + " ms" : "未测速") + '</span>' +
+        (sel.geo ? ' · ' + esc(sel.geo) : '');
+    }
+
+    // 对齐标尺 & 省略检测
+    var cut = 0;
+    listEl.querySelectorAll(".ell").forEach(function (el) {
+      el.classList.remove("cut");
+      if (el.scrollWidth > el.clientWidth + 1) { el.classList.add("cut"); cut += 1; }
+    });
+    cutEl.innerHTML = cut ? '省略 <b>' + cut + '</b> 处' : '无省略';
+
+    buildGuide();
+    updateBudget();
+
+    if (state.scrollTarget) {
+      var target = listEl.querySelector('[data-ip="' + state.scrollTarget.replace(/"/g, '\\"') + '"]');
+      if (target) target.scrollIntoView({ block: "center" });
+      state.scrollTarget = null;
+    } else {
+      listEl.scrollTop = keepScroll;
+    }
+  }
+
+  function buildGuide() {
+    var g = document.getElementById("guide");
+    var lw = wrapEl.getBoundingClientRect();
+    // 标尺贴齐"速度列左边界"与（方案 B 的）"IP 列右边界"，用实测坐标而不是猜的 padding 值
+    g.style.top = (colheadEl.offsetTop + colheadEl.offsetHeight) + "px";
+    var html = "";
+    var spd = listEl.querySelector(".spd");
+    if (spd) html += '<i style="left:' + (spd.getBoundingClientRect().left - lw.left).toFixed(1) + 'px"></i>';
+    if (state.view === "b") {
+      var ip = listEl.querySelector(".ip");
+      if (ip) html += '<i style="left:' + (ip.getBoundingClientRect().right - lw.left).toFixed(1) + 'px"></i>';
+    }
+    g.innerHTML = html;
+  }
+
+  /* ============================ 高度预算（实测） ============================ */
+  function updateBudget() {
+    var nav = document.querySelector(".nav");
+    var foot = document.querySelector(".foot");
+    var head = document.querySelector(".lhead").offsetHeight +
+               document.getElementById("filters").offsetHeight +
+               colheadEl.offsetHeight;
+    document.getElementById("b-nav").textContent = nav.offsetHeight;
+    document.getElementById("b-sec1").textContent = document.getElementById("sec1").offsetHeight;
+    document.getElementById("b-sec3").textContent = document.getElementById("sec3").offsetHeight;
+    document.getElementById("b-sec2").textContent = "0（收进抽屉）";
+    document.getElementById("b-head").textContent = head;
+    document.getElementById("b-list").textContent = listEl.clientHeight || "—";
+    document.getElementById("b-foot").textContent = foot.offsetHeight;
+    document.getElementById("b-total").textContent = SCREEN_H + " px（1 屏）";
+  }
+
+  /* ============================ 旧版复刻 ============================ */
+  function renderOld() {
+    var arr = NODES.slice();
+    var h = "";
+    h += '<div class="oldnote"><b>现状</b><span>列表标题只剩「ProxyIP分流…」· IP / 地区 / ISP 逐列被裁 · 表格 min-height 2560px 把整页撑到 3.3 屏 · 表格自身滚动条被 AlwaysOff 关掉</span></div>';
+    h += '<div class="oldstack">';
+
+    h += '<div class="orow"><span class="rd on"></span>无代理</div>';
+    h += '<div class="orow"><span class="rd"></span>HTTP代理 <span class="lbl">代理地址</span><span class="in">http://127.0.0.1:10809</span></div>';
+    h += '<div class="orow"><span class="rd"></span>Sock5代理 <span class="lbl">代理地址</span><span class="in">127.0.0.1:10808</span></div>';
+    h += '<div class="orow"><span class="lbl">超时</span><span class="in w60">10s</span><span class="lbl">图片</span><span class="in w60">15s</span></div>';
+    h += '<div class="orow"><span class="cbx on"></span>启用ECH<span style="width:10px"></span><span class="cbx"></span>HTTP3</div>';
+    h += '<div class="orow"><span class="lbl">DOH地址</span><span class="in">https://dot.pub/dns-query</span><span style="color:#7fb80e">✓</span></div>';
+    h += '<div class="obtn">测速</div>';
+
+    h += '<div class="ogrid">' +
+      '<span></span><span class="h">延迟</span><span></span><span class="h">速度</span>' +
+      '<span class="rd2"><span class="rd"></span>分流1</span><span class="ms" style="color:#7fb80e">96ms</span>' +
+        '<span class="rd2"><span class="rd"></span>分流1</span><span class="ms" style="color:#7fb80e">88ms</span>' +
+      '<span class="rd2"><span class="rd on"></span>分流2</span><span class="ms" style="color:#7fb80e">118ms</span>' +
+        '<span class="rd2"><span class="rd on"></span>分流2</span><span class="ms" style="color:#7fb80e">104ms</span>' +
+      '<span class="rd2"><span class="rd"></span>分流3</span><span class="ms" style="color:#7fb80e">142ms</span>' +
+        '<span class="rd2"><span class="rd"></span>分流3</span><span class="ms" style="color:#7fb80e">131ms</span>' +
+      '<span class="rd2"><span class="rd"></span>分流4</span><span class="ms" style="color:#7fb80e">205ms</span>' +
+        '<span class="rd2"><span class="rd"></span>分流4</span><span class="ms" style="color:#7fb80e">198ms</span>' +
+      '<span class="rd2"><span class="rd"></span>IP分流</span><span class="ms"></span>' +
+        '<span class="rd2"><span class="rd"></span>IP分流</span><span class="ms"></span>' +
+      '<span class="rd2"><span class="rd"></span>分流6</span><span class="ms" style="color:#d71345">连接超时</span>' +
+        '<span class="rd2"><span class="rd"></span>分流6</span><span class="ms" style="color:#d71345">连接超时</span>' +
+    '</div>';
+
+    h += '<div class="obtn">测试IP分流</div>';
+    h += '<div class="owarn">*使用代理时IP分流不生效，推荐开启ECH功能</div>';
+    h += '<div class="orow"><span class="lbl">自定义获取ProxyIP地区</span><span class="in" style="flex:none;width:66px">JP,US,HK</span><span style="color:#d71345;font-size:10px">成功获取8个节点</span></div>';
+    h += '<div class="orow"><span class="lbl">自定义IP列表</span><span class="in"></span></div>';
+    h += '<div class="oldtotal">页面内容高 <b>3281px</b>（ui_login_new.ui · scrollAreaWidgetContents_3）≈ 3.3 屏；表格自身 min-height 2560px，垂直/水平滚动条都被强制关闭，只能整页滚。</div>';
+
+    h += '<table class="oldtbl">';
+    h += '<thead><tr><th class="vh"></th><th class="clip hdr">名称</th><th class="clip hdr">IP</th><th class="clip hdr">地区</th><th class="clip hdr">ISP</th><th class="clip hdr">速度</th></tr></thead><tbody>';
+    arr.forEach(function (n, i) {
+      var isSel = n.ip === "43.170.8.95";
+      var name = (n.cf ? "CDN分流" : "ProxyIP分流") + (n.cf ? "" : i + 1);
+      var spd = n.d ? (n.d + (n.dd ? "/" + n.dd : "")) : (n.fail || "—");
+      h += '<tr' + (isSel ? ' class="sel"' : '') + '>';
+      h += '<td class="vh">' + (i + 1) + '</td>';
+      h += '<td class="ckcell clip"><span class="ck' + (isSel ? " on" : "") + '"></span>' + esc(name) + '</td>';
+      h += '<td class="clip">' + esc(n.ip) + '</td>';
+      h += '<td class="clip">' + esc(n.geo) + '</td>';
+      h += '<td class="clip">' + esc(n.isp) + '</td>';
+      h += '<td>' + esc(spd) + '</td>';
+      h += '</tr>';
+    });
+    h += '</tbody></table>';
+    h += '<div class="oldlegend">↑ 上表每一列都是 <b>20% 等分</b>（QHeaderView::Stretch），表头 QSS <b>padding: 0 20px</b>，勾选框 24px，所以每列真正能放字的宽度不到 50px。<br>下面是列表尾部，需要从页面顶部滚 3 屏才能看到。</div>';
+    h += '<div class="orow" style="justify-content:flex-start;gap:6px;color:#9aa2ac"><span>分流设置请看说明获取</span><span style="color:#f0a05c">说明</span></div>';
+    h += '</div>';
+
+    document.getElementById("oldview").innerHTML = h;
+  }
+
+  /* ============================ 视图切换 ============================ */
+  function applyView() {
+    var isOld = state.view === "old";
+    if (!isOld) {
+      document.getElementById("newview").style.display = "flex";
+      document.getElementById("oldview").style.display = "none";
+    }
+    if (isOld) {
+      // 先把新方案渲染一次拿到实测高度，再切走（右列始终显示新方案的真实数字）
+      renderList();
+      document.getElementById("newview").style.display = "none";
+      document.getElementById("oldview").style.display = "block";
+      return;
+    }
+    renderList();
+  }
+
+  /* ============================ 交互 ============================ */
+  document.getElementById("seg").addEventListener("click", function (e) {
+    var btn = e.target.closest("button[data-view]");
+    if (!btn) return;
+    state.view = btn.getAttribute("data-view");
+    Array.prototype.forEach.call(this.querySelectorAll("button"), function (b) { b.classList.remove("on"); });
+    btn.classList.add("on");
+    location.hash = state.view;
+    applyView();
+  });
+
+  document.getElementById("segw").addEventListener("click", function (e) {
+    var btn = e.target.closest("button[data-w]");
+    if (!btn) return;
+    state.width = parseInt(btn.getAttribute("data-w"), 10);
+    Array.prototype.forEach.call(this.querySelectorAll("button"), function (b) { b.classList.remove("on"); });
+    btn.classList.add("on");
+    applySize();
+  });
+
+  function applySize() {
+    var w = state.width;
+    var phone = document.getElementById("phone");
+    var screen = document.getElementById("screen");
+    phone.style.width = (w + 18) + "px";
+    screen.style.width = w + "px";
+    screen.style.height = SCREEN_H + "px";
+    screen.setAttribute("data-w", w);
+    if (state.view !== "old") renderList();
+  }
+
+  listEl.addEventListener("click", function (e) {
+    var row = e.target.closest("[data-ip]");
+    if (!row) return;
+    state.selIp = row.getAttribute("data-ip");
+    renderList();
+  });
+
+  document.getElementById("filters").addEventListener("click", function (e) {
+    var b = e.target.closest("button[data-f]");
+    if (!b) return;
+    state.filter = b.getAttribute("data-f");
+    renderList();
+    listEl.scrollTop = 0;   // 换分组回到顶部
+  });
+
+  document.getElementById("sortBtn").addEventListener("click", function () {
+    state.sort = state.sort === "smart" ? "lat" : state.sort === "lat" ? "dl" : "smart";
+    this.textContent = (state.sort === "smart" ? "智能排序" : state.sort === "lat" ? "按延迟" : "按下载") + " ▾";
+    renderList();
+    listEl.scrollTop = 0;
+  });
+
+  document.getElementById("densBtn").addEventListener("click", function () {
+    state.dense = !state.dense;
+    document.getElementById("optDense").checked = state.dense;
+    this.classList.toggle("on", state.dense);
+    document.body.classList.toggle("dense", state.dense);
+    renderList();
+  });
+
+  document.getElementById("proxySeg").addEventListener("click", function (e) {
+    var b = e.target.closest("button[data-p]");
+    if (!b) return;
+    state.proxyMode = parseInt(b.getAttribute("data-p"), 10);
+    Array.prototype.forEach.call(this.querySelectorAll("button"), function (x) { x.classList.remove("on"); });
+    b.classList.add("on");
+    var row = document.getElementById("addrRow");
+    var inp = document.getElementById("addrInp");
+    if (state.proxyMode === 0) {
+      row.classList.add("off");
+      inp.textContent = "未启用代理";
+    } else {
+      row.classList.remove("off");
+      inp.textContent = state.proxyMode === 1 ? "http://127.0.0.1:10809" : "127.0.0.1:10808";
+    }
+  });
+
+  document.querySelectorAll(".lchips").forEach(function (box) {
+    box.addEventListener("click", function (e) {
+      var c = e.target.closest(".lchip");
+      if (!c || c.classList.contains("mk")) return;
+      Array.prototype.forEach.call(box.children, function (x) { x.classList.remove("on"); });
+      c.classList.add("on");
+    });
+  });
+
+  var sheet = document.getElementById("sheet");
+  document.getElementById("advBtn").addEventListener("click", function () { sheet.classList.add("open"); });
+  if ((location.search || "").indexOf("sheet=1") >= 0) sheet.classList.add("open");
+  sheet.addEventListener("click", function (e) {
+    if (e.target.getAttribute("data-close")) sheet.classList.remove("open");
+  });
+
+  document.getElementById("testBtn").addEventListener("click", function () {
+    var btn = this;
+    btn.textContent = "测速中…";
+    setTimeout(function () { btn.textContent = "测试 IP 分流"; }, 1200);
+  });
+
+  ["optExtreme", "optDense", "optGuides"].forEach(function (id) {
+    document.getElementById(id).addEventListener("change", function (e) {
+      var key = id === "optExtreme" ? "extreme" : id === "optDense" ? "dense" : "guides";
+      state[key] = e.target.checked;
+      if (key === "dense") {
+        document.body.classList.toggle("dense", state.dense);
+        document.getElementById("densBtn").classList.toggle("on", state.dense);
+      }
+      if (key === "guides") document.body.classList.toggle("guides", state.guides);
+      if (state.view !== "old") renderList();
+    });
+  });
+
+  /* ============================ 启动 ============================ */
+  // 支持 ?view=a|b|old&w=478&extreme=1&dense=1&guides=1 直接复现某个状态
+  var q = {};
+  (location.search || "").replace(/^\?/, "").split("&").forEach(function (kv) {
+    var a = kv.split("=");
+    if (a[0]) q[a[0]] = a[1];
+  });
+  if (q.extreme === "1") { state.extreme = true; document.getElementById("optExtreme").checked = true; }
+  if (q.dense === "1") { state.dense = true; document.getElementById("optDense").checked = true; document.body.classList.add("dense"); document.getElementById("densBtn").classList.add("on"); }
+  if (q.guides === "1") { state.guides = true; document.getElementById("optGuides").checked = true; document.body.classList.add("guides"); }
+  if (q.w && ["360", "478", "520"].indexOf(q.w) >= 0) {
+    state.width = parseInt(q.w, 10);
+    Array.prototype.forEach.call(document.querySelectorAll("#segw button"), function (b) {
+      b.classList.toggle("on", b.getAttribute("data-w") === q.w);
+    });
+  }
+  if (q.sel) { state.selIp = q.sel; state.scrollTarget = q.sel; }
+  var init = q.view || (location.hash || "").replace("#", "");
+  if (init === "old" || init === "a" || init === "b") {
+    state.view = init;
+    Array.prototype.forEach.call(document.querySelectorAll("#seg button"), function (b) {
+      b.classList.toggle("on", b.getAttribute("data-view") === init);
+    });
+  }
+
+  renderOld();
+  applySize();
+  applyView();
+})();
+</script>
+</body>
+</html>

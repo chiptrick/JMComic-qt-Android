@@ -449,6 +449,11 @@ def TestStaticApiOnAndroid(tempRoot):
         Check(got == (tempRoot, ""), "Android: GetExistingDirectory 返回 (目录, 过滤器): {!r}".format(got))
         Check(called["qfd"] == 0, "Android 上没有碰 QFileDialog")
 
+        # PickLocalDir 是"选真实目录"(缓存位置用)：必须把 ModeDir 的
+        # (目录, "") 元组拆成字符串，且不经过 SAF 导入/拷贝
+        got = mfd.PickLocalDir(None, "cap", tempRoot)
+        Check(got == tempRoot, "Android: PickLocalDir 返回目录字符串: {!r}".format(got))
+
         got = mfd.GetOpenFileName(None, "cap", tempRoot, "Image Files(*.zip)")
         Check(got == (), "Android: 没选文件时 GetOpenFileName 返回 () : {!r}".format(got))
 
