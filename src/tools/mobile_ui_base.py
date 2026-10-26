@@ -203,6 +203,9 @@ def _InPopup(widget):
 
     下拉框弹出的列表、右键菜单、输入框补全列表都是独立弹窗(Qt::Popup)，
     有自己的点击/滚动语义，误触防护不能插手。
+
+    ToolTip 也算：历史遗留的"输入框候选列表"就是 Qt.ToolTip 顶层窗口，
+    不豁免的话它会被当成普通控件去认领触摸(实际上平台根本不投递事件给它)。
     """
     try:
         if not isinstance(widget, QWidget):
@@ -210,7 +213,8 @@ def _InPopup(widget):
         window = widget.window()
         if window is None:
             return True
-        return _WindowType(window) == Qt.WindowType.Popup
+        windowType = _WindowType(window)
+        return windowType in (Qt.WindowType.Popup, Qt.WindowType.ToolTip)
     except Exception:
         return True
 

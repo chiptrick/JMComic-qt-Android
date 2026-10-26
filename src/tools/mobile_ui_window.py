@@ -79,16 +79,48 @@ class _MobileFilter(QObject):
         try:
             if mobile_ui._keyDiagEnabled:
                 KeyDiag(obj, event)
-            if event.type() == QEvent.Type.Show and isinstance(obj, QDialog):
-                if isinstance(obj, QWidget) and getattr(obj, "widget", None) is not None:
+            eventType = event.type()
+            if isinstance(obj, QDialog) and eventType in (QEvent.Type.Show, QEvent.Type.Resize):
+                inner = getattr(obj, "widget", None)
+                if inner is not None:
                     # BaseMaskDialog：内部 widget 才是真正的对话框
-                    mobile_ui.RelaxMinSizes(obj.widget, mobile_ui.CurrentLimit())
-                    obj.widget.adjustSize()
-                else:
+                    if eventType == QEvent.Type.Show:
+                        mobile_ui.RelaxMinSizes(inner, mobile_ui.CurrentLimit())
+                        # 内容宽度不能超过窗口：模型选择表(4 列固定宽 550)、登录页这些
+                        # 桌面上按设计尺寸写的对话框，在 480 宽的竖屏上会被 adjustSize()
+                        # 撑出屏幕，右侧内容永远看不到(真机"信息显示不完整"的来源之一)
+                        ClampInnerWidth(obj)
+                        inner.adjustSize()
+                    else:
+                        # resize 里只夹宽度、不 adjustSize：adjustSize 会再触发 resize，
+                        # 在事件过滤器里递归是最容易写出"窗口抖动/卡死"的写法
+                        ClampInnerWidth(obj)
+                elif eventType == QEvent.Type.Show:
                     mobile_ui.RelaxMinSizes(obj, mobile_ui.CurrentLimit())
         except Exception as es:
             Log.Error(es)
         return False
+
+
+def ClampInnerWidth(dialog):
+    """ 把遮罩对话框的内容层宽度夹到窗口内(竖屏防溢出，桌面端窗口够宽时无效果) """
+    try:
+        inner = getattr(dialog, "widget", None)
+        if inner is None:
+            return
+        width = dialog.width()
+        if width <= 1:
+            return
+        limit = max(240, width - 16)
+        if inner.minimumWidth() > limit:
+            inner.setMinimumWidth(limit)
+        if inner.maximumWidth() > limit:
+            inner.setMaximumWidth(limit)
+        if inner.width() > limit:
+            inner.resize(limit, inner.height())
+    except Exception as es:
+        Log.Error(es)
+    return
 
 
 def KeyDiag(obj, event):

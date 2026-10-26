@@ -5,7 +5,8 @@ from functools import partial
 from PySide6.QtCore import QEvent, QObject, Qt, QTimer
 from PySide6.QtGui import QFontMetrics, QIcon
 from PySide6.QtWidgets import (QAbstractScrollArea, QBoxLayout, QComboBox, QCommandLinkButton,
-                               QGridLayout, QLabel, QSizePolicy, QTabWidget, QToolButton, QWidget)
+                               QGridLayout, QHeaderView, QLabel, QSizePolicy, QTabWidget,
+                               QTableView, QToolButton, QWidget)
 from tools.log import Log
 from tools.mobile_ui_base import *  # noqa: F401,F403
 from tools.mobile_ui_base import (_SelfAndChildren)
@@ -148,6 +149,114 @@ def RelaxMinSizes(root, limit):
     except Exception as es:
         Log.Error(es)
     return
+
+
+# ---------------------------------------------------------------------------
+# 表格：竖屏列宽（一屏要能看清"标题/状态/进度"这类关键信息）
+# ---------------------------------------------------------------------------
+#
+# 真机现象：下载列表 11 列、批量下载 5 列、超分模型表 4 列都是**按桌面尺寸**定宽的
+# (见各 view 里的 setColumnWidth)，竖屏逻辑宽只有 480，列宽总和却有 550~1100，
+# 右侧列永远在屏幕外 —— 用户看到的就是"信息显示不完整"。更糟的是这些表的横向滚动
+# 原来是按列跳的(见 mobile_ui_touch.MakeScrollable)，中间列根本停不住。
+#
+# 这里的策略：**只动显示，不动 item**。隐藏的列照样能用 item(row, col) 取到，
+# 所以各处 `self.tableWidget.item(row, 0).text()` 这类老代码不受影响。
+
+# 列宽下限/上限(逻辑像素)：下限要能放下"999/999"这种进度文本，上限防止某列独吞整屏
+TableMinSection = 46
+TableMaxSection = 260
+# 竖屏下给表格的最大宽度余量(左右布局边距)
+TableWidthMargin = 12
+
+
+def FitTableForPortrait(table, available=0, hideColumns=(), stretchColumn=-1,
+                        fixedWidths=None, hideVerticalHeader=True):
+    """ 按竖屏可用宽度重排一张表格的列(幂等，可反复调用)
+
+    :param available: 可用宽度(px)；<=0 时取表格视口的真实宽度
+    :param hideColumns: 竖屏下隐藏的列号(低信息量列：时间/速度/转换耗时…)
+    :param stretchColumn: 吃掉剩余宽度的主信息列(通常是"标题"/"名称")
+    :param fixedWidths: {列号: 期望宽度}，会被夹在 [TableMinSection, TableMaxSection]
+    :param hideVerticalHeader: 竖屏下隐藏行号表头(省 30+px 且少一个点击偏移来源)
+    """
+    if table is None:
+        return False
+    try:
+        header = table.horizontalHeader()
+        if header is None:
+            return False
+        # 长文本一律右侧省略 + 不换行：长标题不再把行撑高，也不会被硬裁成半截
+        table.setWordWrap(False)
+        table.setTextElideMode(Qt.ElideRight)
+        table.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        table.setMinimumWidth(0)
+        # 表头能压缩到 TableMinSection，窄屏才装得下；不设的话默认下限会把表撑宽
+        header.setMinimumSectionSize(TableMinSection)
+        if hideVerticalHeader:
+            vertical = table.verticalHeader()
+            if vertical is not None:
+                vertical.setVisible(False)
+        hidden = set(int(c) for c in (hideColumns or ()))
+        for col in hidden:
+            if 0 <= col < table.columnCount():
+                table.setColumnHidden(col, True)
+        fixedWidths = fixedWidths or {}
+        for col in range(table.columnCount()):
+            if col in hidden:
+                continue
+            header.setSectionResizeMode(col, QHeaderView.ResizeMode.Interactive)
+        for col, width in fixedWidths.items():
+            col = int(col)
+            if col in hidden or not (0 <= col < table.columnCount()):
+                continue
+            width = max(TableMinSection, min(int(width), TableMaxSection))
+            table.setColumnWidth(col, width)
+        stretchColumn = int(stretchColumn)
+        if 0 <= stretchColumn < table.columnCount() and stretchColumn not in hidden:
+            # Stretch 必须**最后**设：先设会被后面的 setColumnWidth 顶掉
+            header.setSectionResizeMode(stretchColumn, QHeaderView.ResizeMode.Stretch)
+            # 主信息列也要有下限，否则窄屏上会被压成一条缝
+            if table.columnWidth(stretchColumn) < TableMinSection * 2:
+                table.setColumnWidth(stretchColumn, TableMinSection * 2)
+        return True
+    except Exception as es:
+        Log.Error(es)
+    return False
+
+
+def FitTablesForPortrait(root):
+    """ 把 root 里所有"登记过竖屏列策略"的表格按当前宽度重排一次
+
+    登记方式：在表格所属的 view 里给 table 挂一个 `_jmPortraitRule` 字典
+    (hide/stretch/fixed)，这样不用在这里硬编码任何业务表格的名字，也天然支持
+    后建出来的表(首页各分区、弹窗里的表)。可用宽度变化(旋转/窗口缩放)时会重排。
+    """
+    count = 0
+    if root is None:
+        return count
+    try:
+        for table in _SelfAndChildren(root, QTableView):
+            rule = getattr(table, "_jmPortraitRule", None)
+            if not rule:
+                continue
+            viewport = table.viewport()
+            available = viewport.width() if viewport is not None else table.width()
+            if available < 80:
+                continue
+            key = (available, table.columnCount())
+            if getattr(table, "_jmPortraitApplied", None) == key:
+                continue
+            if FitTableForPortrait(table, available,
+                                   hideColumns=rule.get("hide", ()),
+                                   stretchColumn=rule.get("stretch", -1),
+                                   fixedWidths=rule.get("fixed", {}),
+                                   hideVerticalHeader=rule.get("hideVerticalHeader", True)):
+                table._jmPortraitApplied = key
+                count += 1
+    except Exception as es:
+        Log.Error(es)
+    return count
 
 
 def StackBookInfo(view):
@@ -1039,6 +1148,8 @@ def ReflowPortrait(root=None, available=None):
     count += FlattenWideGrids(root, available)
     count += ShrinkToFit(root, available)
     count += ClampPageWidth(root, available)
+    # 表格列宽：必须在页面宽度定下来之后(表格视口宽度依赖父布局)
+    count += FitTablesForPortrait(root)
     # 弹窗宽度要在所有拆行/压扁之后按最终字体算一次(combo 可能已经被压窄)
     count += FitComboPopups(root)
     # 设置页的路径行：任何一次重排之后都重新省略一遍(标签文字是运行时才填的)

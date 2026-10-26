@@ -16,6 +16,7 @@ from tools.str import Str
 from server import req, Status
 import re
 from tools.book import BookMgr
+from tools import platform_mobile
 from view.download.download_some_edit_view import DownloadSomeEditView
 from view.download.download_some_output_view import DownloadSomeOutputView
 from PySide6.QtWidgets import QHeaderView, QAbstractItemView, QMenu, QTableWidgetItem
@@ -60,6 +61,13 @@ class DownloadSomeView(QWidget, Ui_DownloadSome, QtTaskBase):
         print(self.width())
         self.tableWidget.setColumnWidth(1, 300)
         self.tableWidget.setColumnWidth(2, 100)
+        if platform_mobile.IsAndroid():
+            # 竖屏列策略：标题列吃剩余宽度(见 mobile_ui_layout.FitTablesForPortrait)
+            # 原来 100+300+100+100=600 > 竖屏 480，右侧"章节数/状态"看不到
+            self.tableWidget._jmPortraitRule = {
+                "stretch": 1,
+                "fixed": {0: 64, 2: 56, 3: 70},
+            }
         self.tableWidget.customContextMenuRequested.connect(self.SelectMenu)
         self.tableWidget.doubleClicked.connect(self.OpenBookInfo)
         self.tableWidget.horizontalHeader().sectionClicked.connect(self.Sort)

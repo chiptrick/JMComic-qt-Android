@@ -8,6 +8,7 @@ from server import req, Status
 from task.qt_task import QtTaskBase
 from tools.book import BookMgr, BookInfo
 from tools.str import Str
+from tools import platform_mobile
 from view.download.download_all_item import DownloadAllItem
 
 
@@ -28,6 +29,13 @@ class DownloadAllView(QtWidgets.QWidget, Ui_DownloadAll, QtTaskBase):
         self.tableWidget.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.tableWidget.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)
         self.tableWidget.setColumnWidth(4, 300)
+        if platform_mobile.IsAndroid():
+            # 竖屏列策略：分类列让位给名称(见 mobile_ui_layout.FitTablesForPortrait)
+            self.tableWidget._jmPortraitRule = {
+                "hide": (3,),
+                "stretch": 4,
+                "fixed": {0: 46, 1: 104, 2: 56},
+            }
         # self.tableWidget.installEventFilter(self)
         self.selectAllButton.clicked.connect(self.SelectAll)
         self.chipButton.clicked.connect(self.SelectAllChip)

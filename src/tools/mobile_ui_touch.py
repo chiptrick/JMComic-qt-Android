@@ -418,9 +418,17 @@ def _FocusInput(edit, globalPos, placeCursor=False):
 
 
 def _ActivateItemView(view, globalPos):
-    """ 项视图点按：选中 + 走 clicked/itemClicked 信号(应用自己接的激活链) """
+    """ 项视图点按：选中 + 走 clicked/itemClicked 信号(应用自己接的激活链)
+
+    **坐标必须换算到 viewport**：`QAbstractItemView::indexAt(point)` 的点是"视口坐标"
+    (内部就是 rowAt/columnAt 直接吃视口坐标)。之前传的是 view 自己的坐标，
+    等于把命中点往上挪了"水平表头高度(25px)+边框"、往左挪了"竖直表头宽度(约30px)"；
+    表格行高只有 23px，于是点第 2 行稳定命中第 1 行、列也整列错位 ——
+    真机上就是"单击漂移，点不准目标位置"。
+    """
     try:
-        local = view.mapFromGlobal(QPoint(int(globalPos.x()), int(globalPos.y())))
+        viewport = view.viewport() if view.viewport() is not None else view
+        local = viewport.mapFromGlobal(QPoint(int(globalPos.x()), int(globalPos.y())))
         index = view.indexAt(local)
         if not index.isValid():
             # 点在空白处：和真实点击一样"取消选中"
@@ -1061,7 +1069,7 @@ class _TouchRouter(QObject):
             # 数值框点按：编辑区聚焦+弹输入法(可键入)，上下箭头才走 stepBy
             self._busy = True
             try:
-                desc = _ActivateSpin(widget, pos)
+                desc = _ActivateSpin(widget, seq["press"])
             finally:
                 self._busy = False
             if desc:
@@ -1070,9 +1078,12 @@ class _TouchRouter(QObject):
                 Log.Warn("touch: 数值框 {}".format(desc))
             return
         # 点按：走控件自己的公开入口
+        # 命中一律用**按下点**(不是松手点)：判定阈值 TouchSlopPx=16，松手点允许离按下点
+        # 16px，对 23px 行高的表格来说就是大半行 —— 那是"点第 3 行却命中第 4 行"的第二个来源。
+        # Qt 原生鼠标也是按 press 定 pressedIndex、release 只做确认。
         self._busy = True
         try:
-            desc = _Activate(widget, pos)
+            desc = _Activate(widget, seq["press"])
         finally:
             self._busy = False
         if desc:
@@ -1473,8 +1484,16 @@ def MakeScrollable(area):
     target.setAttribute(Qt.WidgetAttribute.WA_AcceptTouchEvents, True)
     QScroller.grabGesture(target, QScroller.ScrollerGestureType.TouchGesture)
     if isinstance(area, QAbstractItemView):
-        # 只有项视图有 setVerticalScrollMode；QPlainTextEdit/QTextEdit 本身已是逐像素
+        # 逐像素滚动是 QScroller 能"1:1 跟手"的**前提**：
+        # QScroller 的滑动闭环是"手指位移(px) -> QScrollEvent.contentPos ->
+        # scrollBar->setValue(contentPos)"，即一个手指像素 = 一个滚动条单位。
+        # 而 QAbstractItemView 默认 ScrollPerItem(一个单位 = 一整行/一整列)，
+        # 于是手指滑 8px 表格就跳 8 行，且 contentSize(行数) < viewport(像素) 会让
+        # 越界/惯性计算彻底失真(一甩就到尽头) —— 真机现象就是"轻微滑动即切换多行"。
+        # 两个方向都必须补：原来只设了垂直，而超分模型表/下载列表的横向内容都超出竖屏，
+        # 横向恰恰是用户最常滑的方向(见 docs/mobile_touch_and_recents_fix_plan.md)。
         area.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+        area.setHorizontalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
     # QScroller 要 1:1 跟手：SmoothScrollBar 的自定义缓动(500ms OutQuint)会让
     # "滚动条实际值"滞后于手指，也叠掉了 QScroller 自己的惯性手感 —— 移动端关掉，
     # 跟手/惯性完全交给 Qt 原生平滑滚动
@@ -1511,10 +1530,41 @@ def EnableTouchScroll(root, exclude=None):
     if root is None:
         return count
     try:
+        # 逐像素滚动是"项视图"的硬性要求(见 MakeScrollable 注释)，且必须对**所有**
+        # 项视图生效 —— 包括已经接管过的、被 exclude 掉的、QScroller 抓不到的表。
+        # MakeScrollable 对已接管的区域会提前 return，所以这条单独走一遍(幂等)。
+        MakeItemViewsPixelScroll(root)
         for area in _SelfAndChildren(root, QAbstractScrollArea):
             if exclude is not None and (area is exclude or exclude.isAncestorOf(area)):
                 continue
             if MakeScrollable(area):
+                count += 1
+    except Exception as es:
+        Log.Error(es)
+    return count
+
+
+def MakeItemViewsPixelScroll(root):
+    """ 把 root(含自己)里所有项视图补成**逐像素**滚动，返回被改动的个数
+
+    为什么不能只靠 MakeScrollable：那个函数对"已接管"的区域直接 return，
+    而滚动模式是每个 QAbstractItemView 自己的事 —— 漏一个就是那张表
+    "轻微一滑跳多行/多列"。让它可单独重入，任意时机(建表时/显示时/手指按下去时)
+    都可以补一遍，不会再因为走了哪条路径而漏。
+    """
+    count = 0
+    if root is None:
+        return count
+    try:
+        for view in _SelfAndChildren(root, QAbstractItemView):
+            changed = False
+            if view.verticalScrollMode() != QAbstractItemView.ScrollMode.ScrollPerPixel:
+                view.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+                changed = True
+            if view.horizontalScrollMode() != QAbstractItemView.ScrollMode.ScrollPerPixel:
+                view.setHorizontalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+                changed = True
+            if changed:
                 count += 1
     except Exception as es:
         Log.Error(es)
