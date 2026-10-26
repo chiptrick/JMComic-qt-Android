@@ -20,8 +20,13 @@ import java.io.File;
  *   * 所以 Service 拉起本 Activity，本 Activity 转手拉起 SAF，拿到结果后写进
  *     文件信箱(SafStore.WriteResult)再 finish()。
  *
- * 主题是 Theme.Translucent.NoTitleBar + noHistory + excludeFromRecents + taskAffinity=""：
+ * 主题是 Theme.Translucent.NoTitleBar + excludeFromRecents + taskAffinity=""：
  * 用户完全看不到这一层，屏幕上就是"主界面 -> 系统文件选择器 -> 主界面"。
+ *
+ * taskAffinity="" 是**必须**的：它让下面 StartPicker 里的 FLAG_ACTIVITY_NEW_TASK
+ * 真的开一个**独立任务**。否则本 Activity 与主 QtActivity 同 affinity，NEW_TASK 会复用
+ * 同一个任务，excludeFromRecents 就把整个应用任务踢出多任务列表了(真机现象：
+ * 按 HOME 后多任务里找不到本应用，但进程还在后台)。
  */
 public class SafPickActivity extends Activity {
 

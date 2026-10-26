@@ -191,9 +191,16 @@ public class SafService extends Service {
             @Override
             public void run() {
                 try {
+                    // 只带 NEW_TASK(从 Service 里起 Activity 必须) + 不要动画。
+                    //
+                    // **绝不能带 FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS**：SafPickActivity 与
+                    // 主 QtActivity 同 affinity，NEW_TASK 会复用**同一个任务**，这个 flag
+                    // 于是把整个应用任务标记成"不进多任务" —— 真机现象就是按 HOME 后
+                    // 多任务列表里找不到本应用，但进程/Service 还在后台跑。
+                    // 该 Activity 自己的"不出现"由清单里的
+                    // android:excludeFromRecents + android:taskAffinity=""(独立任务)保证。
                     Intent intent = new Intent(SafService.this, SafPickActivity.class);
                     intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK
-                            | Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS
                             | Intent.FLAG_ACTIVITY_NO_ANIMATION);
                     intent.putExtra("reqId", reqId);
                     intent.putExtra("kind", kind);

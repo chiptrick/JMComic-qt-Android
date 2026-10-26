@@ -90,8 +90,13 @@ def InitQt(app=None):
     return app, QtWidgets, QtGui, QLocalSocket, QLocalServer, QtOwner, showError, showError2
 
 
-def Run(app=None):
-    """ 程序主流程(桌面端与 Android 共用) """
+def Run(app=None, afterShow=None):
+    """ 程序主流程(桌面端与 Android 共用)
+
+    :param afterShow: 可选回调，在"主窗口已经显示出第一帧之后、Main.Init() 之前"调用。
+        Android 用它把**建窗口不需要的重活**(模型检查、超分后端初始化、启动诊断)
+        挪到首帧之后 —— 见 android/main.py 的说明(多任务快照抓的是"离开前台那一帧")。
+    """
     try:
         app, QtWidgets, QtGui, QLocalSocket, QLocalServer, QtOwner, showError, showError2 = InitQt(app)
     except Exception as es:
@@ -134,6 +139,19 @@ def Run(app=None):
         from view.main.main_view import MainView
         main = MainView()
         main.show()  # 显示窗体
+        # 首帧之后、Main.Init() 之前跑"建窗口不需要的重活"。
+        # 真机问题(多任务里看不到本应用的画面)：Android 在应用离开前台的那一刻抓任务快照，
+        # 抓到的就是窗口里的最后一帧。如果这时候 Qt 还没画过任何东西，快照就是一片空白，
+        # 而且**这个空快照会一直留在这个任务上**(除非再"前台->后台"一次)。
+        # 之前 EnsureModels / sr 后端初始化 / 启动诊断全排在 show() 之前，
+        # 首帧被它们推后了 1~3 秒，用户这时按 HOME 就得到一张空白卡片。
+        # 先 processEvents() 把首帧真正送出去，再跑这些活。
+        if afterShow is not None:
+            try:
+                app.processEvents()
+                afterShow()
+            except Exception as es:
+                Log.Error(es)
         main.Init()
         if localServer is not None:
             localServer.newConnection.connect(main.OnNewConnection)

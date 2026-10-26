@@ -1,9 +1,10 @@
 # coding:utf-8
-""" 主窗口生命周期挂钩（Apply / OnShown / OnResize） """
+""" 主窗口生命周期挂钩（Apply / OnShown / OnResize / 应用前后台） """
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QApplication
 from tools.log import Log
 from tools.mobile_ui_base import *  # noqa: F401,F403
 from tools import mobile_ui
-
 
 
 def Apply(mainView):
@@ -35,6 +36,8 @@ def Apply(mainView):
         mobile_ui.InstallAppFilter(mainView)
         mobile_ui.InstallTouchGuard(mainView)
         mobile_ui.InstallWindowGuard(mainView)
+        # 前后台切换：进后台刷最后一帧(多任务快照要有内容)、回前台重排重绘(防黑屏)
+        mobile_ui.InstallAppStateHook(mainView)
         mobile_ui.ReflowPortrait(getattr(mainView, "subStackWidget", None))
         mobile_ui.InstallReflowHook(mainView)
         # 首页/其它页面里的 QTabWidget(分区标签)：换页后按真实视口重排封面
@@ -100,3 +103,55 @@ def OnResize(mainView):
     except Exception as es:
         Log.Error(es)
     return
+
+
+def InstallAppStateHook(mainView):
+    """ 监听前后台切换：把最后一帧刷出去 + 打一行可验证的日志
+
+    1) **多任务卡片里看不到本应用的画面**：系统是在 Activity 停下来前后抓的任务快照。
+       如果这一帧还没刷出去(或者渲染表面已经被释放)，抓到的就是黑图/空图。
+       在 `ApplicationInactive`(≈ onPause，画面还在) 主动 `repaint()` 一次，
+       保证系统抓到的至少是"当前这一屏"。
+       (真正的根因是渲染容器用了 SurfaceView —— 它不在 View 树里，
+       快照抓不到它的内容；见 android/main.py 里把容器切成 TextureView 的说明。)
+    2) **从多任务切回来黑屏/白屏**(本项目历史问题)：`ApplicationActive` 时按新尺寸重排
+       并强制重绘一次。
+    3) 每次状态变化打一行 `appState:` 日志 —— 真机上一眼能分清
+       "只是进了后台" / "被系统销毁重来"(日志会出现冷启动记录)。
+    """
+    if not IsEnabled() or mainView is None:
+        return False
+    if getattr(mainView, "_jmAppStateHook", False):
+        return False
+    app = QApplication.instance()
+    if app is None:
+        return False
+
+    def OnAppState(state):
+        try:
+            name = state.name if hasattr(state, "name") else str(state)
+        except Exception:
+            name = str(state)
+        try:
+            Log.Warn("appState: {} visible={} active={} page={}".format(
+                name, mainView.isVisible(), mainView.isActiveWindow(),
+                CurrentPageName(mainView)))
+        except Exception:
+            pass
+        try:
+            if state == Qt.ApplicationState.ApplicationActive:
+                # 回到前台：先按新尺寸重排(抽屉/封面/表格列宽)，再整窗强制重绘
+                mobile_ui.OnShown(mainView)
+                mainView.update()
+                mainView.repaint()
+            elif state == Qt.ApplicationState.ApplicationInactive:
+                # 即将进后台(≈ onPause)：把当前这一帧刷出去，系统抓快照才不是黑图
+                mainView.repaint()
+        except Exception as es:
+            Log.Error(es)
+        return
+
+    app.applicationStateChanged.connect(OnAppState)
+    mainView._jmAppStateHook = True
+    Log.Warn("mobile ui: 已监听前后台切换(进后台刷帧 / 回前台重排重绘)")
+    return True

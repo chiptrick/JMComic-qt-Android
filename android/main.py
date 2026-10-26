@@ -9,7 +9,8 @@ assets 根目录，业务代码在 app_src/(构建脚本从 ../src 复制)或 ..
     2. 创建 QApplication(QStandardPaths 需要)
     3. platform_mobile.InitAndroidEnv()：把配置/数据/日志重定向到应用私有目录，
        缓存重定向到应用外部缓存目录(/storage/emulated/0/Android/data/<包名>/cache，
-       用户清理得到)，下载目录默认指向应用外部私有目录
+       用户清理得到)，下载目录默认指向应用外部私有目录；设置读完后
+       ApplyAndroidPathDefaults() 再把历史配置里的内部目录校正到外部
     4. sr_backend.InstallQnnCompat()：把 sr_qnn 注册为 sr_vulkan 兼容模块
     5. start.Run(app)：走与桌面端相同的主流程(自动跳过单实例/系统托盘等桌面特性)
 """
@@ -611,10 +612,23 @@ def DumpDiagnostics(reason=""):
         lines.append("ANDROID_PRIVATE: {}".format(os.environ.get("ANDROID_PRIVATE", "")))
         lines.append("ANDROID_ARGUMENT: {}".format(os.environ.get("ANDROID_ARGUMENT", "")))
         lines.append("JM_SR_MODELS: {}".format(os.environ.get("JM_SR_MODELS", "")))
+        # 渲染容器(SurfaceView=0 / TextureView=1)：决定多任务快照里能不能看到画面
+        lines.append("QT_ANDROID_SURFACE_CONTAINER_TYPE: {} (0=SurfaceView, 1=TextureView)".format(
+            os.environ.get("QT_ANDROID_SURFACE_CONTAINER_TYPE", "(默认)")))
         lines.append("app data dir: {}".format(platform_mobile.GetAppDataDir()))
         lines.append("external dir: {}".format(platform_mobile.GetExternalDir()))
         lines.append("external cache dir: {}".format(platform_mobile.GetExternalCacheDir()))
         lines.append("XDG_CACHE_HOME: {}".format(os.environ.get("XDG_CACHE_HOME", "")))
+        # 下载/缓存目录的实际生效值(自定义缓存目录与默认值可能不同)
+        try:
+            from config.setting import Setting
+            lines.append("save path: {}".format(Setting.SavePath.value))
+            lines.append("download root: {}".format(Setting.GetDownloadRoot()))
+            lines.append("cache path: {} (自定义={})".format(
+                Setting.GetCachePath(), Setting.CachePath.value or "(空=默认)"))
+            lines.append("cache path default: {}".format(Setting.GetDefaultCachePath()))
+        except Exception as es:
+            lines.append("save/cache path: <{}>".format(es))
         nativeDirs = platform_mobile.GetNativeLibDirs()
         lines.append("native lib dirs: {}".format(nativeDirs))
         for lib in ("libsr_qnn.so", "libonnxruntime.so", "libQnnHtp.so", "libQnnHtpV79Skel.so"):
@@ -712,8 +726,74 @@ def DumpDiagnostics(reason=""):
     return
 
 
+def ApplySurfaceContainer():
+    """ 选 Qt 在 Android 上的渲染容器：0 = SurfaceView(默认) / 1 = TextureView
+
+    真机现象(0.53 及以前)：按 HOME 进后台后，多任务界面里**看不到本应用的画面**
+    (卡片是黑/空)，但进程还在后台跑。
+
+    根因不是清单也不是任务被移除 —— 是 **Qt 默认用 SurfaceView 承载整个 Qt 窗口**：
+    SurfaceView 的内容画在一块**独立的 Surface** 上，不属于 View 树，Android 抓任务
+    快照 / 截屏 / 多任务预览(View 层级合成)时**拿不到它的像素**，于是整屏都是黑的。
+    (视频/相机类应用"最近任务缩略图一块黑"是同一件事；项目里上一次留下的
+    android/build_logs/repro_home.png 全黑截图也是它。)
+
+    Qt 6.10+ 提供 `QT_ANDROID_SURFACE_CONTAINER_TYPE` 覆盖容器类型
+    (qandroidplatformwindow.cpp: `qEnvironmentVariableIntValue`，
+    0 = SurfaceView、1 = TextureView)。TextureView 把画面通过 SurfaceTexture
+    合成进 **View 树**，所以系统快照/截图/多任务预览都能拿到内容；
+    代价是每帧多一次纹理合成(GPU 侧开销很小，本项目界面以静态列表/图片为主)。
+
+    该变量在**窗口初始化时读一次**，所以必须在第一个 QWindow 建出来之前写进环境
+    (因此放在 QApplication 之前)。<AppDataDir>/sr_env.txt 里写同名键可以覆盖本默认值
+    —— ApplyEnvFile() 在 QApplication 之后、建窗口之前跑，见 Main()。
+    """
+    if os.environ.get("QT_ANDROID_SURFACE_CONTAINER_TYPE"):
+        return os.environ["QT_ANDROID_SURFACE_CONTAINER_TYPE"]
+    os.environ["QT_ANDROID_SURFACE_CONTAINER_TYPE"] = "1"
+    return "1"
+
+
+def DeferredStartup():
+    """ 建窗口**不需要**的重活：模型检查、超分后端、启动诊断
+
+    为什么要延后(真机问题："多任务界面里没有本应用的画面")：
+    Android 在应用**离开前台的那一刻**抓任务快照，抓到的就是窗口里的最后一帧；
+    如果那时 Qt 还没画过东西，快照就是空白，而且这个空快照**会一直留在这个任务上**
+    (除非再"前台 -> 后台"一次)。之前这几件事全排在 `MainView.show()` 之前，
+    把首帧推后了 1~3 秒，用户在这段时间按 HOME 就得到一张空白卡片。
+    现在由 start.Run(afterShow=...) 在"首帧已送出、Main.Init() 之前"调用这里。
+
+    注意顺序不能乱：EnsureModels 必须在 sr 后端初始化之前(模型文件要先就位)，
+    而 start.InitSrEngine() 写 config.CanWaifu2x，Main.Init() 会读它 —— 所以本函数
+    必须跑在 Main.Init() 之前(afterShow 的调用点就是那里)。
+    """
+    try:
+        EnsureModels()
+    except Exception as es:
+        WriteDiag("EnsureModels 失败: {}".format(es))
+    try:
+        from tools import sr_backend
+        sr_backend.InstallQnnCompat()
+    except Exception as es:
+        WriteDiag("InstallQnnCompat 失败: {}".format(es))
+    try:
+        import start
+        start.InitSrEngine()
+    except Exception as es:
+        WriteDiag("InitSrEngine 失败: {}".format(es))
+    # 走一遍图像格式探测，确认 Qt 插件是否齐全(缺 qsvg 会让主题里的 svg 图标/交互框全部消失)
+    try:
+        DumpDiagnostics("startup")
+    except Exception as es:
+        WriteDiag("DumpDiagnostics 失败: {}".format(es))
+    return
+
+
 def Main():
     SetupPath()
+    # 必须在 QApplication 之前：渲染容器类型是窗口初始化时读的一次性环境变量
+    ApplySurfaceContainer()
     try:
         from PySide6.QtWidgets import QApplication
         app = QApplication.instance()
@@ -724,22 +804,15 @@ def Main():
         platform_mobile.InitAndroidEnv(app)
         # 必须在 sr_qnn 初始化之前：QNN 的调优开关全部走环境变量
         ApplyEnvFile()
-        EnsureModels()
-
-        from tools import sr_backend
-        sr_backend.InstallQnnCompat()
-
-        import start
-        start.InitSrEngine()
-        # 走一遍图像格式探测，确认 Qt 插件是否齐全(缺 qsvg 会让主题里的 svg 图标/交互框全部消失)
-        DumpDiagnostics("startup")
         # 下载目录(SAF)自检：只有 <filesDir>/saf/selftest 存在时才跑(见 tools/saf_selftest.py)
         try:
             from tools import saf_selftest
             saf_selftest.Install()
         except Exception:
             pass
-        start.Run(app)
+        import start
+        # 首帧之后再跑模型/超分/诊断(见 DeferredStartup 的说明)
+        start.Run(app, afterShow=DeferredStartup)
     except SystemExit:
         raise
     except Exception:
