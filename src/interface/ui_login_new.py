@@ -434,160 +434,551 @@ class Ui_LoginNew(object):
         self.tab_4 = QWidget()
         self.tab_4.setObjectName(u"tab_4")
         self.verticalLayout_9 = QVBoxLayout(self.tab_4)
+        self.verticalLayout_9.setSpacing(0)
         self.verticalLayout_9.setObjectName(u"verticalLayout_9")
-        self.horizontalLayout_14 = QHBoxLayout()
-        self.horizontalLayout_14.setObjectName(u"horizontalLayout_14")
-        self.verticalLayout_14 = QVBoxLayout()
-        self.verticalLayout_14.setObjectName(u"verticalLayout_14")
-        self.commandLinkButton_3 = QCommandLinkButton(self.tab_4)
-        self.commandLinkButton_3.setObjectName(u"commandLinkButton_3")
+        self.verticalLayout_9.setContentsMargins(0, 0, 0, 0)
+        self.proxyHeader = QWidget(self.tab_4)
+        self.proxyHeader.setObjectName(u"proxyHeader")
+        self.proxyHeaderLayout = QHBoxLayout(self.proxyHeader)
+        self.proxyHeaderLayout.setSpacing(8)
+        self.proxyHeaderLayout.setObjectName(u"proxyHeaderLayout")
+        self.proxyHeaderLayout.setContentsMargins(12, 0, 12, 0)
+        self.proxyTitleLabel = QLabel(self.proxyHeader)
+        self.proxyTitleLabel.setObjectName(u"proxyTitleLabel")
 
-        self.verticalLayout_14.addWidget(self.commandLinkButton_3)
+        self.proxyHeaderLayout.addWidget(self.proxyTitleLabel)
 
-        self.verticalSpacer_9 = QSpacerItem(20, 40, QSizePolicy.Minimum, QSizePolicy.Expanding)
+        self.proxyHeaderSpacer = QSpacerItem(40, 10, QSizePolicy.Expanding, QSizePolicy.Minimum)
 
-        self.verticalLayout_14.addItem(self.verticalSpacer_9)
+        self.proxyHeaderLayout.addItem(self.proxyHeaderSpacer)
+
+        self.cdnLinkButton = QCommandLinkButton(self.proxyHeader)
+        self.cdnLinkButton.setObjectName(u"cdnLinkButton")
+
+        self.proxyHeaderLayout.addWidget(self.cdnLinkButton)
 
 
-        self.horizontalLayout_14.addLayout(self.verticalLayout_14)
+        self.verticalLayout_9.addWidget(self.proxyHeader)
 
-        self.scrollArea_3 = SmoothScrollArea(self.tab_4)
-        self.scrollArea_3.setObjectName(u"scrollArea_3")
-        self.scrollArea_3.setWidgetResizable(True)
-        self.scrollAreaWidgetContents_3 = QWidget()
-        self.scrollAreaWidgetContents_3.setObjectName(u"scrollAreaWidgetContents_3")
-        self.scrollAreaWidgetContents_3.setGeometry(QRect(0, -224, 479, 3281))
-        self.verticalLayout_10 = QVBoxLayout(self.scrollAreaWidgetContents_3)
-        self.verticalLayout_10.setObjectName(u"verticalLayout_10")
-        self.horizontalLayout_15 = QHBoxLayout()
-        self.horizontalLayout_15.setObjectName(u"horizontalLayout_15")
-        self.proxy_0 = QRadioButton(self.scrollAreaWidgetContents_3)
+        self.proxyModeBox = QWidget(self.tab_4)
+        self.proxyModeBox.setObjectName(u"proxyModeBox")
+        self.proxyModeLayout = QVBoxLayout(self.proxyModeBox)
+        self.proxyModeLayout.setSpacing(5)
+        self.proxyModeLayout.setObjectName(u"proxyModeLayout")
+        self.proxyModeLayout.setContentsMargins(12, 2, 12, 6)
+        self.proxyModeRow = QHBoxLayout()
+        self.proxyModeRow.setSpacing(6)
+        self.proxyModeRow.setObjectName(u"proxyModeRow")
+        self.proxy_0 = QRadioButton(self.proxyModeBox)
         self.radioProxyGroup = QButtonGroup(LoginNew)
         self.radioProxyGroup.setObjectName(u"radioProxyGroup")
         self.radioProxyGroup.addButton(self.proxy_0)
         self.proxy_0.setObjectName(u"proxy_0")
 
-        self.horizontalLayout_15.addWidget(self.proxy_0)
+        self.proxyModeRow.addWidget(self.proxy_0)
 
-
-        self.verticalLayout_10.addLayout(self.horizontalLayout_15)
-
-        self.horizontalLayout_16 = QHBoxLayout()
-        self.horizontalLayout_16.setObjectName(u"horizontalLayout_16")
-        self.proxy_1 = QRadioButton(self.scrollAreaWidgetContents_3)
+        self.proxy_1 = QRadioButton(self.proxyModeBox)
         self.radioProxyGroup.addButton(self.proxy_1)
         self.proxy_1.setObjectName(u"proxy_1")
-        self.proxy_1.setMinimumSize(QSize(90, 0))
 
-        self.horizontalLayout_16.addWidget(self.proxy_1)
+        self.proxyModeRow.addWidget(self.proxy_1)
 
-        self.line_4 = QFrame(self.scrollAreaWidgetContents_3)
-        self.line_4.setObjectName(u"line_4")
-        self.line_4.setFrameShape(QFrame.VLine)
-        self.line_4.setFrameShadow(QFrame.Sunken)
-
-        self.horizontalLayout_16.addWidget(self.line_4)
-
-        self.label_13 = QLabel(self.scrollAreaWidgetContents_3)
-        self.label_13.setObjectName(u"label_13")
-        self.label_13.setAlignment(Qt.AlignCenter)
-
-        self.horizontalLayout_16.addWidget(self.label_13)
-
-        self.httpLine = QLineEdit(self.scrollAreaWidgetContents_3)
-        self.httpLine.setObjectName(u"httpLine")
-
-        self.horizontalLayout_16.addWidget(self.httpLine)
-
-
-        self.verticalLayout_10.addLayout(self.horizontalLayout_16)
-
-        self.horizontalLayout_17 = QHBoxLayout()
-        self.horizontalLayout_17.setObjectName(u"horizontalLayout_17")
-        self.proxy_2 = QRadioButton(self.scrollAreaWidgetContents_3)
+        self.proxy_2 = QRadioButton(self.proxyModeBox)
         self.radioProxyGroup.addButton(self.proxy_2)
         self.proxy_2.setObjectName(u"proxy_2")
-        self.proxy_2.setMinimumSize(QSize(90, 0))
 
-        self.horizontalLayout_17.addWidget(self.proxy_2)
+        self.proxyModeRow.addWidget(self.proxy_2)
 
-        self.line_5 = QFrame(self.scrollAreaWidgetContents_3)
-        self.line_5.setObjectName(u"line_5")
-        self.line_5.setFrameShape(QFrame.VLine)
-        self.line_5.setFrameShadow(QFrame.Sunken)
-
-        self.horizontalLayout_17.addWidget(self.line_5)
-
-        self.label_14 = QLabel(self.scrollAreaWidgetContents_3)
-        self.label_14.setObjectName(u"label_14")
-
-        self.horizontalLayout_17.addWidget(self.label_14)
-
-        self.sockEdit = QLineEdit(self.scrollAreaWidgetContents_3)
-        self.sockEdit.setObjectName(u"sockEdit")
-
-        self.horizontalLayout_17.addWidget(self.sockEdit)
-
-
-        self.verticalLayout_10.addLayout(self.horizontalLayout_17)
-
-        self.horizontalLayout_18 = QHBoxLayout()
-        self.horizontalLayout_18.setObjectName(u"horizontalLayout_18")
-        self.proxy_3 = QRadioButton(self.scrollAreaWidgetContents_3)
+        self.proxy_3 = QRadioButton(self.proxyModeBox)
         self.radioProxyGroup.addButton(self.proxy_3)
         self.proxy_3.setObjectName(u"proxy_3")
 
-        self.horizontalLayout_18.addWidget(self.proxy_3)
+        self.proxyModeRow.addWidget(self.proxy_3)
 
-        self.checkLabel = QLabel(self.scrollAreaWidgetContents_3)
-        self.checkLabel.setObjectName(u"checkLabel")
-        font = QFont()
-        font.setBold(False)
-        self.checkLabel.setFont(font)
-        self.checkLabel.setStyleSheet(u"color:rgb(255, 0, 0)")
+        self.proxyModeSpacer = QSpacerItem(20, 10, QSizePolicy.Expanding, QSizePolicy.Minimum)
 
-        self.horizontalLayout_18.addWidget(self.checkLabel)
+        self.proxyModeRow.addItem(self.proxyModeSpacer)
 
-        self.proxyLabel = QLabel(self.scrollAreaWidgetContents_3)
+
+        self.proxyModeLayout.addLayout(self.proxyModeRow)
+
+        self.proxyAddrRow = QHBoxLayout()
+        self.proxyAddrRow.setSpacing(6)
+        self.proxyAddrRow.setObjectName(u"proxyAddrRow")
+        self.label_13 = QLabel(self.proxyModeBox)
+        self.label_13.setObjectName(u"label_13")
+
+        self.proxyAddrRow.addWidget(self.label_13)
+
+        self.httpLine = QLineEdit(self.proxyModeBox)
+        self.httpLine.setObjectName(u"httpLine")
+
+        self.proxyAddrRow.addWidget(self.httpLine)
+
+        self.sockEdit = QLineEdit(self.proxyModeBox)
+        self.sockEdit.setObjectName(u"sockEdit")
+
+        self.proxyAddrRow.addWidget(self.sockEdit)
+
+        self.proxyLabel = QLabel(self.proxyModeBox)
         self.proxyLabel.setObjectName(u"proxyLabel")
 
-        self.horizontalLayout_18.addWidget(self.proxyLabel)
+        self.proxyAddrRow.addWidget(self.proxyLabel)
 
-        self.horizontalSpacer_7 = QSpacerItem(40, 20, QSizePolicy.Expanding, QSizePolicy.Minimum)
+        self.checkLabel = QLabel(self.proxyModeBox)
+        self.checkLabel.setObjectName(u"checkLabel")
+        self.checkLabel.setStyleSheet(u"color:rgb(255, 0, 0)")
 
-        self.horizontalLayout_18.addItem(self.horizontalSpacer_7)
+        self.proxyAddrRow.addWidget(self.checkLabel)
+
+        self.proxyHint = QLabel(self.proxyModeBox)
+        self.proxyHint.setObjectName(u"proxyHint")
+
+        self.proxyAddrRow.addWidget(self.proxyHint)
 
 
-        self.verticalLayout_10.addLayout(self.horizontalLayout_18)
+        self.proxyModeLayout.addLayout(self.proxyAddrRow)
 
-        self.line_6 = QFrame(self.scrollAreaWidgetContents_3)
-        self.line_6.setObjectName(u"line_6")
-        self.line_6.setFrameShape(QFrame.HLine)
-        self.line_6.setFrameShadow(QFrame.Sunken)
 
-        self.verticalLayout_10.addWidget(self.line_6)
+        self.verticalLayout_9.addWidget(self.proxyModeBox)
 
-        self.horizontalLayout_20 = QHBoxLayout()
-        self.horizontalLayout_20.setObjectName(u"horizontalLayout_20")
-        self.label_15 = QLabel(self.scrollAreaWidgetContents_3)
+        self.speedBox = QWidget(self.tab_4)
+        self.speedBox.setObjectName(u"speedBox")
+        self.speedLayout = QVBoxLayout(self.speedBox)
+        self.speedLayout.setSpacing(4)
+        self.speedLayout.setObjectName(u"speedLayout")
+        self.speedLayout.setContentsMargins(12, 2, 12, 4)
+        self.speedCapRow = QHBoxLayout()
+        self.speedCapRow.setSpacing(6)
+        self.speedCapRow.setObjectName(u"speedCapRow")
+        self.speedCapLabel = QLabel(self.speedBox)
+        self.speedCapLabel.setObjectName(u"speedCapLabel")
+
+        self.speedCapRow.addWidget(self.speedCapLabel)
+
+        self.speedCapSpacer = QSpacerItem(40, 10, QSizePolicy.Expanding, QSizePolicy.Minimum)
+
+        self.speedCapRow.addItem(self.speedCapSpacer)
+
+        self.speedUnitLabel = QLabel(self.speedBox)
+        self.speedUnitLabel.setObjectName(u"speedUnitLabel")
+
+        self.speedCapRow.addWidget(self.speedUnitLabel)
+
+
+        self.speedLayout.addLayout(self.speedCapRow)
+
+        self.speedBody = QHBoxLayout()
+        self.speedBody.setSpacing(8)
+        self.speedBody.setObjectName(u"speedBody")
+        self.testSpeedButton = QPushButton(self.speedBox)
+        self.testSpeedButton.setObjectName(u"testSpeedButton")
+        self.testSpeedButton.setMinimumSize(QSize(46, 0))
+        self.testSpeedButton.setMaximumSize(QSize(46, 16777215))
+
+        self.speedBody.addWidget(self.testSpeedButton)
+
+        self.speedGrid = QGridLayout()
+        self.speedGrid.setObjectName(u"speedGrid")
+        self.speedGrid.setHorizontalSpacing(4)
+        self.speedGrid.setVerticalSpacing(3)
+        self.chipApi1 = QWidget(self.speedBox)
+        self.chipApi1.setObjectName(u"chipApi1")
+        self.chipApi1Layout = QHBoxLayout(self.chipApi1)
+        self.chipApi1Layout.setSpacing(2)
+        self.chipApi1Layout.setObjectName(u"chipApi1Layout")
+        self.chipApi1Layout.setContentsMargins(0, 0, 0, 0)
+        self.radioButton_1 = QRadioButton(self.chipApi1)
+        self.radioApiGroup = QButtonGroup(LoginNew)
+        self.radioApiGroup.setObjectName(u"radioApiGroup")
+        self.radioApiGroup.addButton(self.radioButton_1)
+        self.radioButton_1.setObjectName(u"radioButton_1")
+
+        self.chipApi1Layout.addWidget(self.radioButton_1)
+
+        self.label_api_1 = QLabel(self.chipApi1)
+        self.label_api_1.setObjectName(u"label_api_1")
+
+        self.chipApi1Layout.addWidget(self.label_api_1)
+
+
+        self.speedGrid.addWidget(self.chipApi1, 0, 0, 1, 1)
+
+        self.chipApi2 = QWidget(self.speedBox)
+        self.chipApi2.setObjectName(u"chipApi2")
+        self.chipApi2Layout = QHBoxLayout(self.chipApi2)
+        self.chipApi2Layout.setSpacing(2)
+        self.chipApi2Layout.setObjectName(u"chipApi2Layout")
+        self.chipApi2Layout.setContentsMargins(0, 0, 0, 0)
+        self.radioButton_2 = QRadioButton(self.chipApi2)
+        self.radioApiGroup.addButton(self.radioButton_2)
+        self.radioButton_2.setObjectName(u"radioButton_2")
+
+        self.chipApi2Layout.addWidget(self.radioButton_2)
+
+        self.label_api_2 = QLabel(self.chipApi2)
+        self.label_api_2.setObjectName(u"label_api_2")
+
+        self.chipApi2Layout.addWidget(self.label_api_2)
+
+
+        self.speedGrid.addWidget(self.chipApi2, 0, 1, 1, 1)
+
+        self.chipApi3 = QWidget(self.speedBox)
+        self.chipApi3.setObjectName(u"chipApi3")
+        self.chipApi3Layout = QHBoxLayout(self.chipApi3)
+        self.chipApi3Layout.setSpacing(2)
+        self.chipApi3Layout.setObjectName(u"chipApi3Layout")
+        self.chipApi3Layout.setContentsMargins(0, 0, 0, 0)
+        self.radioButton_3 = QRadioButton(self.chipApi3)
+        self.radioApiGroup.addButton(self.radioButton_3)
+        self.radioButton_3.setObjectName(u"radioButton_3")
+
+        self.chipApi3Layout.addWidget(self.radioButton_3)
+
+        self.label_api_3 = QLabel(self.chipApi3)
+        self.label_api_3.setObjectName(u"label_api_3")
+
+        self.chipApi3Layout.addWidget(self.label_api_3)
+
+
+        self.speedGrid.addWidget(self.chipApi3, 0, 2, 1, 1)
+
+        self.chipApi4 = QWidget(self.speedBox)
+        self.chipApi4.setObjectName(u"chipApi4")
+        self.chipApi4Layout = QHBoxLayout(self.chipApi4)
+        self.chipApi4Layout.setSpacing(2)
+        self.chipApi4Layout.setObjectName(u"chipApi4Layout")
+        self.chipApi4Layout.setContentsMargins(0, 0, 0, 0)
+        self.radioButton_4 = QRadioButton(self.chipApi4)
+        self.radioApiGroup.addButton(self.radioButton_4)
+        self.radioButton_4.setObjectName(u"radioButton_4")
+
+        self.chipApi4Layout.addWidget(self.radioButton_4)
+
+        self.label_api_4 = QLabel(self.chipApi4)
+        self.label_api_4.setObjectName(u"label_api_4")
+
+        self.chipApi4Layout.addWidget(self.label_api_4)
+
+
+        self.speedGrid.addWidget(self.chipApi4, 0, 3, 1, 1)
+
+        self.chipApi5 = QWidget(self.speedBox)
+        self.chipApi5.setObjectName(u"chipApi5")
+        self.chipApi5Layout = QHBoxLayout(self.chipApi5)
+        self.chipApi5Layout.setSpacing(2)
+        self.chipApi5Layout.setObjectName(u"chipApi5Layout")
+        self.chipApi5Layout.setContentsMargins(0, 0, 0, 0)
+        self.radioButton_5 = QRadioButton(self.chipApi5)
+        self.radioApiGroup.addButton(self.radioButton_5)
+        self.radioButton_5.setObjectName(u"radioButton_5")
+
+        self.chipApi5Layout.addWidget(self.radioButton_5)
+
+        self.label_api_5 = QLabel(self.chipApi5)
+        self.label_api_5.setObjectName(u"label_api_5")
+
+        self.chipApi5Layout.addWidget(self.label_api_5)
+
+
+        self.speedGrid.addWidget(self.chipApi5, 0, 4, 1, 1)
+
+        self.chipApi6 = QWidget(self.speedBox)
+        self.chipApi6.setObjectName(u"chipApi6")
+        self.chipApi6Layout = QHBoxLayout(self.chipApi6)
+        self.chipApi6Layout.setSpacing(2)
+        self.chipApi6Layout.setObjectName(u"chipApi6Layout")
+        self.chipApi6Layout.setContentsMargins(0, 0, 0, 0)
+        self.radioButton_6 = QRadioButton(self.chipApi6)
+        self.radioApiGroup.addButton(self.radioButton_6)
+        self.radioButton_6.setObjectName(u"radioButton_6")
+
+        self.chipApi6Layout.addWidget(self.radioButton_6)
+
+        self.label_api_6 = QLabel(self.chipApi6)
+        self.label_api_6.setObjectName(u"label_api_6")
+
+        self.chipApi6Layout.addWidget(self.label_api_6)
+
+
+        self.speedGrid.addWidget(self.chipApi6, 0, 5, 1, 1)
+
+        self.chipImg1 = QWidget(self.speedBox)
+        self.chipImg1.setObjectName(u"chipImg1")
+        self.chipImg1Layout = QHBoxLayout(self.chipImg1)
+        self.chipImg1Layout.setSpacing(2)
+        self.chipImg1Layout.setObjectName(u"chipImg1Layout")
+        self.chipImg1Layout.setContentsMargins(0, 0, 0, 0)
+        self.radio_img_1 = QRadioButton(self.chipImg1)
+        self.radioImgGroup = QButtonGroup(LoginNew)
+        self.radioImgGroup.setObjectName(u"radioImgGroup")
+        self.radioImgGroup.addButton(self.radio_img_1)
+        self.radio_img_1.setObjectName(u"radio_img_1")
+
+        self.chipImg1Layout.addWidget(self.radio_img_1)
+
+        self.label_img_1 = QLabel(self.chipImg1)
+        self.label_img_1.setObjectName(u"label_img_1")
+
+        self.chipImg1Layout.addWidget(self.label_img_1)
+
+
+        self.speedGrid.addWidget(self.chipImg1, 1, 0, 1, 1)
+
+        self.chipImg2 = QWidget(self.speedBox)
+        self.chipImg2.setObjectName(u"chipImg2")
+        self.chipImg2Layout = QHBoxLayout(self.chipImg2)
+        self.chipImg2Layout.setSpacing(2)
+        self.chipImg2Layout.setObjectName(u"chipImg2Layout")
+        self.chipImg2Layout.setContentsMargins(0, 0, 0, 0)
+        self.radio_img_2 = QRadioButton(self.chipImg2)
+        self.radioImgGroup.addButton(self.radio_img_2)
+        self.radio_img_2.setObjectName(u"radio_img_2")
+
+        self.chipImg2Layout.addWidget(self.radio_img_2)
+
+        self.label_img_2 = QLabel(self.chipImg2)
+        self.label_img_2.setObjectName(u"label_img_2")
+
+        self.chipImg2Layout.addWidget(self.label_img_2)
+
+
+        self.speedGrid.addWidget(self.chipImg2, 1, 1, 1, 1)
+
+        self.chipImg3 = QWidget(self.speedBox)
+        self.chipImg3.setObjectName(u"chipImg3")
+        self.chipImg3Layout = QHBoxLayout(self.chipImg3)
+        self.chipImg3Layout.setSpacing(2)
+        self.chipImg3Layout.setObjectName(u"chipImg3Layout")
+        self.chipImg3Layout.setContentsMargins(0, 0, 0, 0)
+        self.radio_img_3 = QRadioButton(self.chipImg3)
+        self.radioImgGroup.addButton(self.radio_img_3)
+        self.radio_img_3.setObjectName(u"radio_img_3")
+
+        self.chipImg3Layout.addWidget(self.radio_img_3)
+
+        self.label_img_3 = QLabel(self.chipImg3)
+        self.label_img_3.setObjectName(u"label_img_3")
+
+        self.chipImg3Layout.addWidget(self.label_img_3)
+
+
+        self.speedGrid.addWidget(self.chipImg3, 1, 2, 1, 1)
+
+        self.chipImg4 = QWidget(self.speedBox)
+        self.chipImg4.setObjectName(u"chipImg4")
+        self.chipImg4Layout = QHBoxLayout(self.chipImg4)
+        self.chipImg4Layout.setSpacing(2)
+        self.chipImg4Layout.setObjectName(u"chipImg4Layout")
+        self.chipImg4Layout.setContentsMargins(0, 0, 0, 0)
+        self.radio_img_4 = QRadioButton(self.chipImg4)
+        self.radioImgGroup.addButton(self.radio_img_4)
+        self.radio_img_4.setObjectName(u"radio_img_4")
+
+        self.chipImg4Layout.addWidget(self.radio_img_4)
+
+        self.label_img_4 = QLabel(self.chipImg4)
+        self.label_img_4.setObjectName(u"label_img_4")
+
+        self.chipImg4Layout.addWidget(self.label_img_4)
+
+
+        self.speedGrid.addWidget(self.chipImg4, 1, 3, 1, 1)
+
+        self.chipImg5 = QWidget(self.speedBox)
+        self.chipImg5.setObjectName(u"chipImg5")
+        self.chipImg5Layout = QHBoxLayout(self.chipImg5)
+        self.chipImg5Layout.setSpacing(2)
+        self.chipImg5Layout.setObjectName(u"chipImg5Layout")
+        self.chipImg5Layout.setContentsMargins(0, 0, 0, 0)
+        self.radio_img_5 = QRadioButton(self.chipImg5)
+        self.radioImgGroup.addButton(self.radio_img_5)
+        self.radio_img_5.setObjectName(u"radio_img_5")
+
+        self.chipImg5Layout.addWidget(self.radio_img_5)
+
+        self.label_img_5 = QLabel(self.chipImg5)
+        self.label_img_5.setObjectName(u"label_img_5")
+
+        self.chipImg5Layout.addWidget(self.label_img_5)
+
+
+        self.speedGrid.addWidget(self.chipImg5, 1, 4, 1, 1)
+
+        self.chipImg6 = QWidget(self.speedBox)
+        self.chipImg6.setObjectName(u"chipImg6")
+        self.chipImg6Layout = QHBoxLayout(self.chipImg6)
+        self.chipImg6Layout.setSpacing(2)
+        self.chipImg6Layout.setObjectName(u"chipImg6Layout")
+        self.chipImg6Layout.setContentsMargins(0, 0, 0, 0)
+        self.radio_img_6 = QRadioButton(self.chipImg6)
+        self.radioImgGroup.addButton(self.radio_img_6)
+        self.radio_img_6.setObjectName(u"radio_img_6")
+
+        self.chipImg6Layout.addWidget(self.radio_img_6)
+
+        self.label_img_6 = QLabel(self.chipImg6)
+        self.label_img_6.setObjectName(u"label_img_6")
+
+        self.chipImg6Layout.addWidget(self.label_img_6)
+
+
+        self.speedGrid.addWidget(self.chipImg6, 1, 5, 1, 1)
+
+
+        self.speedBody.addLayout(self.speedGrid)
+
+
+        self.speedLayout.addLayout(self.speedBody)
+
+
+        self.verticalLayout_9.addWidget(self.speedBox)
+
+        self.proxyListBox = QWidget(self.tab_4)
+        self.proxyListBox.setObjectName(u"proxyListBox")
+        self.proxyListLayout = QVBoxLayout(self.proxyListBox)
+        self.proxyListLayout.setSpacing(0)
+        self.proxyListLayout.setObjectName(u"proxyListLayout")
+        self.proxyListLayout.setContentsMargins(0, 0, 0, 0)
+        self.proxyListHead = QWidget(self.proxyListBox)
+        self.proxyListHead.setObjectName(u"proxyListHead")
+        self.proxyListHeadLayout = QHBoxLayout(self.proxyListHead)
+        self.proxyListHeadLayout.setSpacing(6)
+        self.proxyListHeadLayout.setObjectName(u"proxyListHeadLayout")
+        self.proxyListHeadLayout.setContentsMargins(12, 0, 12, 0)
+        self.proxyListTitle = QLabel(self.proxyListHead)
+        self.proxyListTitle.setObjectName(u"proxyListTitle")
+
+        self.proxyListHeadLayout.addWidget(self.proxyListTitle)
+
+        self.proxyCountLabel = QLabel(self.proxyListHead)
+        self.proxyCountLabel.setObjectName(u"proxyCountLabel")
+
+        self.proxyListHeadLayout.addWidget(self.proxyCountLabel)
+
+        self.proxyHeadSpacer = QSpacerItem(40, 10, QSizePolicy.Expanding, QSizePolicy.Minimum)
+
+        self.proxyListHeadLayout.addItem(self.proxyHeadSpacer)
+
+        self.proxySortButton = QPushButton(self.proxyListHead)
+        self.proxySortButton.setObjectName(u"proxySortButton")
+
+        self.proxyListHeadLayout.addWidget(self.proxySortButton)
+
+        self.proxyDensityButton = QPushButton(self.proxyListHead)
+        self.proxyDensityButton.setObjectName(u"proxyDensityButton")
+        self.proxyDensityButton.setMaximumSize(QSize(34, 16777215))
+
+        self.proxyListHeadLayout.addWidget(self.proxyDensityButton)
+
+
+        self.proxyListLayout.addWidget(self.proxyListHead)
+
+        self.proxyFilterBar = QWidget(self.proxyListBox)
+        self.proxyFilterBar.setObjectName(u"proxyFilterBar")
+        self.proxyFilterLayout = QHBoxLayout(self.proxyFilterBar)
+        self.proxyFilterLayout.setSpacing(5)
+        self.proxyFilterLayout.setObjectName(u"proxyFilterLayout")
+        self.proxyFilterLayout.setContentsMargins(12, 0, 12, 0)
+        self.proxyFilterAll = QPushButton(self.proxyFilterBar)
+        self.proxyFilterGroup = QButtonGroup(LoginNew)
+        self.proxyFilterGroup.setObjectName(u"proxyFilterGroup")
+        self.proxyFilterGroup.addButton(self.proxyFilterAll)
+        self.proxyFilterAll.setObjectName(u"proxyFilterAll")
+        self.proxyFilterAll.setCheckable(True)
+        self.proxyFilterAll.setChecked(True)
+
+        self.proxyFilterLayout.addWidget(self.proxyFilterAll)
+
+        self.proxyFilterProxy = QPushButton(self.proxyFilterBar)
+        self.proxyFilterGroup.addButton(self.proxyFilterProxy)
+        self.proxyFilterProxy.setObjectName(u"proxyFilterProxy")
+        self.proxyFilterProxy.setCheckable(True)
+
+        self.proxyFilterLayout.addWidget(self.proxyFilterProxy)
+
+        self.proxyFilterCf = QPushButton(self.proxyFilterBar)
+        self.proxyFilterGroup.addButton(self.proxyFilterCf)
+        self.proxyFilterCf.setObjectName(u"proxyFilterCf")
+        self.proxyFilterCf.setCheckable(True)
+
+        self.proxyFilterLayout.addWidget(self.proxyFilterCf)
+
+        self.proxyFilterSpacer = QSpacerItem(40, 10, QSizePolicy.Expanding, QSizePolicy.Minimum)
+
+        self.proxyFilterLayout.addItem(self.proxyFilterSpacer)
+
+        self.proxyCutLabel = QLabel(self.proxyFilterBar)
+        self.proxyCutLabel.setObjectName(u"proxyCutLabel")
+
+        self.proxyFilterLayout.addWidget(self.proxyCutLabel)
+
+
+        self.proxyListLayout.addWidget(self.proxyFilterBar)
+
+        self.proxyColHead = QWidget(self.proxyListBox)
+        self.proxyColHead.setObjectName(u"proxyColHead")
+        self.proxyColHeadLayout = QHBoxLayout(self.proxyColHead)
+        self.proxyColHeadLayout.setSpacing(8)
+        self.proxyColHeadLayout.setObjectName(u"proxyColHeadLayout")
+        self.proxyColHeadLayout.setContentsMargins(34, 0, 12, 0)
+        self.colNameLabel = QLabel(self.proxyColHead)
+        self.colNameLabel.setObjectName(u"colNameLabel")
+
+        self.proxyColHeadLayout.addWidget(self.colNameLabel)
+
+        self.colSpeedLabel = QLabel(self.proxyColHead)
+        self.colSpeedLabel.setObjectName(u"colSpeedLabel")
+        self.colSpeedLabel.setMinimumSize(QSize(86, 0))
+        self.colSpeedLabel.setAlignment(Qt.AlignRight|Qt.AlignTrailing|Qt.AlignVCenter)
+
+        self.proxyColHeadLayout.addWidget(self.colSpeedLabel)
+
+
+        self.proxyListLayout.addWidget(self.proxyColHead)
+
+        self.tableWidget = BaseTableWidget(self.proxyListBox)
+        if (self.tableWidget.columnCount() < 1):
+            self.tableWidget.setColumnCount(1)
+        __qtablewidgetitem = QTableWidgetItem()
+        self.tableWidget.setHorizontalHeaderItem(0, __qtablewidgetitem)
+        self.tableWidget.setObjectName(u"tableWidget")
+
+        self.proxyListLayout.addWidget(self.tableWidget)
+
+
+        self.verticalLayout_9.addWidget(self.proxyListBox)
+
+        self.proxyAdvPanel = QWidget(self.tab_4)
+        self.proxyAdvPanel.setObjectName(u"proxyAdvPanel")
+        self.proxyAdvPanel.setVisible(False)
+        self.proxyAdvLayout = QVBoxLayout(self.proxyAdvPanel)
+        self.proxyAdvLayout.setSpacing(4)
+        self.proxyAdvLayout.setObjectName(u"proxyAdvLayout")
+        self.proxyAdvLayout.setContentsMargins(12, 4, 12, 6)
+        self.proxyTimeoutRow = QHBoxLayout()
+        self.proxyTimeoutRow.setSpacing(6)
+        self.proxyTimeoutRow.setObjectName(u"proxyTimeoutRow")
+        self.label_15 = QLabel(self.proxyAdvPanel)
         self.label_15.setObjectName(u"label_15")
 
-        self.horizontalLayout_20.addWidget(self.label_15)
+        self.proxyTimeoutRow.addWidget(self.label_15)
 
-        self.apiTimeout = WheelComboBox(self.scrollAreaWidgetContents_3)
+        self.apiTimeout = WheelComboBox(self.proxyAdvPanel)
         self.apiTimeout.addItem("")
         self.apiTimeout.addItem("")
         self.apiTimeout.addItem("")
         self.apiTimeout.setObjectName(u"apiTimeout")
 
-        self.horizontalLayout_20.addWidget(self.apiTimeout)
+        self.proxyTimeoutRow.addWidget(self.apiTimeout)
 
-        self.label_16 = QLabel(self.scrollAreaWidgetContents_3)
+        self.label_16 = QLabel(self.proxyAdvPanel)
         self.label_16.setObjectName(u"label_16")
 
-        self.horizontalLayout_20.addWidget(self.label_16)
+        self.proxyTimeoutRow.addWidget(self.label_16)
 
-        self.imgTimeout = WheelComboBox(self.scrollAreaWidgetContents_3)
+        self.imgTimeout = WheelComboBox(self.proxyAdvPanel)
         self.imgTimeout.addItem("")
         self.imgTimeout.addItem("")
         self.imgTimeout.addItem("")
@@ -595,402 +986,130 @@ class Ui_LoginNew(object):
         self.imgTimeout.addItem("")
         self.imgTimeout.setObjectName(u"imgTimeout")
 
-        self.horizontalLayout_20.addWidget(self.imgTimeout)
+        self.proxyTimeoutRow.addWidget(self.imgTimeout)
 
-        self.horizontalSpacer_8 = QSpacerItem(40, 20, QSizePolicy.Expanding, QSizePolicy.Minimum)
+        self.proxyTimeoutSpacer = QSpacerItem(20, 10, QSizePolicy.Expanding, QSizePolicy.Minimum)
 
-        self.horizontalLayout_20.addItem(self.horizontalSpacer_8)
-
-
-        self.verticalLayout_10.addLayout(self.horizontalLayout_20)
-
-        self.horizontalLayout_21 = QHBoxLayout()
-        self.horizontalLayout_21.setObjectName(u"horizontalLayout_21")
-        self.horizontalSpacer_9 = QSpacerItem(40, 20, QSizePolicy.Expanding, QSizePolicy.Minimum)
-
-        self.horizontalLayout_21.addItem(self.horizontalSpacer_9)
+        self.proxyTimeoutRow.addItem(self.proxyTimeoutSpacer)
 
 
-        self.verticalLayout_10.addLayout(self.horizontalLayout_21)
+        self.proxyAdvLayout.addLayout(self.proxyTimeoutRow)
 
-        self.verticalLayout_11 = QVBoxLayout()
-        self.verticalLayout_11.setObjectName(u"verticalLayout_11")
-        self.http3Box = QCheckBox(self.scrollAreaWidgetContents_3)
-        self.http3Box.setObjectName(u"http3Box")
+        self.proxyDohRow = QHBoxLayout()
+        self.proxyDohRow.setSpacing(6)
+        self.proxyDohRow.setObjectName(u"proxyDohRow")
+        self.label_17 = QLabel(self.proxyAdvPanel)
+        self.label_17.setObjectName(u"label_17")
 
-        self.verticalLayout_11.addWidget(self.http3Box)
+        self.proxyDohRow.addWidget(self.label_17)
+
+        self.dohLine = TipLineEdit(self.proxyAdvPanel)
+        self.dohLine.setObjectName(u"dohLine")
+
+        self.proxyDohRow.addWidget(self.dohLine)
+
+        self.dohTool = QToolButton(self.proxyAdvPanel)
+        self.dohTool.setObjectName(u"dohTool")
+
+        self.proxyDohRow.addWidget(self.dohTool)
 
 
-        self.verticalLayout_10.addLayout(self.verticalLayout_11)
+        self.proxyAdvLayout.addLayout(self.proxyDohRow)
 
-        self.horizontalLayout_22 = QHBoxLayout()
-        self.horizontalLayout_22.setObjectName(u"horizontalLayout_22")
-        self.echBox = QCheckBox(self.scrollAreaWidgetContents_3)
+        self.proxyTlsRow = QHBoxLayout()
+        self.proxyTlsRow.setSpacing(10)
+        self.proxyTlsRow.setObjectName(u"proxyTlsRow")
+        self.echBox = QCheckBox(self.proxyAdvPanel)
         self.echBox.setObjectName(u"echBox")
         self.echBox.setChecked(True)
 
-        self.horizontalLayout_22.addWidget(self.echBox)
+        self.proxyTlsRow.addWidget(self.echBox)
 
-        self.echTick = QLabel(self.scrollAreaWidgetContents_3)
-        self.echTick.setObjectName(u"echTick")
+        self.http3Box = QCheckBox(self.proxyAdvPanel)
+        self.http3Box.setObjectName(u"http3Box")
 
-        self.horizontalLayout_22.addWidget(self.echTick)
+        self.proxyTlsRow.addWidget(self.http3Box)
 
-        self.horizontalSpacer_10 = QSpacerItem(40, 20, QSizePolicy.Expanding, QSizePolicy.Minimum)
+        self.proxyTlsSpacer = QSpacerItem(20, 10, QSizePolicy.Expanding, QSizePolicy.Minimum)
 
-        self.horizontalLayout_22.addItem(self.horizontalSpacer_10)
+        self.proxyTlsRow.addItem(self.proxyTlsSpacer)
 
 
-        self.verticalLayout_10.addLayout(self.horizontalLayout_22)
+        self.proxyAdvLayout.addLayout(self.proxyTlsRow)
 
-        self.horizontalLayout_23 = QHBoxLayout()
-        self.horizontalLayout_23.setObjectName(u"horizontalLayout_23")
-
-        self.verticalLayout_10.addLayout(self.horizontalLayout_23)
-
-        self.horizontalLayout_24 = QHBoxLayout()
-        self.horizontalLayout_24.setObjectName(u"horizontalLayout_24")
-        self.label_17 = QLabel(self.scrollAreaWidgetContents_3)
-        self.label_17.setObjectName(u"label_17")
-
-        self.horizontalLayout_24.addWidget(self.label_17)
-
-        self.dohLine = TipLineEdit(self.scrollAreaWidgetContents_3)
-        self.dohLine.setObjectName(u"dohLine")
-
-        self.horizontalLayout_24.addWidget(self.dohLine)
-
-        self.dohTool = QToolButton(self.scrollAreaWidgetContents_3)
-        self.dohTool.setObjectName(u"dohTool")
-
-        self.horizontalLayout_24.addWidget(self.dohTool)
-
-
-        self.verticalLayout_10.addLayout(self.horizontalLayout_24)
-
-        self.line_8 = QFrame(self.scrollAreaWidgetContents_3)
-        self.line_8.setObjectName(u"line_8")
-        self.line_8.setFrameShape(QFrame.HLine)
-        self.line_8.setFrameShadow(QFrame.Sunken)
-
-        self.verticalLayout_10.addWidget(self.line_8)
-
-        self.horizontalLayout_25 = QHBoxLayout()
-        self.horizontalLayout_25.setObjectName(u"horizontalLayout_25")
-
-        self.verticalLayout_10.addLayout(self.horizontalLayout_25)
-
-        self.testSpeedButton = QPushButton(self.scrollAreaWidgetContents_3)
-        self.testSpeedButton.setObjectName(u"testSpeedButton")
-
-        self.verticalLayout_10.addWidget(self.testSpeedButton)
-
-        self.line_7 = QFrame(self.scrollAreaWidgetContents_3)
-        self.line_7.setObjectName(u"line_7")
-        self.line_7.setFrameShape(QFrame.HLine)
-        self.line_7.setFrameShadow(QFrame.Sunken)
-
-        self.verticalLayout_10.addWidget(self.line_7)
-
-        self.gridLayout_2 = QGridLayout()
-        self.gridLayout_2.setObjectName(u"gridLayout_2")
-        self.label_20 = QLabel(self.scrollAreaWidgetContents_3)
-        self.label_20.setObjectName(u"label_20")
-        self.label_20.setAlignment(Qt.AlignCenter)
-
-        self.gridLayout_2.addWidget(self.label_20, 1, 1, 1, 1)
-
-        self.label_19 = QLabel(self.scrollAreaWidgetContents_3)
-        self.label_19.setObjectName(u"label_19")
-        self.label_19.setAlignment(Qt.AlignCenter)
-
-        self.gridLayout_2.addWidget(self.label_19, 1, 3, 1, 1)
-
-        self.radioButton_3 = QRadioButton(self.scrollAreaWidgetContents_3)
-        self.radioApiGroup = QButtonGroup(LoginNew)
-        self.radioApiGroup.setObjectName(u"radioApiGroup")
-        self.radioApiGroup.addButton(self.radioButton_3)
-        self.radioButton_3.setObjectName(u"radioButton_3")
-
-        self.gridLayout_2.addWidget(self.radioButton_3, 4, 0, 1, 1)
-
-        self.label_img_6 = QLabel(self.scrollAreaWidgetContents_3)
-        self.label_img_6.setObjectName(u"label_img_6")
-
-        self.gridLayout_2.addWidget(self.label_img_6, 6, 3, 1, 1)
-
-        self.label_api_2 = QLabel(self.scrollAreaWidgetContents_3)
-        self.label_api_2.setObjectName(u"label_api_2")
-
-        self.gridLayout_2.addWidget(self.label_api_2, 3, 1, 1, 1)
-
-        self.radio_img_4 = QRadioButton(self.scrollAreaWidgetContents_3)
-        self.radioImgGroup = QButtonGroup(LoginNew)
-        self.radioImgGroup.setObjectName(u"radioImgGroup")
-        self.radioImgGroup.addButton(self.radio_img_4)
-        self.radio_img_4.setObjectName(u"radio_img_4")
-
-        self.gridLayout_2.addWidget(self.radio_img_4, 5, 2, 1, 1)
-
-        self.radio_img_6 = QRadioButton(self.scrollAreaWidgetContents_3)
-        self.radioImgGroup.addButton(self.radio_img_6)
-        self.radio_img_6.setObjectName(u"radio_img_6")
-
-        self.gridLayout_2.addWidget(self.radio_img_6, 6, 2, 1, 1)
-
-        self.radio_img_2 = QRadioButton(self.scrollAreaWidgetContents_3)
-        self.radioImgGroup.addButton(self.radio_img_2)
-        self.radio_img_2.setObjectName(u"radio_img_2")
-
-        self.gridLayout_2.addWidget(self.radio_img_2, 3, 2, 1, 1)
-
-        self.radioButton_4 = QRadioButton(self.scrollAreaWidgetContents_3)
-        self.radioApiGroup.addButton(self.radioButton_4)
-        self.radioButton_4.setObjectName(u"radioButton_4")
-
-        self.gridLayout_2.addWidget(self.radioButton_4, 5, 0, 1, 1)
-
-        self.radioButton_6 = QRadioButton(self.scrollAreaWidgetContents_3)
-        self.radioApiGroup.addButton(self.radioButton_6)
-        self.radioButton_6.setObjectName(u"radioButton_6")
-
-        self.gridLayout_2.addWidget(self.radioButton_6, 6, 0, 1, 1)
-
-        self.radio_img_1 = QRadioButton(self.scrollAreaWidgetContents_3)
-        self.radioImgGroup.addButton(self.radio_img_1)
-        self.radio_img_1.setObjectName(u"radio_img_1")
-        self.radio_img_1.setChecked(False)
-
-        self.gridLayout_2.addWidget(self.radio_img_1, 2, 2, 1, 1)
-
-        self.label_18 = QLabel(self.scrollAreaWidgetContents_3)
-        self.label_18.setObjectName(u"label_18")
-        self.label_18.setAlignment(Qt.AlignCenter)
-
-        self.gridLayout_2.addWidget(self.label_18, 1, 0, 1, 1)
-
-        self.radioButton_2 = QRadioButton(self.scrollAreaWidgetContents_3)
-        self.radioApiGroup.addButton(self.radioButton_2)
-        self.radioButton_2.setObjectName(u"radioButton_2")
-
-        self.gridLayout_2.addWidget(self.radioButton_2, 3, 0, 1, 1)
-
-        self.label_api_3 = QLabel(self.scrollAreaWidgetContents_3)
-        self.label_api_3.setObjectName(u"label_api_3")
-
-        self.gridLayout_2.addWidget(self.label_api_3, 4, 1, 1, 1)
-
-        self.label_img_1 = QLabel(self.scrollAreaWidgetContents_3)
-        self.label_img_1.setObjectName(u"label_img_1")
-
-        self.gridLayout_2.addWidget(self.label_img_1, 2, 3, 1, 1)
-
-        self.label_api_1 = QLabel(self.scrollAreaWidgetContents_3)
-        self.label_api_1.setObjectName(u"label_api_1")
-
-        self.gridLayout_2.addWidget(self.label_api_1, 2, 1, 1, 1)
-
-        self.label_img_4 = QLabel(self.scrollAreaWidgetContents_3)
-        self.label_img_4.setObjectName(u"label_img_4")
-
-        self.gridLayout_2.addWidget(self.label_img_4, 5, 3, 1, 1)
-
-        self.radioButton_1 = QRadioButton(self.scrollAreaWidgetContents_3)
-        self.radioApiGroup.addButton(self.radioButton_1)
-        self.radioButton_1.setObjectName(u"radioButton_1")
-        self.radioButton_1.setChecked(True)
-
-        self.gridLayout_2.addWidget(self.radioButton_1, 2, 0, 1, 1)
-
-        self.label_api_6 = QLabel(self.scrollAreaWidgetContents_3)
-        self.label_api_6.setObjectName(u"label_api_6")
-
-        self.gridLayout_2.addWidget(self.label_api_6, 6, 1, 1, 1)
-
-        self.radio_img_3 = QRadioButton(self.scrollAreaWidgetContents_3)
-        self.radioImgGroup.addButton(self.radio_img_3)
-        self.radio_img_3.setObjectName(u"radio_img_3")
-
-        self.gridLayout_2.addWidget(self.radio_img_3, 4, 2, 1, 1)
-
-        self.label_21 = QLabel(self.scrollAreaWidgetContents_3)
-        self.label_21.setObjectName(u"label_21")
-        self.label_21.setAlignment(Qt.AlignCenter)
-
-        self.gridLayout_2.addWidget(self.label_21, 1, 2, 1, 1)
-
-        self.label_img_3 = QLabel(self.scrollAreaWidgetContents_3)
-        self.label_img_3.setObjectName(u"label_img_3")
-
-        self.gridLayout_2.addWidget(self.label_img_3, 4, 3, 1, 1)
-
-        self.label_img_2 = QLabel(self.scrollAreaWidgetContents_3)
-        self.label_img_2.setObjectName(u"label_img_2")
-
-        self.gridLayout_2.addWidget(self.label_img_2, 3, 3, 1, 1)
-
-        self.label_api_4 = QLabel(self.scrollAreaWidgetContents_3)
-        self.label_api_4.setObjectName(u"label_api_4")
-
-        self.gridLayout_2.addWidget(self.label_api_4, 5, 1, 1, 1)
-
-
-        self.verticalLayout_10.addLayout(self.gridLayout_2)
-
-        self.line_9 = QFrame(self.scrollAreaWidgetContents_3)
-        self.line_9.setObjectName(u"line_9")
-        self.line_9.setFrameShape(QFrame.HLine)
-        self.line_9.setFrameShadow(QFrame.Sunken)
-
-        self.verticalLayout_10.addWidget(self.line_9)
-
-        self.gridLayout = QGridLayout()
-        self.gridLayout.setObjectName(u"gridLayout")
-        self.label_api_5 = QLabel(self.scrollAreaWidgetContents_3)
-        self.label_api_5.setObjectName(u"label_api_5")
-
-        self.gridLayout.addWidget(self.label_api_5, 0, 1, 1, 1)
-
-        self.label_img_5 = QLabel(self.scrollAreaWidgetContents_3)
-        self.label_img_5.setObjectName(u"label_img_5")
-
-        self.gridLayout.addWidget(self.label_img_5, 0, 3, 1, 1)
-
-        self.radioButton_5 = QRadioButton(self.scrollAreaWidgetContents_3)
-        self.radioApiGroup.addButton(self.radioButton_5)
-        self.radioButton_5.setObjectName(u"radioButton_5")
-
-        self.gridLayout.addWidget(self.radioButton_5, 0, 0, 1, 1)
-
-        self.radio_img_5 = QRadioButton(self.scrollAreaWidgetContents_3)
-        self.radioImgGroup.addButton(self.radio_img_5)
-        self.radio_img_5.setObjectName(u"radio_img_5")
-
-        self.gridLayout.addWidget(self.radio_img_5, 0, 2, 1, 1)
-
-
-        self.verticalLayout_10.addLayout(self.gridLayout)
-
-        self.testIpButton = QPushButton(self.scrollAreaWidgetContents_3)
-        self.testIpButton.setObjectName(u"testIpButton")
-
-        self.verticalLayout_10.addWidget(self.testIpButton)
-
-        self.line_10 = QFrame(self.scrollAreaWidgetContents_3)
-        self.line_10.setObjectName(u"line_10")
-        self.line_10.setFrameShape(QFrame.HLine)
-        self.line_10.setFrameShadow(QFrame.Sunken)
-
-        self.verticalLayout_10.addWidget(self.line_10)
-
-        self.verticalLayout_2 = QVBoxLayout()
-        self.verticalLayout_2.setObjectName(u"verticalLayout_2")
-        self.label_25 = QLabel(self.scrollAreaWidgetContents_3)
-        self.label_25.setObjectName(u"label_25")
-        self.label_25.setStyleSheet(u"color:rgb(255, 0, 0)")
-
-        self.verticalLayout_2.addWidget(self.label_25)
-
-
-        self.verticalLayout_10.addLayout(self.verticalLayout_2)
-
-        self.horizontalLayout_29 = QHBoxLayout()
-        self.horizontalLayout_29.setObjectName(u"horizontalLayout_29")
-
-        self.verticalLayout_10.addLayout(self.horizontalLayout_29)
-
-        self.horizontalLayout_30 = QHBoxLayout()
-        self.horizontalLayout_30.setObjectName(u"horizontalLayout_30")
-        self.label_26 = QLabel(self.scrollAreaWidgetContents_3)
+        self.proxyRegionRow = QHBoxLayout()
+        self.proxyRegionRow.setSpacing(6)
+        self.proxyRegionRow.setObjectName(u"proxyRegionRow")
+        self.label_26 = QLabel(self.proxyAdvPanel)
         self.label_26.setObjectName(u"label_26")
 
-        self.horizontalLayout_30.addWidget(self.label_26)
+        self.proxyRegionRow.addWidget(self.label_26)
 
-        self.proxyIpEdit = TipLineEdit(self.scrollAreaWidgetContents_3)
+        self.proxyIpEdit = TipLineEdit(self.proxyAdvPanel)
         self.proxyIpEdit.setObjectName(u"proxyIpEdit")
-        self.proxyIpEdit.setMaximumSize(QSize(80, 16777215))
+        self.proxyIpEdit.setMaximumSize(QSize(110, 16777215))
 
-        self.horizontalLayout_30.addWidget(self.proxyIpEdit)
+        self.proxyRegionRow.addWidget(self.proxyIpEdit)
 
-        self.proxyIpLabel = QLabel(self.scrollAreaWidgetContents_3)
+        self.proxyIpLabel = QLabel(self.proxyAdvPanel)
         self.proxyIpLabel.setObjectName(u"proxyIpLabel")
-        self.proxyIpLabel.setMinimumSize(QSize(80, 0))
 
-        self.horizontalLayout_30.addWidget(self.proxyIpLabel)
+        self.proxyRegionRow.addWidget(self.proxyIpLabel)
 
-        self.horizontalSpacer_11 = QSpacerItem(40, 20, QSizePolicy.Expanding, QSizePolicy.Minimum)
+        self.proxyRegionSpacer = QSpacerItem(20, 10, QSizePolicy.Expanding, QSizePolicy.Minimum)
 
-        self.horizontalLayout_30.addItem(self.horizontalSpacer_11)
+        self.proxyRegionRow.addItem(self.proxyRegionSpacer)
 
 
-        self.verticalLayout_10.addLayout(self.horizontalLayout_30)
+        self.proxyAdvLayout.addLayout(self.proxyRegionRow)
 
-        self.horizontalLayout_26 = QHBoxLayout()
-        self.horizontalLayout_26.setObjectName(u"horizontalLayout_26")
-        self.label_22 = QLabel(self.scrollAreaWidgetContents_3)
+        self.proxyIpListRow = QHBoxLayout()
+        self.proxyIpListRow.setSpacing(6)
+        self.proxyIpListRow.setObjectName(u"proxyIpListRow")
+        self.label_22 = QLabel(self.proxyAdvPanel)
         self.label_22.setObjectName(u"label_22")
 
-        self.horizontalLayout_26.addWidget(self.label_22)
+        self.proxyIpListRow.addWidget(self.label_22)
 
-        self.ipListEdit = QLineEdit(self.scrollAreaWidgetContents_3)
+        self.ipListEdit = QLineEdit(self.proxyAdvPanel)
         self.ipListEdit.setObjectName(u"ipListEdit")
 
-        self.horizontalLayout_26.addWidget(self.ipListEdit)
+        self.proxyIpListRow.addWidget(self.ipListEdit)
 
 
-        self.verticalLayout_10.addLayout(self.horizontalLayout_26)
+        self.proxyAdvLayout.addLayout(self.proxyIpListRow)
 
-        self.horizontalLayout_28 = QHBoxLayout()
-        self.horizontalLayout_28.setObjectName(u"horizontalLayout_28")
-        self.line_11 = QFrame(self.scrollAreaWidgetContents_3)
-        self.line_11.setObjectName(u"line_11")
-        self.line_11.setFrameShape(QFrame.VLine)
-        self.line_11.setFrameShadow(QFrame.Sunken)
+        self.label_25 = QLabel(self.proxyAdvPanel)
+        self.label_25.setObjectName(u"label_25")
 
-        self.horizontalLayout_28.addWidget(self.line_11)
+        self.proxyAdvLayout.addWidget(self.label_25)
 
 
-        self.verticalLayout_10.addLayout(self.horizontalLayout_28)
+        self.verticalLayout_9.addWidget(self.proxyAdvPanel)
 
-        self.tableWidget = BaseTableWidget(self.scrollAreaWidgetContents_3)
-        if (self.tableWidget.columnCount() < 5):
-            self.tableWidget.setColumnCount(5)
-        __qtablewidgetitem = QTableWidgetItem()
-        self.tableWidget.setHorizontalHeaderItem(0, __qtablewidgetitem)
-        __qtablewidgetitem1 = QTableWidgetItem()
-        self.tableWidget.setHorizontalHeaderItem(1, __qtablewidgetitem1)
-        __qtablewidgetitem2 = QTableWidgetItem()
-        self.tableWidget.setHorizontalHeaderItem(2, __qtablewidgetitem2)
-        __qtablewidgetitem3 = QTableWidgetItem()
-        self.tableWidget.setHorizontalHeaderItem(3, __qtablewidgetitem3)
-        __qtablewidgetitem4 = QTableWidgetItem()
-        self.tableWidget.setHorizontalHeaderItem(4, __qtablewidgetitem4)
-        self.tableWidget.setObjectName(u"tableWidget")
-        self.tableWidget.setMinimumSize(QSize(0, 2560))
+        self.proxyFoot = QWidget(self.tab_4)
+        self.proxyFoot.setObjectName(u"proxyFoot")
+        self.proxyFootLayout = QHBoxLayout(self.proxyFoot)
+        self.proxyFootLayout.setSpacing(8)
+        self.proxyFootLayout.setObjectName(u"proxyFootLayout")
+        self.proxyFootLayout.setContentsMargins(12, 4, 12, 6)
+        self.proxyStatusLabel = QLabel(self.proxyFoot)
+        self.proxyStatusLabel.setObjectName(u"proxyStatusLabel")
 
-        self.verticalLayout_10.addWidget(self.tableWidget)
+        self.proxyFootLayout.addWidget(self.proxyStatusLabel)
 
-        self.horizontalLayout_27 = QHBoxLayout()
-        self.horizontalLayout_27.setObjectName(u"horizontalLayout_27")
-        self.label_24 = QLabel(self.scrollAreaWidgetContents_3)
-        self.label_24.setObjectName(u"label_24")
+        self.proxyAdvButton = QPushButton(self.proxyFoot)
+        self.proxyAdvButton.setObjectName(u"proxyAdvButton")
 
-        self.horizontalLayout_27.addWidget(self.label_24)
+        self.proxyFootLayout.addWidget(self.proxyAdvButton)
 
-        self.cdnLinkButton = QCommandLinkButton(self.scrollAreaWidgetContents_3)
-        self.cdnLinkButton.setObjectName(u"cdnLinkButton")
+        self.testIpButton = QPushButton(self.proxyFoot)
+        self.testIpButton.setObjectName(u"testIpButton")
 
-        self.horizontalLayout_27.addWidget(self.cdnLinkButton)
+        self.proxyFootLayout.addWidget(self.testIpButton)
 
 
-        self.verticalLayout_10.addLayout(self.horizontalLayout_27)
-
-        self.scrollArea_3.setWidget(self.scrollAreaWidgetContents_3)
-
-        self.horizontalLayout_14.addWidget(self.scrollArea_3)
-
-
-        self.verticalLayout_9.addLayout(self.horizontalLayout_14)
+        self.verticalLayout_9.addWidget(self.proxyFoot)
 
         self.tabWidget.addTab(self.tab_4, "")
 
@@ -1020,9 +1139,7 @@ class Ui_LoginNew(object):
         QWidget.setTabOrder(self.resetEdit, self.resetButton)
         QWidget.setTabOrder(self.resetButton, self.sendEdit)
         QWidget.setTabOrder(self.sendEdit, self.sendButton)
-        QWidget.setTabOrder(self.sendButton, self.commandLinkButton_3)
-        QWidget.setTabOrder(self.commandLinkButton_3, self.scrollArea_3)
-        QWidget.setTabOrder(self.scrollArea_3, self.proxy_0)
+        QWidget.setTabOrder(self.sendButton, self.proxy_0)
         QWidget.setTabOrder(self.proxy_0, self.proxy_1)
         QWidget.setTabOrder(self.proxy_1, self.httpLine)
         QWidget.setTabOrder(self.httpLine, self.proxy_2)
@@ -1095,92 +1212,89 @@ class Ui_LoginNew(object):
         self.label_12.setText(QCoreApplication.translate("LoginNew", u"\u5730\u5740\uff1a", None))
         self.sendButton.setText(QCoreApplication.translate("LoginNew", u"\u53d1\u9001", None))
         self.tabWidget.setTabText(self.tabWidget.indexOf(self.tab_3), QCoreApplication.translate("LoginNew", u"\u9a8c\u8bc1", None))
-        self.commandLinkButton_3.setText(QCoreApplication.translate("LoginNew", u"\u5206\u6d41", None))
+        self.proxyTitleLabel.setText(QCoreApplication.translate("LoginNew", u"\u5206\u6d41\u8bbe\u7f6e", None))
+        self.cdnLinkButton.setText(QCoreApplication.translate("LoginNew", u"\u8bf4\u660e", None))
         self.proxy_0.setText(QCoreApplication.translate("LoginNew", u"\u65e0\u4ee3\u7406", None))
-        self.proxy_1.setText(QCoreApplication.translate("LoginNew", u"HTTP\u4ee3\u7406", None))
+        self.proxy_1.setText(QCoreApplication.translate("LoginNew", u"HTTP", None))
+        self.proxy_2.setText(QCoreApplication.translate("LoginNew", u"Socks5", None))
+        self.proxy_3.setText(QCoreApplication.translate("LoginNew", u"\u7cfb\u7edf", None))
         self.label_13.setText(QCoreApplication.translate("LoginNew", u"\u4ee3\u7406\u5730\u5740", None))
 #if QT_CONFIG(tooltip)
         self.httpLine.setToolTip(QCoreApplication.translate("LoginNew", u"http://127.0.0.1:10809", None))
 #endif // QT_CONFIG(tooltip)
         self.httpLine.setPlaceholderText("")
-        self.proxy_2.setText(QCoreApplication.translate("LoginNew", u"Sock5\u4ee3\u7406", None))
-        self.label_14.setText(QCoreApplication.translate("LoginNew", u"\u4ee3\u7406\u5730\u5740", None))
 #if QT_CONFIG(tooltip)
         self.sockEdit.setToolTip(QCoreApplication.translate("LoginNew", u"127.0.0.1:10808", None))
 #endif // QT_CONFIG(tooltip)
         self.sockEdit.setPlaceholderText("")
-        self.proxy_3.setText(QCoreApplication.translate("LoginNew", u"\u4f7f\u7528\u7cfb\u7edf\u4ee3\u7406", None))
-        self.checkLabel.setText(QCoreApplication.translate("LoginNew", u"\u672a\u68c0\u6d4b\u5230\u7cfb\u7edf\u4ee3\u7406", None))
         self.proxyLabel.setText("")
-        self.label_15.setText(QCoreApplication.translate("LoginNew", u"API\u8d85\u65f6\u65f6\u95f4  ", None))
+        self.checkLabel.setText(QCoreApplication.translate("LoginNew", u"\u672a\u68c0\u6d4b\u5230\u7cfb\u7edf\u4ee3\u7406", None))
+        self.proxyHint.setText(QCoreApplication.translate("LoginNew", u"\u672a\u542f\u7528\u4ee3\u7406", None))
+        self.speedCapLabel.setText(QCoreApplication.translate("LoginNew", u"\u7ebf\u8def\u6d4b\u901f", None))
+        self.speedUnitLabel.setText(QCoreApplication.translate("LoginNew", u"\u5ef6\u8fdf / \u4e0b\u8f7d \u00b7 ms", None))
+        self.testSpeedButton.setText(QCoreApplication.translate("LoginNew", u"\u6d4b\u901f", None))
+        self.radioButton_1.setText(QCoreApplication.translate("LoginNew", u"1", None))
+        self.label_api_1.setText("")
+        self.radioButton_2.setText(QCoreApplication.translate("LoginNew", u"2", None))
+        self.label_api_2.setText("")
+        self.radioButton_3.setText(QCoreApplication.translate("LoginNew", u"3", None))
+        self.label_api_3.setText("")
+        self.radioButton_4.setText(QCoreApplication.translate("LoginNew", u"4", None))
+        self.label_api_4.setText("")
+        self.radioButton_5.setText(QCoreApplication.translate("LoginNew", u"IP", None))
+        self.label_api_5.setText("")
+        self.radioButton_6.setText(QCoreApplication.translate("LoginNew", u"6", None))
+        self.label_api_6.setText("")
+        self.radio_img_1.setText(QCoreApplication.translate("LoginNew", u"1", None))
+        self.label_img_1.setText("")
+        self.radio_img_2.setText(QCoreApplication.translate("LoginNew", u"2", None))
+        self.label_img_2.setText("")
+        self.radio_img_3.setText(QCoreApplication.translate("LoginNew", u"3", None))
+        self.label_img_3.setText("")
+        self.radio_img_4.setText(QCoreApplication.translate("LoginNew", u"4", None))
+        self.label_img_4.setText("")
+        self.radio_img_5.setText(QCoreApplication.translate("LoginNew", u"IP", None))
+        self.label_img_5.setText("")
+        self.radio_img_6.setText(QCoreApplication.translate("LoginNew", u"6", None))
+        self.label_img_6.setText("")
+        self.proxyListTitle.setText(QCoreApplication.translate("LoginNew", u"\u8282\u70b9\u5217\u8868", None))
+        self.proxyCountLabel.setText("")
+        self.proxySortButton.setText(QCoreApplication.translate("LoginNew", u"\u667a\u80fd\u6392\u5e8f \u25be", None))
+#if QT_CONFIG(tooltip)
+        self.proxyDensityButton.setToolTip(QCoreApplication.translate("LoginNew", u"\u7d27\u51d1 / \u8212\u9002", None))
+#endif // QT_CONFIG(tooltip)
+        self.proxyDensityButton.setText(QCoreApplication.translate("LoginNew", u"\u2261", None))
+        self.proxyFilterAll.setText(QCoreApplication.translate("LoginNew", u"\u5168\u90e8", None))
+        self.proxyFilterProxy.setText(QCoreApplication.translate("LoginNew", u"ProxyIP", None))
+        self.proxyFilterCf.setText(QCoreApplication.translate("LoginNew", u"\u4f18\u9009", None))
+        self.proxyCutLabel.setText("")
+        self.colNameLabel.setText(QCoreApplication.translate("LoginNew", u"\u8282\u70b9 / \u5730\u533a \u00b7 ISP", None))
+        self.colSpeedLabel.setText(QCoreApplication.translate("LoginNew", u"\u5ef6\u8fdf / \u4e0b\u8f7d", None))
+        ___qtablewidgetitem = self.tableWidget.horizontalHeaderItem(0)
+        ___qtablewidgetitem.setText(QCoreApplication.translate("LoginNew", u"\u8282\u70b9", None));
+        self.label_15.setText(QCoreApplication.translate("LoginNew", u"API\u8d85\u65f6", None))
         self.apiTimeout.setItemText(0, QCoreApplication.translate("LoginNew", u"2", None))
         self.apiTimeout.setItemText(1, QCoreApplication.translate("LoginNew", u"5", None))
         self.apiTimeout.setItemText(2, QCoreApplication.translate("LoginNew", u"7", None))
 
-        self.label_16.setText(QCoreApplication.translate("LoginNew", u"\u56fe\u7247\u8d85\u65f6\u65f6\u95f4 ", None))
+        self.label_16.setText(QCoreApplication.translate("LoginNew", u"\u56fe\u7247\u8d85\u65f6", None))
         self.imgTimeout.setItemText(0, QCoreApplication.translate("LoginNew", u"2", None))
         self.imgTimeout.setItemText(1, QCoreApplication.translate("LoginNew", u"5", None))
         self.imgTimeout.setItemText(2, QCoreApplication.translate("LoginNew", u"7", None))
         self.imgTimeout.setItemText(3, QCoreApplication.translate("LoginNew", u"10", None))
         self.imgTimeout.setItemText(4, QCoreApplication.translate("LoginNew", u"15", None))
 
-        self.http3Box.setText(QCoreApplication.translate("LoginNew", u"\u542f\u7528HTTP3\uff08UDP\uff09", None))
-        self.echBox.setText(QCoreApplication.translate("LoginNew", u"\u542f\u7528ECH\uff08Encrypted Client Hello\uff09", None))
-        self.echTick.setText("")
-        self.label_17.setText(QCoreApplication.translate("LoginNew", u"DOH\u5730\u5740\uff1a", None))
+        self.label_17.setText(QCoreApplication.translate("LoginNew", u"DOH", None))
         self.dohTool.setText("")
-        self.testSpeedButton.setText(QCoreApplication.translate("LoginNew", u"\u6d4b\u901f", None))
-        self.label_20.setText(QCoreApplication.translate("LoginNew", u"\u5ef6\u8fdf", None))
-        self.label_19.setText(QCoreApplication.translate("LoginNew", u"\u901f\u5ea6", None))
-        self.radioButton_3.setText(QCoreApplication.translate("LoginNew", u"\u5206\u6d413", None))
-        self.label_img_6.setText("")
-        self.label_api_2.setText("")
-#if QT_CONFIG(tooltip)
-        self.radio_img_4.setToolTip("")
-#endif // QT_CONFIG(tooltip)
-        self.radio_img_4.setText(QCoreApplication.translate("LoginNew", u"\u5206\u6d414", None))
-        self.radio_img_6.setText(QCoreApplication.translate("LoginNew", u"US\u53cd\u4ee3\u5206\u6d41", None))
-        self.radio_img_2.setText(QCoreApplication.translate("LoginNew", u"\u5206\u6d412", None))
-#if QT_CONFIG(tooltip)
-        self.radioButton_4.setToolTip("")
-#endif // QT_CONFIG(tooltip)
-        self.radioButton_4.setText(QCoreApplication.translate("LoginNew", u"\u5206\u6d414", None))
-        self.radioButton_6.setText(QCoreApplication.translate("LoginNew", u"US\u53cd\u4ee3\u5206\u6d41", None))
-        self.radio_img_1.setText(QCoreApplication.translate("LoginNew", u"\u5206\u6d411", None))
-        self.label_18.setText(QCoreApplication.translate("LoginNew", u"Api\u5206\u6d41", None))
-        self.radioButton_2.setText(QCoreApplication.translate("LoginNew", u"\u5206\u6d412", None))
-        self.label_api_3.setText("")
-        self.label_img_1.setText("")
-        self.label_api_1.setText("")
-        self.label_img_4.setText("")
-        self.radioButton_1.setText(QCoreApplication.translate("LoginNew", u"\u5206\u6d411", None))
-        self.label_api_6.setText("")
-        self.radio_img_3.setText(QCoreApplication.translate("LoginNew", u"\u5206\u6d413", None))
-        self.label_21.setText(QCoreApplication.translate("LoginNew", u"\u56fe\u7247\u5206\u6d41", None))
-        self.label_img_3.setText("")
-        self.label_img_2.setText("")
-        self.label_api_4.setText("")
-        self.label_api_5.setText("")
-        self.label_img_5.setText("")
-        self.radioButton_5.setText(QCoreApplication.translate("LoginNew", u"IP\u5206\u6d41", None))
-        self.radio_img_5.setText(QCoreApplication.translate("LoginNew", u"IP\u5206\u6d41", None))
-        self.testIpButton.setText(QCoreApplication.translate("LoginNew", u"\u6d4b\u8bd5IP\u5206\u6d41", None))
-        self.label_25.setText(QCoreApplication.translate("LoginNew", u"*\u4f7f\u7528\u4ee3\u7406\u65f6IP\u5206\u6d41\u4e0d\u751f\u6548\uff0c\u63a8\u8350\u5f00\u542fECH\u529f\u80fd", None))
-        self.label_26.setText(QCoreApplication.translate("LoginNew", u"\u81ea\u5b9a\u4e49\u83b7\u53d6ProxyIP\u5730\u533a\uff1a", None))
+        self.echBox.setText(QCoreApplication.translate("LoginNew", u"\u542f\u7528 ECH", None))
+        self.http3Box.setText(QCoreApplication.translate("LoginNew", u"\u542f\u7528 HTTP3", None))
+        self.label_26.setText(QCoreApplication.translate("LoginNew", u"\u83b7\u53d6\u5730\u533a", None))
         self.proxyIpLabel.setText("")
-        self.label_22.setText(QCoreApplication.translate("LoginNew", u"\u81ea\u5b9a\u4e49IP\u5217\u8868\uff08\u9017\u53f7\u5206\u5272\uff09\uff1a", None))
-        ___qtablewidgetitem = self.tableWidget.horizontalHeaderItem(0)
-        ___qtablewidgetitem.setText(QCoreApplication.translate("LoginNew", u"\u540d\u79f0", None));
-        ___qtablewidgetitem1 = self.tableWidget.horizontalHeaderItem(1)
-        ___qtablewidgetitem1.setText(QCoreApplication.translate("LoginNew", u"IP", None));
-        ___qtablewidgetitem2 = self.tableWidget.horizontalHeaderItem(2)
-        ___qtablewidgetitem2.setText(QCoreApplication.translate("LoginNew", u"\u5730\u533a", None));
-        ___qtablewidgetitem3 = self.tableWidget.horizontalHeaderItem(3)
-        ___qtablewidgetitem3.setText(QCoreApplication.translate("LoginNew", u"ISP", None));
-        ___qtablewidgetitem4 = self.tableWidget.horizontalHeaderItem(4)
-        ___qtablewidgetitem4.setText(QCoreApplication.translate("LoginNew", u"\u901f\u5ea6", None));
-        self.label_24.setText(QCoreApplication.translate("LoginNew", u"\u5206\u6d41\u8bbe\u7f6e\u8bf7\u770b\u8bf4\u660e\u83b7\u53d6", None))
-        self.cdnLinkButton.setText(QCoreApplication.translate("LoginNew", u"\u8bf4\u660e", None))
+        self.label_22.setText(QCoreApplication.translate("LoginNew", u"\u81ea\u5b9a\u4e49 IP", None))
+        self.label_25.setText(QCoreApplication.translate("LoginNew", u"*\u4f7f\u7528\u4ee3\u7406\u65f6IP\u5206\u6d41\u4e0d\u751f\u6548\uff0c\u63a8\u8350\u5f00\u542fECH\u529f\u80fd", None))
+        self.proxyStatusLabel.setText("")
+        self.proxyAdvButton.setText(QCoreApplication.translate("LoginNew", u"\u9ad8\u7ea7", None))
+        self.testIpButton.setText(QCoreApplication.translate("LoginNew", u"\u6d4b\u8bd5 IP \u5206\u6d41", None))
         self.tabWidget.setTabText(self.tabWidget.indexOf(self.tab_4), QCoreApplication.translate("LoginNew", u"\u5206\u6d41", None))
     # retranslateUi
 

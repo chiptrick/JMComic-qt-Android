@@ -5,20 +5,31 @@ import re
 import urllib.request
 from functools import partial
 
-from PySide6 import QtCore
-from PySide6.QtCore import QSize, Qt
+from PySide6.QtCore import QEvent, QObject, QSize, Qt
 from PySide6.QtGui import QIcon
-from PySide6.QtWidgets import QTableWidgetItem, QHeaderView, QAbstractItemView, QCheckBox, QButtonGroup, QLabel
+from PySide6.QtWidgets import (QAbstractItemView, QFrame, QHeaderView, QLabel)
 
-from component.layout.flow_layout import FlowLayout
-from component.widget.proxy_ip_item_widget import ProxyIpWidget
-from config import config
+from component.list.proxy_node_card import (ProxyNodeCard, ScaledFont, ShortName,
+                                            TagKind)
 from config.global_config import GlobalConfig
 from config.setting import Setting
 from qt_owner import QtOwner
 from server import req, Server
 from tools.log import Log
 from tools.str import Str
+
+
+class _ViewportWatcher(QObject):
+    """ 视口尺寸变化时回调（LoginProxyNewWidget 不是 QObject，不能自己当事件过滤器） """
+
+    def __init__(self, callback, parent=None):
+        QObject.__init__(self, parent)
+        self.callback = callback
+
+    def eventFilter(self, obj, event):
+        if event.type() == QEvent.Type.Resize:
+            self.callback()
+        return False
 
 
 class IpItem(object):
@@ -69,12 +80,19 @@ class IpItem(object):
             else:
                 return False
 
+
 class LoginProxyNewWidget(object):
+    """ 分流设置页驱动
+
+    列表从「5 列宽表」换成「一行一张卡片」（component/list/proxy_node_card.py）：
+    页面结构见 ui_login_new.ui 的 tab_4 —— 代理通道 / 线路测速 / 节点列表 / 高级 / 底栏
+    五块固定高度 + 列表吃满剩余高度，整页不再需要滚动。
+    """
+
     def __init__(self, owner):
         from view.user.login_new_view import LoginNewView
         assert isinstance(owner, LoginNewView)
         self.owner = owner
-
 
         self.speedTest = []
         self.speedPingNum = 0
@@ -90,7 +108,6 @@ class LoginProxyNewWidget(object):
         self.owner.radioApiGroup.setId(self.owner.radioButton_4, 4)
         self.owner.radioApiGroup.setId(self.owner.radioButton_5, 5)
         self.owner.radioApiGroup.setId(self.owner.radioButton_6, 6)
-        # self.owner.radioApiGroup.setId(self.owner.radioButton_7, 7)
 
         self.owner.radioImgGroup.setId(self.owner.radio_img_1, 1)
         self.owner.radioImgGroup.setId(self.owner.radio_img_2, 2)
@@ -98,94 +115,396 @@ class LoginProxyNewWidget(object):
         self.owner.radioImgGroup.setId(self.owner.radio_img_4, 4)
         self.owner.radioImgGroup.setId(self.owner.radio_img_5, 5)
         self.owner.radioImgGroup.setId(self.owner.radio_img_6, 6)
-        # self.owner.radioImgGroup.setId(self.owner.radio_img_7, 7)
-        # self.buttonGroup.setId(self.radioButton_5, 5)
 
         self.owner.radioProxyGroup.setId(self.owner.proxy_0, 0)
         self.owner.radioProxyGroup.setId(self.owner.proxy_1, 1)
         self.owner.radioProxyGroup.setId(self.owner.proxy_2, 2)
         self.owner.radioProxyGroup.setId(self.owner.proxy_3, 3)
 
-        self.LoadSetting()
-
-        # self.UpdateServer()
-        self.owner.cdnLinkButton.clicked.connect(self.OpenUrl)
-        self.maxNum = 7
-        # self.loginProxy.hide()
-        # self.uaRandom.clicked.connect(self.RandomUa)
-        self.lastResult = {}
-        # self.owner.host_img_domain.SetWordData(GlobalConfig.ImgAutoUrl.value[:])
-        self.owner.dohLine.SetWordData(GlobalConfig.DohUrlList.value[:])
-        self.allApiUrl = []
-        self.checkDohUrl = ""
-        self.checkResult = None
-        self.owner.dohLine.editingFinished.connect(self.CheckDohReq)
-
-        # self.flowLayout = FlowLayout(self.owner.ipWidget)
-        self.owner.testSpeedButton.clicked.connect(self.SpeedTest)
-        self.owner.testIpButton.clicked.connect(self.StartTestIp)
+        self.systemProxyValue = ""
+        self.isInitProxy = False
+        self.dense = False
+        self.filter = "all"
+        self.sortMode = "smart"
+        self.rowItems = {}
         self.allItems = {}
         self.maxSpeedIpCnt = 0
         self.maxSpeedImgCnt = 0
-        self.isInitProxy = False
-        self.owner.tableWidget.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        self.owner.tableWidget.verticalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        self.owner.tableWidget.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self.owner.tableWidget.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.maxNum = 7
+        self.cdnIndex = 5
+        self.lastResult = {}
+        self.allApiUrl = []
+        self.checkDohUrl = ""
+        self.checkResult = None
 
-        self.owner.tableWidget.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self.owner.tableWidget.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.InitCardTable()
+        self.InitUi()
+        self.LoadSetting()
 
-        self.owner.tableWidget.resizeColumnsToContents()
-        self.owner.tableWidget.resizeRowsToContents()
-
-        self.proxyIpGroup = QButtonGroup(self.owner)
-        self.proxyIpGroup.setExclusive(True)
         self.otherProxyIps = Setting.ProxyIpLastList.value.split(",")
         if not self.otherProxyIps:
             self.otherProxyIps = GlobalConfig.ProxyIpList.value[:]
 
         self.ShowAllItem()
         self.LoadHistory()
-        self.Sort()
-        self.cdnIndex = 5
-        self.owner.proxyIpEdit.SetWordData(["JP", "US", "HK", "SG", "KR", "GB", "FR", "NL"])
-        pass
+        self.RenderList()
+        self.UpdateAddrRow()
 
-    def SetEnabled(self, enabled):
-        self.owner.testSpeedButton.setEnabled(enabled)
-        # self.dohBox.setEnabled(enabled)
-        # self.dohEdit.setEnabled(enabled)
-        self.owner.proxy_0.setEnabled(enabled)
-        self.owner.proxy_1.setEnabled(enabled)
-        self.owner.proxy_2.setEnabled(enabled)
-        self.owner.proxy_3.setEnabled(enabled)
-        self.owner.httpLine.setEnabled(enabled)
-        self.owner.sockEdit.setEnabled(enabled)
-        # self.owner.cdn_img_ip.setEnabled(enabled)
-        # self.owner.cdn_api_ip.setEnabled(enabled)
-        # self.owner.host_api_domain.setEnabled(enabled)
-        # self.owner.host_img_domain.setEnabled(enabled)
-        self.owner.radioButton_1.setEnabled(enabled)
-        self.owner.radioButton_2.setEnabled(enabled)
-        self.owner.radioButton_3.setEnabled(enabled)
-        self.owner.radioButton_4.setEnabled(enabled)
-        self.owner.radioButton_5.setEnabled(enabled)
-        self.owner.radioButton_6.setEnabled(enabled)
-        # self.owner.radioButton_7.setEnabled(enabled)
-        self.owner.radio_img_1.setEnabled(enabled)
-        self.owner.radio_img_2.setEnabled(enabled)
-        self.owner.radio_img_3.setEnabled(enabled)
-        self.owner.radio_img_4.setEnabled(enabled)
-        self.owner.radio_img_5.setEnabled(enabled)
-        self.owner.radio_img_6.setEnabled(enabled)
-        # self.owner.radio_img_7.setEnabled(enabled)
-        self.owner.echBox.setEnabled(enabled)
-        self.owner.http3Box.setEnabled(enabled)
-        # self.owner.dohBox.setEnabled(enabled)
-        self.owner.dohLine.setEnabled(enabled)
-        # self.radioButton_5.setEnabled(enabled)
+        self.owner.dohLine.SetWordData(GlobalConfig.DohUrlList.value[:])
+        self.owner.cdnLinkButton.clicked.connect(self.OpenUrl)
+        self.owner.dohLine.editingFinished.connect(self.CheckDohReq)
 
+    # ---------------- 列表（一行一张卡片） ----------------
+    def InitCardTable(self):
+        """ 表格退化成单列卡片容器：去掉表头/网格，行高由卡片决定，滚动条要留出来 """
+        table = self.owner.tableWidget
+        table.setColumnCount(1)
+        table.horizontalHeader().setVisible(False)
+        table.verticalHeader().setVisible(False)
+        table.verticalHeader().setSectionResizeMode(QHeaderView.Fixed)
+        table.verticalHeader().setMinimumSectionSize(1)
+        table.setShowGrid(False)
+        table.setWordWrap(False)
+        table.setFrameShape(QFrame.NoFrame)
+        table.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        # 旧代码把竖直滚动条也关掉了 —— 列表比可视区高时根本滚不动，
+        # 这正是"后面的节点看不到"的另一半原因
+        table.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        table.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
+        table.setHorizontalScrollMode(QAbstractItemView.ScrollPerPixel)
+        table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        table.setSelectionMode(QAbstractItemView.SingleSelection)
+        table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        # 主题里 QTableWidget 有边框、item 有 padding，卡片自己有留白，这里清掉
+        table.setStyleSheet("QTableWidget{background:transparent;border:none;}"
+                            "QTableWidget::item{border:none;padding:0;}"
+                            "QTableWidget::item:selected{background:transparent;}")
+        table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+        table.horizontalHeader().setStretchLastSection(True)
+        table.itemSelectionChanged.connect(self.OnRowSelected)
+        self.emptyLabel = QLabel("当前分组暂无节点", table.viewport())
+        self.emptyLabel.setAlignment(Qt.AlignCenter)
+        self.emptyLabel.setStyleSheet("color:#7C858E;background:transparent;")
+        self.emptyLabel.hide()
+        self.viewportWatcher = _ViewportWatcher(self.UpdateEmpty, table.viewport())
+        table.viewport().installEventFilter(self.viewportWatcher)
+
+    def InitUi(self):
+        """ 接上新布局上的筛选 / 排序 / 密度 / 高级面板 / 速度格子 """
+        owner = self.owner
+        for col in range(6):
+            owner.speedGrid.setColumnStretch(col, 1)
+        small = ScaledFont(owner.font(), -1.8)
+        for i in range(1, self.maxNum):
+            for name in ("label_api_" + str(i), "label_img_" + str(i)):
+                label = getattr(owner, name, None)
+                if isinstance(label, QLabel):
+                    label.setFont(small)
+                    label.setAlignment(Qt.AlignCenter)
+
+        # 主题里 QPushButton 是 34px 高 + 左右 16px 内边距（桌面尺寸），塞进这几条紧凑栏
+        # 会把行撑胖、把"测速/≡"这类窄按钮的文字挤掉。这里只覆盖度量，配色仍走主题。
+        self.CompactButton(owner.proxyFilterAll, 24, 8, -2.2)
+        self.CompactButton(owner.proxyFilterProxy, 24, 8, -2.2)
+        self.CompactButton(owner.proxyFilterCf, 24, 8, -2.2)
+        self.CompactButton(owner.proxySortButton, 22, 6, -2.2)
+        self.CompactButton(owner.proxyDensityButton, 22, 0, 0.6, maxWidth=30)
+        self.CompactButton(owner.testSpeedButton, 30, 2, -1.0)
+        self.CompactLink(owner.cdnLinkButton, 22, 6, -2.0)
+        owner.proxyStatusLabel.setWordWrap(True)
+
+        owner.proxyFilterGroup.buttonClicked.connect(self.OnFilterClicked)
+        owner.proxySortButton.clicked.connect(self.OnSortClicked)
+        owner.proxyDensityButton.clicked.connect(self.OnDensityClicked)
+        owner.proxyAdvButton.clicked.connect(self.OnAdvClicked)
+        owner.testIpButton.clicked.connect(self.StartTestIp)
+        owner.testSpeedButton.clicked.connect(self.SpeedTest)
+        owner.radioProxyGroup.buttonClicked.connect(self.OnProxyModeChanged)
+        self.SyncFilterText()
+
+    @staticmethod
+    def CompactButton(widget, height, padding, fontDelta, maxWidth=None):
+        """ 只改高度/内边距/字号，不动颜色（颜色继续由主题 QSS 给） """
+        widget.setFont(ScaledFont(widget.font(), fontDelta))
+        widget.setStyleSheet(
+            "QPushButton{{height:{h}px;min-height:{h}px;max-height:{h}px;padding:0 {p}px;}}".format(
+                h=height, p=padding))
+        if maxWidth:
+            widget.setFixedWidth(maxWidth)
+
+    @staticmethod
+    def CompactLink(widget, height, padding, fontDelta):
+        """ QCommandLinkButton（"说明"）按紧凑文字链接处理 """
+        widget.setFont(ScaledFont(widget.font(), fontDelta))
+        widget.setIcon(QIcon())
+        widget.setStyleSheet(
+            "QCommandLinkButton{{height:{h}px;min-height:{h}px;max-height:{h}px;"
+            "padding:0 {p}px;background:transparent;border:none;}}".format(h=height, p=padding))
+
+    def RenderList(self):
+        """ 按当前分组/排序重建行（只重建行，不重建控件） """
+        table = self.owner.tableWidget
+        for item in self.allItems.values():
+            item.tableRow = -1
+
+        items = [item for item in self.allItems.values() if self.MatchFilter(item)]
+        self.SortItems(items)
+        self.rowItems = {}
+
+        table.blockSignals(True)
+        table.setRowCount(0)
+        for row, item in enumerate(items):
+            item.tableRow = row
+            table.insertRow(row)
+            self.rowItems[row] = item
+            self.UpdateRow(item)
+            table.setRowHeight(row, self.RowHeight(item))
+        table.blockSignals(False)
+
+        self.SyncTableSelection()
+        self.UpdateCount()
+        self.UpdateEmpty()
+
+    def SortItems(self, items):
+        """ 三种排序：智能(默认，选中优先 + 延迟*0.8+下载*0.2) / 按延迟 / 按下载
+
+            后两种只把"失败项"沉到最后，其余严格按数值排，选中的节点不再被顶到第一行
+            —— 否则用户点一下第 40 行，列表顺序会跟着变。
+        """
+        if self.sortMode == "lat":
+            items.sort(key=lambda it: (1 if (it.isFail or it.downloadFail) else 0,
+                                       it.delay or 10 ** 9))
+        elif self.sortMode == "dl":
+            items.sort(key=lambda it: (1 if (it.isFail or it.downloadFail) else 0,
+                                       it.downloadDelay or 10 ** 9))
+        else:
+            items.sort()
+
+    def MatchFilter(self, item):
+        assert isinstance(item, IpItem)
+        kind = TagKind(item)
+        if self.filter == "proxy":
+            return kind in ("proxy", "self")
+        if self.filter == "cf":
+            return kind == "cf"
+        return True
+
+    def RowHeight(self, item):
+        card = self.owner.tableWidget.cellWidget(item.tableRow, 0)
+        if isinstance(card, ProxyNodeCard):
+            return card.RowHeight()
+        return 62
+
+    def UpdateRow(self, info):
+        """ 刷新一行：表格里只放卡片，文本全部由卡片负责 """
+        assert isinstance(info, IpItem)
+        table = self.owner.tableWidget
+        row = info.tableRow
+        if row < 0 or row >= table.rowCount():
+            return
+        card = table.cellWidget(row, 0)
+        if not isinstance(card, ProxyNodeCard):
+            card = ProxyNodeCard(table.viewport())
+            card.SetDense(self.dense)
+            table.setCellWidget(row, 0, card)
+            card.SetSelected(self.IsRowSelected(row))
+        card.Update(info)
+        height = card.RowHeight()
+        if table.rowHeight(row) != height:
+            table.setRowHeight(row, height)
+
+    def ShowAllItem(self):
+        """ 重建数据源：ProxyIP 列表 + 自定义 IP + 内置优选 IP """
+        oldItems = {item.ip: item for item in self.allItems.values()}
+        self.allItems = {}
+        index = 0
+        allips = set()
+
+        for j, ip in enumerate(self.otherProxyIps):
+            if not ip or ip in allips:
+                continue
+            allips.add(ip)
+            item = IpItem(index, j + 1, ip, True, False)
+            item.isSelect = ip == Setting.ProxyIpValue.value
+            self.allItems[index] = item
+            if ip in oldItems:
+                item.Copy(oldItems[ip])
+            index += 1
+
+        for j, ip in enumerate(re.split(r'[、，；;,\s]\s*', Setting.PreferCDNList.value)):
+            if not ip or ip in allips:
+                continue
+            allips.add(ip)
+            item = IpItem(index, j + 1, ip, False, True)
+            item.isSelect = ip == Setting.ProxyIpValue.value
+            self.allItems[index] = item
+            if ip in oldItems:
+                item.Copy(oldItems[ip])
+            index += 1
+
+        for j, ip in enumerate(GlobalConfig.BestCfIpList.value):
+            if not ip:
+                continue
+            item = IpItem(index, j + 1, ip, False, False)
+            item.isSelect = ip == Setting.ProxyIpValue.value
+            self.allItems[index] = item
+            if ip in oldItems:
+                item.Copy(oldItems[ip])
+            index += 1
+
+    def Sort(self):
+        self.RenderList()
+
+    # ---------------- 选中 / 计数 / 状态 ----------------
+    def IsRowSelected(self, row):
+        for index in self.owner.tableWidget.selectedIndexes():
+            if index.row() == row:
+                return True
+        return False
+
+    def SyncCardSelection(self):
+        table = self.owner.tableWidget
+        selected = set(index.row() for index in table.selectedIndexes())
+        for row in range(table.rowCount()):
+            card = table.cellWidget(row, 0)
+            if isinstance(card, ProxyNodeCard):
+                card.SetSelected(row in selected)
+
+    def SyncTableSelection(self):
+        """ item.isSelect -> 表格行选中 -> 卡片高亮 """
+        table = self.owner.tableWidget
+        target = None
+        for row, item in self.rowItems.items():
+            if item.isSelect:
+                target = row
+                break
+        table.blockSignals(True)
+        if target is not None and target < table.rowCount():
+            table.selectRow(target)
+        else:
+            table.clearSelection()
+        table.blockSignals(False)
+        self.SyncCardSelection()
+        self.UpdateStatus()
+
+    def OnRowSelected(self):
+        model = self.owner.tableWidget.selectionModel()
+        rows = model.selectedRows() if model is not None else []
+        if not rows:
+            self.SyncCardSelection()
+            return
+        item = self.rowItems.get(rows[0].row())
+        if item is None:
+            return
+        self.SelectItem(item)
+        self.SyncCardSelection()
+        self.UpdateStatus()
+
+    def SelectItem(self, item):
+        """ 单选语义：原来是表格里的 QCheckBox + QButtonGroup，现在由行选中承担 """
+        assert isinstance(item, IpItem)
+        for other in self.allItems.values():
+            other.isSelect = other is item
+        Setting.ProxyIpValue.SetValue(item.ip)
+        try:
+            # 宿主自检/单元测试里没有主界面，这里要能安静跳过
+            if getattr(QtOwner(), "_owner", None) is not None:
+                QtOwner().UpdateProxyName()
+        except Exception as es:
+            Log.Error(es)
+
+    def SelectIp(self, ip):
+        """ 按 IP 选中（被分组筛掉的项也要能选中） """
+        for item in self.allItems.values():
+            item.isSelect = item.ip == ip
+        self.SyncTableSelection()
+
+    def UpdateCount(self):
+        items = list(self.allItems.values())
+        shown = [item for item in items if self.MatchFilter(item)]
+        available = len([item for item in shown if item.delay])
+        self.owner.proxyCountLabel.setText(
+            "共 {} 项 · 可用 {}".format(len(shown), available) if available else
+            "共 {} 项".format(len(shown)))
+        self.owner.proxyFilterAll.setText("全部 {}".format(len(items)))
+        self.owner.proxyFilterProxy.setText("ProxyIP {}".format(
+            len([item for item in items if TagKind(item) in ("proxy", "self")])))
+        self.owner.proxyFilterCf.setText("优选 {}".format(
+            len([item for item in items if TagKind(item) == "cf"])))
+
+    def UpdateStatus(self):
+        selected = [item for item in self.allItems.values() if item.isSelect]
+        if not selected:
+            self.owner.proxyStatusLabel.setText("未选择节点")
+            return
+        item = selected[0]
+        speed = "{} ms".format(int(float(item.delay))) if item.delay else "未测速"
+        self.owner.proxyStatusLabel.setText("已选 {} · {}\n{} · {}".format(
+            ShortName(item), item.ip, speed, item.country or "未知地区"))
+
+    def UpdateEmpty(self):
+        count = self.owner.tableWidget.rowCount()
+        self.emptyLabel.setVisible(count == 0)
+        self.emptyLabel.setGeometry(self.owner.tableWidget.viewport().rect())
+
+    # ---------------- 分组 / 排序 / 密度 / 高级 ----------------
+    def SyncFilterText(self):
+        self.owner.proxyFilterAll.setChecked(self.filter == "all")
+        self.owner.proxyFilterProxy.setChecked(self.filter == "proxy")
+        self.owner.proxyFilterCf.setChecked(self.filter == "cf")
+        self.owner.proxySortButton.setText({"smart": "智能排序 ▾", "lat": "按延迟 ▾",
+                                            "dl": "按下载 ▾"}.get(self.sortMode, "智能排序 ▾"))
+
+    def OnFilterClicked(self, button):
+        text = button.text()
+        if text.startswith("ProxyIP"):
+            self.filter = "proxy"
+        elif text.startswith("优选"):
+            self.filter = "cf"
+        else:
+            self.filter = "all"
+        self.SyncFilterText()
+        self.RenderList()
+        self.owner.tableWidget.scrollToTop()
+
+    def OnSortClicked(self):
+        self.sortMode = {"smart": "lat", "lat": "dl", "dl": "smart"}[self.sortMode]
+        self.SyncFilterText()
+        self.RenderList()
+        self.owner.tableWidget.scrollToTop()
+
+    def OnDensityClicked(self):
+        self.dense = not self.dense
+        for row in range(self.owner.tableWidget.rowCount()):
+            card = self.owner.tableWidget.cellWidget(row, 0)
+            if isinstance(card, ProxyNodeCard):
+                card.SetDense(self.dense)
+                self.owner.tableWidget.setRowHeight(row, card.RowHeight())
+
+    def OnAdvClicked(self):
+        panel = self.owner.proxyAdvPanel
+        panel.setVisible(not panel.isVisible())
+        self.owner.proxyAdvButton.setText("收起" if panel.isVisible() else "高级")
+
+    def OnProxyModeChanged(self, *args):
+        self.UpdateAddrRow()
+
+    def UpdateAddrRow(self):
+        """ 代理模式 -> 地址行只显示当前模式需要的那一个控件 """
+        mode = self.owner.radioProxyGroup.checkedId()
+        if mode < 0:
+            # 配置异常/还没 LoadSetting 时别把整行都藏掉，按"无代理"处理
+            mode = 0
+        owner = self.owner
+        owner.label_13.setText("系统代理" if mode == 3 else "代理地址")
+        owner.label_13.setVisible(mode != 0)
+        owner.proxyHint.setVisible(mode == 0)
+        owner.httpLine.setVisible(mode == 1)
+        owner.sockEdit.setVisible(mode == 2)
+        owner.proxyLabel.setVisible(mode == 3 and bool(self.systemProxyValue))
+        owner.checkLabel.setVisible(mode == 3 and not self.systemProxyValue)
+
+    # ---------------- 初始化 ----------------
     def __InitSetting(self):
         self.owner.radioApiGroup.buttonClicked.connect(
             partial(QtOwner().settingView.ButtonClickEvent, Setting.ProxySelectIndex))
@@ -209,10 +528,8 @@ class LoginProxyNewWidget(object):
         self.owner.dohLine.editingFinished.connect(
             partial(QtOwner().settingView.LineEditEvent, Setting.DohAddress, self.owner.dohLine))
 
-        self.proxyIpGroup.buttonClicked.connect(self.SaveProxyIp)
         self.owner.radioApiGroup.buttonClicked.connect(QtOwner().UpdateProxyName)
         self.owner.radioImgGroup.buttonClicked.connect(QtOwner().UpdateProxyName)
-        self.proxyIpGroup.buttonClicked.connect(QtOwner().UpdateProxyName)
         self.LoadHistory()
 
     def LoadHistory(self):
@@ -249,17 +566,39 @@ class LoginProxyNewWidget(object):
         self.LoadSetting()
         proxy = urllib.request.getproxies()
         if isinstance(proxy, dict) and proxy.get("http"):
-            self.owner.proxyLabel.setText(proxy.get("http", ""))
-            self.owner.checkLabel.setVisible(False)
+            self.systemProxyValue = proxy.get("http", "")
+            self.owner.proxyLabel.setText(self.systemProxyValue)
         else:
-            self.owner.checkLabel.setVisible(True)
-        # if not self.allApiUrl:
-        #     self.InitJmServer()
+            self.systemProxyValue = ""
+            self.owner.proxyLabel.setText("")
+        self.UpdateAddrRow()
         self.CheckDohReq()
 
+    def SetEnabled(self, enabled):
+        self.owner.testSpeedButton.setEnabled(enabled)
+        self.owner.proxy_0.setEnabled(enabled)
+        self.owner.proxy_1.setEnabled(enabled)
+        self.owner.proxy_2.setEnabled(enabled)
+        self.owner.proxy_3.setEnabled(enabled)
+        self.owner.httpLine.setEnabled(enabled)
+        self.owner.sockEdit.setEnabled(enabled)
+        self.owner.radioButton_1.setEnabled(enabled)
+        self.owner.radioButton_2.setEnabled(enabled)
+        self.owner.radioButton_3.setEnabled(enabled)
+        self.owner.radioButton_4.setEnabled(enabled)
+        self.owner.radioButton_5.setEnabled(enabled)
+        self.owner.radioButton_6.setEnabled(enabled)
+        self.owner.radio_img_1.setEnabled(enabled)
+        self.owner.radio_img_2.setEnabled(enabled)
+        self.owner.radio_img_3.setEnabled(enabled)
+        self.owner.radio_img_4.setEnabled(enabled)
+        self.owner.radio_img_5.setEnabled(enabled)
+        self.owner.radio_img_6.setEnabled(enabled)
+        self.owner.echBox.setEnabled(enabled)
+        self.owner.http3Box.setEnabled(enabled)
+        self.owner.dohLine.setEnabled(enabled)
+
     def LoadSetting(self):
-        # self.dohBox.setChecked(Setting.IsOpenDoh.value)
-        # self.dohEdit.setText(Setting.DohAddress.value)
         self.owner.httpLine.setText(Setting.HttpProxy.value)
         self.owner.sockEdit.setText(Setting.Sock5Proxy.value)
         button = getattr(self.owner, "radioButton_{}".format(Setting.ProxySelectIndex.value), None)
@@ -271,16 +610,9 @@ class LoginProxyNewWidget(object):
         button = getattr(self.owner, "radio_img_{}".format(int(Setting.ProxyImgSelectIndex.value)), None)
         if button:
             button.setChecked(True)
-        # self.owner.cdn_api_ip.setText(Setting.PreferCDNIP.value)
-        # self.owner.cdn_img_ip.setText(Setting.PreferCDNIPImg.value)
-        # self.uaEdit.setText(Setting.UerAgent.value)
-        # self.loginProxy.setChecked(bool(Setting.IsLoginProxy.value))
         self.owner.apiTimeout.setCurrentIndex(Setting.ApiTimeOut.value)
         self.owner.imgTimeout.setCurrentIndex(Setting.ImgTimeOut.value)
-        # self.owner.host_api_domain.setText(Setting.HostApiDomain.value)
-        # self.owner.host_img_domain.setText(Setting.HostImgDomain.value)
         self.owner.echBox.setChecked(bool(Setting.EnableEch.value))
-        # self.owner.dohBox.setChecked(bool(Setting.IsOpenDoh.value))
         self.owner.dohLine.setText(Setting.DohAddress.value)
         self.owner.http3Box.setChecked(bool(Setting.IsOpenHTTP3.value))
         self.owner.ipListEdit.setText(Setting.PreferCDNList.value)
@@ -292,42 +624,16 @@ class LoginProxyNewWidget(object):
         Setting.HttpProxy.SetValue(self.owner.httpLine.text())
         Setting.ProxySelectIndex.SetValue(self.owner.radioApiGroup.checkedId())
         Setting.ProxyImgSelectIndex.SetValue(self.owner.radioImgGroup.checkedId())
-        # Setting.IsLoginProxy.SetValue(int(self.loginProxy.isChecked()))
-        # Setting.PreferCDNIPImg.SetValue(self.owner.cdn_img_ip.text())
-        # Setting.PreferCDNIP.SetValue(self.owner.cdn_api_ip.text())
-        # Setting.HostApiDomain.SetValue(self.owner.host_api_domain.text())
-        # Setting.HostImgDomain.SetValue(self.owner.host_img_domain.text())
-        # Setting.UerAgent.SetValue(self.uaEdit.text())
         Setting.ApiTimeOut.SetValue(self.owner.apiTimeout.currentIndex())
         Setting.ImgTimeOut.SetValue(self.owner.imgTimeout.currentIndex())
-        # Setting.IsOpenDoh.SetValue(bool(self.owner.dohBox.isChecked()))
         Setting.EnableEch.SetValue(bool(self.owner.echBox.isChecked()))
         Setting.DohAddress.SetValue((self.owner.dohLine.text()))
         Setting.IsOpenHTTP3.SetValue(bool(self.owner.http3Box.isChecked()))
         # 用户重新选/保存代理就重新相信这两个选项：之前运行时因为失败把它们关了，
         # 现在给个机会再试(比如换了网络/换了 IP)。
         req.ResetHttp3EchFallback()
-        # Setting.DohAddress.SetValue(self.dohEdit.text())
-        # Setting.IsOpenDoh.SetValue(int(self.dohBox.isChecked()))
-        # self.UpdateServer()
         QtOwner().ShowMsg(Str.GetStr(Str.SaveSuc))
         return
-
-    # def UpdateServer(self):
-    #     index = Setting.ProxySelectIndex.value-1
-    #     index2 = Setting.ProxyImgSelectIndex.value-1
-    #     if Setting.ProxyImgSelectIndex.value == 5:
-    #         imageServer = Setting.PreferCDNIPImg.value
-    #     else:
-    #         imageServer = ""
-    #     if Setting.ProxySelectIndex.value == 5:
-    #         address = Setting.PreferCDNIP.value
-    #     else:
-    #         address = ""
-    #     # Server().UpdateDns(address, imageServer)
-    #     # Server().UpdateProxy()
-    #     # QtOwner().settingView.SetSock5Proxy()
-    #     Log.Warn("update proxy, ver:{}, setId:{}:{}, address:{}, img:{}".format(config.UpdateVersion, Setting.ProxySelectIndex.value, Setting.ProxyImgSelectIndex.value, address, imageServer))
 
     def CheckDohReq(self):
         self.checkResult = None
@@ -364,20 +670,7 @@ class LoginProxyNewWidget(object):
     def OpenUrl(self):
         QtOwner().owner.helpView.OpenProxyUrl()
 
-    # def InitJmServer(self):
-    #     self.owner.AddHttpTask(req.GetJmServerReq(), self.InitJmServerBack)
-    #     return
-    #
-    # def InitJmServerBack(self, raw):
-    #     if raw.get("st") == Str.Ok:
-    #         for server in raw.get('data', {}).get("jm3_Server"):
-    #             if not server:
-    #                 continue
-    #             url = server[0]
-    #             self.allApiUrl.append(url)
-    #         self.owner.host_api_domain.SetWordData(self.allApiUrl)
-    #     return
-
+    # ---------------- IP 分流测速（网络逻辑沿用原实现） ----------------
     def StartTestIp(self):
         self.owner.testIpButton.setEnabled(False)
         self.StartGetProxyIp()
@@ -404,6 +697,7 @@ class LoginProxyNewWidget(object):
 
     def StartTestIp2(self):
         self.ShowAllItem()
+        self.RenderList()
         self.owner.testIpButton.setEnabled(False)
         url = GlobalConfig.CdnApiUrl.value
         self.maxSpeedIpCnt = len(self.allItems)
@@ -434,12 +728,11 @@ class LoginProxyNewWidget(object):
                 item.isSelect = True
             else:
                 item.isSelect = False
-            self.UpdateRow(item)
         if not isHave:
             firstItem = sorted(self.allItems.values())[0]
             firstItem.isSelect = True
             Setting.ProxyIpValue.SetValue(firstItem.ip)
-            self.UpdateRow(firstItem)
+        self.SyncTableSelection()
 
     def StartTestImgIp(self):
         url = GlobalConfig.CdnImgUrl.value
@@ -473,27 +766,8 @@ class LoginProxyNewWidget(object):
                     item.country = f"{country}·{province}"
                     item.asn = isp
                     self.UpdateRow(item)
-                    # v = self.flowLayout.itemAt(item.index)
-                    # if v:
-                    #     w = v.widget()
-                    #     assert isinstance(w, ProxyIpWidget)
-                    #     w.Update(item)
             except Exception as es:
                 Log.Error(es)
-    #
-    # def GetRawCountry(self, data):
-    #     if data.get("country", {}).get("names"):
-    #         names = data.get("country", {}).get("names")
-    #     elif data.get("registered_country", {}).get("names"):
-    #         names = data.get("country", {}).get("names")
-    #     else:
-    #         names = {}
-    #     return self.GetCnName(names)
-    #
-    # def GetCnName(self, names):
-    #     if "zh-CN" in names:
-    #         return names['zh-CN']
-    #     return names.get("en", "")
 
     def StartTestIpBack(self, raw, v):
         index = v
@@ -507,13 +781,10 @@ class LoginProxyNewWidget(object):
         assert isinstance(item, IpItem)
         if float(data) > 0.0:
             item.delay = int(float(data))
-            # self.pingBackNumDict[i][backNum] = int(float(data))
-            # label.setText("<font color=#7fb80e>{}</font>".format(str(int(float(data))) + "ms"))
         else:
             item.delay = 0
             item.isFail = True
             item.st = st
-            # label.setText("<font color=#d71345>{}</font>".format(Str.GetStr(st)))
         self.UpdateRow(item)
         if self.maxSpeedIpCnt == 0:
             self.Sort()
@@ -553,107 +824,7 @@ class LoginProxyNewWidget(object):
                 history[item.ip]['st'] = item.st
                 history[item.ip]['downloadSt'] = item.downloadSt
             Setting.LastIpResult.SetValue(history)
-
-    def SaveProxyIp(self):
-        tabRow = self.proxyIpGroup.checkedId()
-        for item in self.allItems.values():
-            if item.tableRow == tabRow:
-                item.isSelect = True
-                Setting.ProxyIpValue.SetValue(item.ip)
-            else:
-                item.isSelect = False
-
-
-    def ShowAllItem(self):
-        self.ClearAllItem()
-        oldItems = {}
-        for v in self.allItems.values():
-            oldItems[v.ip] = v
-        self.allItems = {}
-        index = 0
-        allips = set()
-
-        for j, ip in enumerate(self.otherProxyIps):
-            if not ip:
-                continue
-
-            if ip in allips:
-                continue
-            allips.add(ip)
-
-            item = IpItem(index, j + 1, ip, True, False)
-            item.isSelect = ip == Setting.ProxyIpValue.value
-            self.allItems[index] = item
-            if ip in oldItems:
-                item.Copy(oldItems[ip])
-            self.AddRow(index)
-            self.UpdateRow(item)
-            index += 1
-
-        for j, ip in enumerate(re.split(r'[、，；;,\s]\s*', Setting.PreferCDNList.value)):
-            if not ip:
-                continue
-            if ip in allips:
-                continue
-            allips.add(ip)
-            item = IpItem(index, j+1, ip,False, True)
-            item.isSelect = ip == Setting.ProxyIpValue.value
-            self.allItems[index] = item
-            if ip in oldItems:
-                item.Copy(oldItems[ip])
-            self.AddRow(index)
-            self.UpdateRow(item)
-            index += 1
-        for j, ip in enumerate(GlobalConfig.BestCfIpList.value):
-            if not ip:
-                continue
-            item = IpItem(index, j+1, ip,False, False)
-            item.isSelect = ip == Setting.ProxyIpValue.value
-            self.allItems[index] = item
-            if ip in oldItems:
-                item.Copy(oldItems[ip])
-            self.AddRow(index)
-            self.UpdateRow(item)
-            index += 1
-        # self.owner.tableWidget.resizeColumnsToContents()
-        # self.owner.tableWidget.resizeRowsToContents()
-
-    def AddRow(self, index):
-        rowCont = self.owner.tableWidget.rowCount()
-        self.owner.tableWidget.insertRow(rowCont)
-        checkBox = QCheckBox()
-        self.owner.tableWidget.setCellWidget(rowCont, 0, checkBox)
-        self.proxyIpGroup.addButton(checkBox)
-        self.proxyIpGroup.setId(checkBox, index)
-
-    def UpdateRow(self, info):
-        assert isinstance(info, IpItem)
-        if info.tableRow < 0:
-            return
-        widget = self.owner.tableWidget.cellWidget(info.tableRow, 0)
-        if isinstance(widget, QCheckBox):
-            widget.setText(info.name)
-            widget.setChecked(info.isSelect)
-        # self.owner.tableWidget.setItem(info.tableRow, 0, QTableWidgetItem(info.name))
-        self.owner.tableWidget.setItem(info.tableRow, 1, QTableWidgetItem(info.ip))
-        speed = ""
-        if info.delay:
-            speed = str(int(float(info.delay))) + "ms"
-        if info.isFail:
-            speed = Str.GetStr(info.st)
-        if info.downloadDelay:
-             speed += "/" + str(int(float(info.downloadDelay))) + "ms"
-        if info.downloadFail:
-            speed += "/" + Str.GetStr(info.downloadSt)
-
-            # speed = ""
-        # if info.delay:
-        #     speed = "<font color=#7fb80e>{}</font>".format(str(int(float(info.delay))) + "ms")
-        # if info.isFail:
-        #     speed = "<font color=#d71345>{}</font>".format(Str.GetStr(info.st))
-        self.owner.tableWidget.setItem(info.tableRow, 4, QTableWidgetItem(speed))
-        self.owner.tableWidget.setItem(info.tableRow, 2, QTableWidgetItem(info.country))
-        self.owner.tableWidget.setItem(info.tableRow, 3, QTableWidgetItem(info.asn))
+            self.UpdateCount()
 
     def GetProxyName(self):
         for item in self.allItems.values():
@@ -661,37 +832,7 @@ class LoginProxyNewWidget(object):
                 return item.name
         return Setting.ProxyIpValue.value
 
-    def ClearAllItem(self):
-        for i in range(self.owner.tableWidget.rowCount()-1, -1, -1):
-            widget = self.owner.tableWidget.cellWidget(i, 0)
-            if isinstance(widget, QCheckBox):
-                self.proxyIpGroup.removeButton(widget)
-            self.owner.tableWidget.removeRow(i)
-
-        # while 1:
-            # child = self.flowLayout.takeAt(0)
-            # if not child:
-            #     break
-            # if child.widget():
-            #     child.widget().setParent(None)
-            # del child
-        return
-
-    def Sort(self):
-        sortItems = sorted(self.allItems.values())
-        for i, item in enumerate(sortItems):
-            assert isinstance(item, IpItem)
-            item.tableRow = i
-            self.UpdateRow(item)
-
-        # order = self.order.get(col, 1)
-        # if order == 1:
-        #     self.tableWidget.sortItems(col, Qt.AscendingOrder)
-        #     self.order[col] = 0
-        # else:
-        #     self.tableWidget.sortItems(col, Qt.DescendingOrder)
-        #     self.order[col] = 1
-
+    # ---------------- 线路测速（逻辑未改） ----------------
     def SpeedTest(self):
         self.speedPingNum = 0
         self.speedTest = []
