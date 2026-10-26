@@ -1,11 +1,11 @@
 import os
 import re
 
-from PySide6.QtCore import QStringListModel, QPoint
+from PySide6.QtCore import QStringListModel
 from PySide6.QtGui import Qt
-from PySide6.QtWidgets import QLineEdit, QLabel, QWidget, \
-    QHBoxLayout
+from PySide6.QtWidgets import QLineEdit, QWidget
 
+from component.line_edit import popup_list
 from config.setting import Setting
 from interface.ui_line_edit_help_widget import Ui_LineEditHelp
 from qt_owner import QtOwner
@@ -14,26 +14,25 @@ from tools.log import Log
 
 
 class TipLineEdit(QLineEdit):
+    """ 带候选名单的输入框(登录页 DoH 地址 / 代理地址 / 域名等)
+
+    弹层与 SearchLineEdit 共用 component.line_edit.popup_list：手机端是主窗口里的
+    子控件图层(原来的 Qt.ToolTip 顶层窗口在 Android 上点不动、宽度写死 500 会溢出)。
+    """
+
     def __init__(self, parent=None):
         QLineEdit.__init__(self, parent)
-        proxy = self.focusPolicy()
 
         self.widget = QWidget()
         self.help = Ui_LineEditHelp()
         self.help.setupUi(self.widget)
         self.help.label.setText("")
 
-        self.widget.setParent(self, Qt.Popup)
-        self.widget.setFocusProxy(self)
-        self.widget.setWindowFlags(Qt.ToolTip)
-        self.qLabel = QLabel("asdasdasdasd")
-        self.hLayout = QHBoxLayout(self.widget)
-        self.hLayout.addWidget(self.qLabel)
-
         self.words = []
         self.model = QStringListModel(self)
         self.listView.setModel(self.model)
         self.listView.clicked.connect(self.SetText)
+        popup_list.Install(self, self.widget, self.listView)
 
         self.isNotReload = False
         self.isShowSearch = True
@@ -102,30 +101,16 @@ class TipLineEdit(QLineEdit):
         return QLineEdit.focusInEvent(self, ev)
 
     def focusOutEvent(self, ev):
-        self.widget.hide()
-        # print("out")
+        self.HideListView()
         return QLineEdit.focusOutEvent(self, ev)
 
     def HideListView(self):
-        if self.widget.isHidden():
-            return
-        self.widget.hide()
-        # self.widget.clear()
+        popup_list.Hide(self)
 
     def ShowListView(self):
-        if not self.widget.isHidden():
-            return
         if not self.isShowSearch:
             return
-        self.widget.show()
-        pos = self.mapToGlobal(self.pos())
-        # print(pos, self.pos(), self.size())
-        self.widget.move(pos-self.pos()+QPoint(0, self.height()))
-        self.widget.resize(max(500, self.width()), QtOwner().owner.height() // 2)
-        # self.ShowInit()
+        popup_list.Show(self)
 
     def CheckClick(self, pos):
-        if self.widget.isHidden():
-            return
-        self.clearFocus()
-        return
+        popup_list.CheckClick(self, pos)

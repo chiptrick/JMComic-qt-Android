@@ -1,11 +1,11 @@
 import os
 import re
 
-from PySide6.QtCore import QStringListModel, QPoint
+from PySide6.QtCore import QStringListModel
 from PySide6.QtGui import Qt
-from PySide6.QtWidgets import QLineEdit, QLabel, QWidget, \
-    QHBoxLayout
+from PySide6.QtWidgets import QLineEdit, QWidget
 
+from component.line_edit import popup_list
 from config.setting import Setting
 from interface.ui_line_edit_help_widget import Ui_LineEditHelp
 from qt_owner import QtOwner
@@ -16,39 +16,19 @@ from tools.log import Log
 class SearchLineEdit(QLineEdit):
     def __init__(self, parent=None):
         QLineEdit.__init__(self, parent)
-        # self.action = QAction()
-        # self.action.setIcon(QApplication.style().standardIcon(QStyle.SP_DialogResetButton))
-        # self.addAction(self.action, self.TrailingPosition)
-        # self.action.triggered.connect(self.Search)
-        proxy = self.focusPolicy()
-        # self.listView = BaseListWidget(self)
-        # self.listView.setParent(self, Qt.Popup)
-        # self.listView.setFocusPolicy(Qt.NoFocus)
-        # self.listView.setFocusProxy(self)
-        # self.setFocusPolicy(proxy)
-
+        # 搜索记录弹层：手机端是主窗口里的**子控件**(不再是 Qt.ToolTip 顶层窗口 ——
+        # 那个在 Android 上不激活、收不到触摸，点搜索记录没反应；宽度还写死 500，
+        # 480 宽的竖屏必然溢出)。几何/焦点/收起统一由 component.line_edit.popup_list 处理。
         self.widget = QWidget()
         self.help = Ui_LineEditHelp()
         self.help.setupUi(self.widget)
 
-        self.widget.setParent(self, Qt.Popup)
-        # self.widget.setFocusPolicy(Qt.NoFocus)
-        self.widget.setFocusProxy(self)
-        # self.setFocusPolicy(proxy)
-        # self.widget.setFocusPolicy(Qt.NoFocus)
-        self.widget.setWindowFlags(Qt.ToolTip)
-        self.qLabel = QLabel("asdasdasdasd")
-        self.hLayout = QHBoxLayout(self.widget)
-        self.hLayout.addWidget(self.qLabel)
-
-        # self.model = QWidgetListModel(self)
-        # self.listView.setWindowFlags(Qt.ToolTip)
         self.words = []
         self.cacheWords = []
         self.model = QStringListModel(self)
         self.listView.setModel(self.model)
-        # self.textChanged.connect(self.setCompleter)
         self.listView.clicked.connect(self.SetText)
+        popup_list.Install(self, self.widget, self.listView)
 
         self.isNotReload = False
         self.isShowSearch = True
@@ -79,7 +59,6 @@ class SearchLineEdit(QLineEdit):
     def SetText(self, index):
         item = self.model.itemData(index)
         text = item.get(0)
-        # self.setText(text.replace(self.searchTag1, "").replace(self.searchTag2, ""))
         self.setText(text)
         self.Search()
         return
@@ -163,33 +142,19 @@ class SearchLineEdit(QLineEdit):
         return QLineEdit.focusInEvent(self, ev)
 
     def focusOutEvent(self, ev):
-        self.widget.hide()
-        # print("out")
+        self.HideListView()
         return QLineEdit.focusOutEvent(self, ev)
 
     def HideListView(self):
-        if self.widget.isHidden():
-            return
-        self.widget.hide()
-        # self.widget.clear()
+        popup_list.Hide(self)
 
     def ShowListView(self):
-        if not self.widget.isHidden():
-            return
         if not self.isShowSearch:
             return
-        self.widget.show()
-        pos = self.mapToGlobal(self.pos())
-        # print(pos, self.pos(), self.size())
-        self.widget.move(pos-self.pos()+QPoint(0, self.height()))
-        self.widget.resize(max(500, self.width()), QtOwner().owner.height() // 2)
-        # self.ShowInit()
+        popup_list.Show(self)
 
     def CheckClick(self, pos):
-        if self.widget.isHidden():
-            return
-        self.clearFocus()
-        return
+        popup_list.CheckClick(self, pos)
 
     def SaveCacheWord(self):
         path = os.path.join(Setting.GetDataPath(), "cache_word")
