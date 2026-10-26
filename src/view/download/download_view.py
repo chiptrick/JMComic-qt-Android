@@ -1,15 +1,15 @@
 import os
 import shutil
-import time
 from functools import partial
 
 from PySide6 import QtWidgets
-from PySide6.QtCore import Qt, QTimer, QUrl
+from PySide6.QtCore import QEvent, Qt, QTimer, QUrl
 from PySide6.QtGui import QCursor, QDesktopServices, QAction
 from PySide6.QtWidgets import QHeaderView, QAbstractItemView, QMenu, QTableWidgetItem, QMessageBox, QApplication
 
 from config import config
 from config.setting import Setting
+from component.list.download_card import DownloadCard, Tr
 from interface.ui_download import Ui_Download
 from qt_owner import QtOwner
 from task.qt_task import QtTaskBase
@@ -39,8 +39,10 @@ class DownloadView(QtWidgets.QWidget, Ui_Download, DownloadStatus):
         self.tableWidget.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.tableWidget.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.tableWidget.setContextMenuPolicy(Qt.CustomContextMenu)
-        self.tableWidget.setColumnCount(11)
-        # self.tableWidget.setHorizontalHeaderLabels(HorizontalHeaderLabels)
+        # 方案A：一行 = 一张卡片。表格退化成"单列 + 卡片 cellWidget"的数据/交互层
+        # （选择、右键菜单、双击、QScroller 全部沿用原来的行为），显示由 DownloadCard 负责。
+        self.InitCardTable()
+        self.InitSortBar()
         self.timer = QTimer(self.tableWidget)
         self.timer.setInterval(1000)
         self.timer.timeout.connect(self.TimeOutHandler)
@@ -55,9 +57,7 @@ class DownloadView(QtWidgets.QWidget, Ui_Download, DownloadStatus):
         self.tableWidget.customContextMenuRequested.connect(self.SelectMenu)
 
         self.tableWidget.doubleClicked.connect(self.OpenBookInfo)
-
-        self.tableWidget.horizontalHeader().sectionClicked.connect(self.Sort)
-        self.order = {}
+        self.tableWidget.itemSelectionChanged.connect(self.SyncCardSelection)
         self.radioButton.setChecked(Setting.DownloadAuto.value)
         datas = self.db.LoadDownload(self)
         self.redownloadRadio.clicked.connect(self.SwitchReDownload)
@@ -74,17 +74,167 @@ class DownloadView(QtWidgets.QWidget, Ui_Download, DownloadStatus):
             self.tableWidget.insertRow(rowCont)
             self.RepairData(task)
             self.UpdateTableItem(task)
-        self.tableWidget.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        # self.tableWidget.horizontalHeader().setMinimumSectionSize(120)
-        self.tableWidget.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)
-        # self.tableWidget.setColumnWidth(0, 40)
-        print(self.width())
-        self.tableWidget.setColumnWidth(1, 200)
-        self.tableWidget.setColumnWidth(2, 300)
         self.someDownButton.clicked.connect(QtOwner().OpenSomeDownload)
         self.comboBox.currentIndexChanged.connect(self.CheckHideItem)
         self.lineEdit.textChanged.connect(self.SearchTextChange)
         self.searchText = ""
+        self.UpdateCount()
+
+    # ---------------- 卡片列表（方案 A） ----------------
+    def InitCardTable(self):
+        """ 表格退化成单列卡片容器：隐藏表头/网格/行号，行高由卡片内容算 """
+        table = self.tableWidget
+        # 列数保持 11、只隐藏 1~10 列：生成代码 ui_download.retranslateUi() 会去
+        # horizontalHeaderItem(0..10) 改表头文字，直接 setColumnCount(1) 会让那些
+        # item 变成 None —— 启动/切语言时 RetranslateUi 就 AttributeError 崩掉。
+        # 隐藏列不参与布局，可见效果与"单列"完全一致。
+        table.setColumnCount(11)
+        for index in range(1, 11):
+            table.setColumnHidden(index, True)
+        table.horizontalHeader().setVisible(False)
+        table.verticalHeader().setVisible(False)
+        table.verticalHeader().setSectionResizeMode(QHeaderView.Fixed)
+        table.verticalHeader().setMinimumSectionSize(1)
+        table.setShowGrid(False)
+        table.setWordWrap(False)
+        table.setFrameShape(QtWidgets.QFrame.NoFrame)
+        table.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        table.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
+        # 主题里 QHeaderView::section 有 padding:0 20px、QTableView 有 1px 边框；
+        # 卡片自己有左右留白，这里全部清掉，否则卡片两侧会被裁
+        # color:transparent —— 第 0 列还存着 bookId(命中/数据用)，但卡片是透明底，
+        # 不把它画成透明的话，表格会在卡片下面再画一遍 ID，和标题第二行叠在一起
+        table.setStyleSheet("QTableWidget{background:transparent;border:none;}"
+                            "QTableWidget::item{border:none;padding:0;color:transparent;}"
+                            "QTableWidget::item:selected{color:transparent;}")
+        # 唯一的那一列必须吃满视口：默认列宽 100，卡片会被挤成手指宽的一条
+        table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+        table.horizontalHeader().setStretchLastSection(True)
+        self._syncGuard = False
+        # 视口宽度变了(旋转/滚动条出现)：卡片标题折行与行高都要重算
+        table.viewport().installEventFilter(self)
+        # 表头去掉之后，空列表就是一块白板 —— 给个占位提示
+        self.emptyLabel = QtWidgets.QLabel(Tr("暂无下载记录"), table.viewport())
+        self.emptyLabel.setAlignment(Qt.AlignCenter)
+        self.emptyLabel.setStyleSheet("color:#7C858E;background:transparent;")
+        self.emptyLabel.hide()
+
+    def InitSortBar(self):
+        """ 「共 N 项 + 排序」细条：表头没了，排序入口挪到这里 """
+        bar = QtWidgets.QWidget(self)
+        layout = QtWidgets.QHBoxLayout(bar)
+        layout.setContentsMargins(13, 2, 13, 2)
+        layout.setSpacing(6)
+        self.countLabel = QtWidgets.QLabel(bar)
+        self.sortLabel = QtWidgets.QLabel(Tr("排序"), bar)
+        self.sortCombo = QtWidgets.QComboBox(bar)
+        for text in (Tr("添加时间"), Tr("标题"), Tr("下载状态"), Tr("转换状态")):
+            self.sortCombo.addItem(text)
+        layout.addWidget(self.countLabel, 0)
+        layout.addStretch(1)
+        layout.addWidget(self.sortLabel, 0)
+        layout.addWidget(self.sortCombo, 0)
+        self.gridLayout.addWidget(bar, 4, 0, 1, 1)
+        self.sortCombo.currentIndexChanged.connect(self.SortBy)
+
+    def SyncCardSelection(self):
+        """ 表格选中状态 -> 卡片高亮（卡片本身鼠标穿透，选中仍由表格决定） """
+        table = self.tableWidget
+        selected = set()
+        for index in table.selectedIndexes():
+            selected.add(index.row())
+        for row in range(table.rowCount()):
+            card = table.cellWidget(row, 0)
+            if card is not None:
+                card.SetSelected(row in selected)
+
+    def eventFilter(self, obj, event):
+        try:
+            if obj is self.tableWidget.viewport() and event.type() == QEvent.Type.Resize:
+                if getattr(self, "emptyLabel", None) is not None:
+                    self.emptyLabel.setGeometry(self.tableWidget.viewport().rect())
+                if not self._syncGuard:
+                    self._syncGuard = True
+                    QTimer.singleShot(0, self.DeferredSyncCards)
+        except Exception as es:
+            Log.Error(es)
+        return QtWidgets.QWidget.eventFilter(self, obj, event)
+
+    def DeferredSyncCards(self):
+        try:
+            self.SyncCardHeights()
+        finally:
+            self._syncGuard = False
+
+    def SyncCardHeights(self):
+        """ 宽度变了(旋转/窗口缩放)：重算标题折行与行高 """
+        table = self.tableWidget
+        for row in range(table.rowCount()):
+            card = table.cellWidget(row, 0)
+            if card is None:
+                continue
+            card.Relayout()
+            self.SyncRowHeight(row, card)
+
+    def SyncRowHeight(self, row, card=None):
+        table = self.tableWidget
+        if card is None:
+            card = table.cellWidget(row, 0)
+        if card is None:
+            return
+        height = card.HeightForWidth(table.viewport().width())
+        if height > 0 and table.rowHeight(row) != height:
+            table.setRowHeight(row, height)
+
+    def UpdateCount(self):
+        if getattr(self, "countLabel", None) is None:
+            return
+        total = self.tableWidget.rowCount()
+        hidden = 0
+        for row in range(total):
+            if self.tableWidget.isRowHidden(row):
+                hidden += 1
+        if hidden:
+            self.countLabel.setText(Tr("共 {} 项 · 显示 {} 项").format(total, total - hidden))
+        else:
+            self.countLabel.setText(Tr("共 {} 项").format(total))
+        if getattr(self, "emptyLabel", None) is not None:
+            self.emptyLabel.setGeometry(self.tableWidget.viewport().rect())
+            self.emptyLabel.setVisible(total == 0)
+
+    def SortBy(self, index):
+        """ 排序（表头隐藏后由下拉框触发）：重建行，行号随之更新 """
+        tasks = [t for t in self.downloadDict.values() if isinstance(t, DownloadItem)]
+        try:
+            if index == 0:
+                tasks.sort(key=lambda t: t.tick, reverse=True)
+            elif index == 1:
+                tasks.sort(key=lambda t: (t.title or "").lower())
+            elif index == 2:
+                tasks.sort(key=lambda t: t.GetStatusMsg() or "")
+            else:
+                tasks.sort(key=lambda t: t.GetConvertStatusMsg() or "")
+        except Exception as es:
+            Log.Error(es)
+        self.RebuildRows(tasks)
+
+    def RebuildRows(self, tasks=None):
+        """ 清空重排所有行（排序/重建用）：表格行号与卡片一一对应 """
+        table = self.tableWidget
+        table.setRowCount(0)
+        if tasks is None:
+            tasks = [t for t in self.downloadDict.values() if isinstance(t, DownloadItem)]
+        for row, task in enumerate(tasks):
+            task.tableRow = row
+            table.insertRow(row)
+            self.UpdateTableItem(task)
+        self.CheckHideItem()
+        self.UpdateCount()
+
+    def resizeEvent(self, event):
+        QtWidgets.QWidget.resizeEvent(self, event)
+        # 布局跑完才有真实宽度
+        QTimer.singleShot(0, self.SyncCardHeights)
 
     # 修复下数据
     def RepairData(self, task):
@@ -213,34 +363,41 @@ class DownloadView(QtWidgets.QWidget, Ui_Download, DownloadStatus):
                     self.SetNewCovertStatus(task, task.Pause)
 
         self.UpdateTableItem(task)
+        self.UpdateCount()
         self.db.AddDownloadDB(task)
         return True
 
     def UpdateTableItem(self, info):
+        """ 刷新一行：表格第 0 列只放 bookId(数据/命中用)，显示交给卡片 """
         assert isinstance(info, DownloadItem)
-        if info.tableRow < 0:
+        row = info.tableRow
+        table = self.tableWidget
+        if row < 0 or row >= table.rowCount():
             return
 
-        localTime = time.localtime(info.tick)
-        strTime = time.strftime("%Y-%m-%d %H:%M:%S", localTime)
+        item = table.item(row, 0)
+        if item is None:
+            item = QTableWidgetItem(str(info.bookId))
+            table.setItem(row, 0, item)
+        elif item.text() != str(info.bookId):
+            item.setText(str(info.bookId))
+        if item.toolTip() != (info.title or ""):
+            item.setToolTip(info.title or "")
 
-        self.tableWidget.setItem(info.tableRow, 0, QTableWidgetItem(info.bookId))
-        self.tableWidget.setItem(info.tableRow, 1, QTableWidgetItem(strTime))
-        item = QTableWidgetItem(info.title)
-        item.setToolTip(info.title)
-        self.tableWidget.setItem(info.tableRow, 2, item)
-
-        self.tableWidget.setItem(info.tableRow, 6, QTableWidgetItem(info.GetStatusMsg()))
-        self.tableWidget.setItem(info.tableRow, 3,
-                                 QTableWidgetItem("{}/{}".format(str(info.curDownloadPic), str(info.maxDownloadPic))))
-        self.tableWidget.setItem(info.tableRow, 4,
-                                 QTableWidgetItem("{}/{}".format(str(info.curDownloadEps), str(info.epsCount))))
-        self.tableWidget.setItem(info.tableRow, 5, QTableWidgetItem(info.speedStr))
-        self.tableWidget.setItem(info.tableRow, 7, QTableWidgetItem("{}/{}".format(str(info.curConvertCnt), str(info.convertCnt))))
-        self.tableWidget.setItem(info.tableRow, 8, QTableWidgetItem("{}/{}".format(str(info.curConvertEps), str(info.convertEpsCnt))))
-        self.tableWidget.setItem(info.tableRow, 9, QTableWidgetItem("{}".format(str(info.convertTick))))
-        self.tableWidget.setItem(info.tableRow, 10, QTableWidgetItem(info.GetConvertStatusMsg()))
+        card = table.cellWidget(row, 0)
+        if not isinstance(card, DownloadCard):
+            card = DownloadCard(table.viewport())
+            table.setCellWidget(row, 0, card)
+            card.SetSelected(self.IsRowSelected(row))
+        card.Update(info)
+        self.SyncRowHeight(row, card)
         return
+
+    def IsRowSelected(self, row):
+        for index in self.tableWidget.selectedIndexes():
+            if index.row() == row:
+                return True
+        return False
 
     def RemoveRecord(self, bookId):
         task = self.downloadDict.get(bookId)
@@ -258,6 +415,9 @@ class DownloadView(QtWidgets.QWidget, Ui_Download, DownloadStatus):
         self.downloadDict.pop(bookId)
         if task.tableRow >= 0:
             self.tableWidget.removeRow(task.tableRow)
+            # 删掉一行后，后面所有 task.tableRow 都要前移（不重算会串行/越界）
+            self.UpdateTableRow()
+        self.UpdateCount()
         self.db.DelDownloadDB(bookId)
 
     def UpdateTableRow(self):
@@ -316,10 +476,10 @@ class DownloadView(QtWidgets.QWidget, Ui_Download, DownloadStatus):
                 row = selectRows.pop()
                 col = 0
                 bookId = self.tableWidget.item(row, col).text()
-                title = self.tableWidget.item(row, 2).text()
                 task = self.downloadDict.get(bookId)
                 if not task:
                     return
+                title = task.title
 
                 menu = QMenu(self.tableWidget)
 
@@ -614,7 +774,8 @@ class DownloadView(QtWidgets.QWidget, Ui_Download, DownloadStatus):
         row = list(selectRows)[0]
         col = 0
         bookId = self.tableWidget.item(row, col).text()
-        bookName = self.tableWidget.item(row, 1).text()
+        task = self.downloadDict.get(bookId)
+        bookName = task.title if task else ""
         if not bookId:
             return
         QtOwner().OpenBookInfo(bookId, bookName)
@@ -669,16 +830,6 @@ class DownloadView(QtWidgets.QWidget, Ui_Download, DownloadStatus):
 
     def SetAutoConvert(self):
         Setting.DownloadAuto.SetValue(int(self.radioButton.isChecked()))
-
-    def Sort(self, col):
-        order = self.order.get(col, 1)
-        if order == 1:
-            self.tableWidget.sortItems(col, Qt.AscendingOrder)
-            self.order[col] = 0
-        else:
-            self.tableWidget.sortItems(col, Qt.DescendingOrder)
-            self.order[col] = 1
-        self.UpdateTableRow()
 
     def SwitchReDownload(self):
         Setting.IsReDownload.SetValue(int(self.redownloadRadio.isChecked()))
@@ -738,3 +889,4 @@ class DownloadView(QtWidgets.QWidget, Ui_Download, DownloadStatus):
                         self.tableWidget.setRowHidden(i, False)
                     else:
                         self.tableWidget.setRowHidden(i, True)
+        self.UpdateCount()
