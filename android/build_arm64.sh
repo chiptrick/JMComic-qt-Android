@@ -137,9 +137,24 @@ WHEEL_DIR="${HERE}/wheels"
 if ! ls "${WHEEL_DIR}"/PySide6-*-android_aarch64.whl >/dev/null 2>&1; then
     warn "wheels/ 下没有 android_aarch64 wheel，构建时会自动 qtpip download --arch aarch64"
 fi
-if ! compgen -G "${HERE}/libs/arm64-v8a/libQnnHtp.so" >/dev/null; then
-    warn "libs/arm64-v8a 没有 QNN 运行库(libQnnHtp.so 等)，NPU 加速不可用(自动回落 CPU EP)"
-    warn "需要 NPU 加速请先跑: bash android/tools/wsl_fetch_qnn.sh"
+# QNN 运行库：历史上这里只 warn，于是"告警 -> 继续打包 -> APK 没有 NPU 库 ->
+# 真机静默退回 CPU"这条链路一直存在。现在改成闸门：
+#   · 没有库 -> 自动跑 wsl_fetch_qnn.sh 补齐(可用 QNN_AUTO_FETCH=0 关闭)
+#   · 补不上 -> 直接失败并给出下一步命令
+# --dry-run 只体检不动网，也不判失败(用于先看环境)。
+if [[ "${DRY_RUN}" == "1" ]]; then
+    PY_BIN="$(command -v python3 2>/dev/null || command -v python 2>/dev/null || echo python3)"
+    if "${PY_BIN}" "${HERE}/tools/qnn_manifest.py" verify --libs-dir "${HERE}/libs/arm64-v8a" --quiet 2>/dev/null; then
+        log "QNN 运行库: 就绪(libs/arm64-v8a)"
+    else
+        warn "libs/arm64-v8a 缺 QNN 运行库 -> 真正构建时会自动补齐(NPU 才是默认路径)"
+        warn "手动补: bash android/tools/wsl_fetch_qnn.sh --libs-dir ${HERE}/libs/arm64-v8a"
+    fi
+else
+    bash "${HERE}/tools/qnn_guard.sh" --android "${HERE}" --abi "${TARGET_ABI}" \
+        || die "QNN 运行库缺失/不合规，拒绝打包：这样的 arm64 包在真机上超分只会跑 CPU。
+       手动补: bash android/tools/wsl_fetch_qnn.sh --libs-dir ${HERE}/libs/arm64-v8a
+       确实要打纯 CPU 对照包: JM_QNN=0 $0"
 fi
 
 # ---------------------------------------------------------------- 构建流程

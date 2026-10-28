@@ -334,7 +334,15 @@ class ReadTool(QtWidgets.QWidget, Ui_ReadImg):
                 from tools import sr_backend
                 name = sr_backend.GetEngineName()
                 if "CPU" in name:
-                    QtOwner().ShowMsg("超分未使用 NPU（{}），单页可能需要数十秒".format(name))
+                    reason = ""
+                    try:
+                        reason = sr_backend.GetNoNpuReason()
+                    except Exception:
+                        pass
+                    if reason:
+                        QtOwner().ShowMsg("超分未使用 NPU（{}）：{}".format(name, reason))
+                    else:
+                        QtOwner().ShowMsg("超分未使用 NPU（{}），单页可能需要数十秒".format(name))
             except Exception:
                 pass
         else:

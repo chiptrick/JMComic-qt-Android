@@ -294,11 +294,13 @@ BuildOneAbi() {
     cp "${ABI_WORK}/aar/jni/${abi}/"*.so "${LIBS_DIR}/" || { Fail "拷贝 libonnxruntime.so 到 ${LIBS_DIR} 失败"; return 1; }
     log "ONNX Runtime 库就绪(${LIBS_DIR}): $(ls -1 "${LIBS_DIR}" | tr '\n' ' ')"
 
-    # arm64 额外提醒 QNN 运行库(只有 arm64 有 NPU；本脚本不自动下载，指向既有工具)
-    if [[ "${abi}" == "arm64-v8a" ]] && ! compgen -G "${LIBS_DIR}/libQnnHtp.so" >/dev/null; then
-        warn "libs/arm64-v8a 里没有 QNN 运行库(libQnnHtp.so 等)，NPU 加速不可用(回落 CPU EP)。"
-        warn "需要 NPU 的话先跑: bash android/tools/wsl_fetch_qnn.sh"
-    fi
+    # arm64 的 QNN 运行库：缺了 NPU 就静默失效，所以这里不再是"提醒一下"，
+    # 而是硬闸门(缺库自动补，补不上直接失败)。x86_64 没有 NPU，闸门内部会跳过。
+    Step "[${abi}] QNN 运行库闸门"
+    bash "${HERE}/tools/qnn_guard.sh" --android "${HERE}" --abi "${abi}" \
+        || { Fail "libs/${abi} 缺 QNN 运行库且无法自动补齐(NPU 会在真机上静默失效)。
+       手动补: bash android/tools/wsl_fetch_qnn.sh --libs-dir ${LIBS_DIR}
+       确实要打纯 CPU 对照包: JM_QNN=0 $0 --abi ${abi}"; return 1; }
 
     # ------------------------------------------------ 2. libsr_qnn.so
     if [[ "${SKIP_NATIVE:-0}" != "1" ]]; then
@@ -401,11 +403,19 @@ BuildOneAbi() {
     log "APK 原生库目录校验通过: lib/${abi}/"
     if [[ -f "${LIBS_DIR}/libsr_qnn.so" ]]; then
         if ! unzip -l "${best}" 2>/dev/null | grep -q "lib/${abi}/libsr_qnn.so"; then
-            Fail "APK 里缺少 lib/${abi}/libsr_qnn.so(超分后端没打进包)。若为 x86_64：buildozer 1.6.0 的 add_libs 映射表缺 x86_64 键、会被静默忽略，先跑 bash tools/wsl_patch_buildozer_addlibs.sh；若为 arm64：检查 pin_min_sdk.sh 的 android.local_libs 与 ${LIBS_DIR} 内容"
+            Fail "APK 里缺少 lib/${abi}/libsr_qnn.so(超分后端没打进包)。若为 x86_64：buildozer 1.6.0 的 add_libs 映射表缺 x86_64 键、会被静默忽略，先跑 bash tools/wsl_patch_buildozer_addlibs.sh；若为 arm64：先用 bash tools/qnn_guard.sh --abi arm64-v8a 体检 libs 目录"
             return 1
         fi
         log "APK 含 libsr_qnn.so(超分后端已打入)"
     fi
+    # QNN 运行库不进 QtLoader 的清单(由 libsr_qnn 自己 dlopen)，必须单独断言：
+    # 少一个 libQnnHtp.so 就是"真机能装能跑但超分纯 CPU"的静默事故。
+    if ! "${PYTHON_BIN}" "${HERE}/tools/qnn_manifest.py" verify-apk --apk "${best}" --abi "${abi}" --quiet; then
+        "${PYTHON_BIN}" "${HERE}/tools/qnn_manifest.py" verify-apk --apk "${best}" --abi "${abi}" | sed 's/^/    /'
+        Fail "APK 里的 QNN 运行库不齐全(装到真机会静默退回 CPU 超分)"
+        return 1
+    fi
+    log "APK 含 QNN 运行库(NPU 加速可用)"
 
     local OUT="${DIST_DIR}/${APP_NAME}-${APP_VERSION}-${abi}-${BUILD_TYPE}.${EXT}"
     mkdir -p "${DIST_DIR}" || { Fail "创建输出目录失败: ${DIST_DIR}"; return 1; }

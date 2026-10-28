@@ -47,7 +47,7 @@ Android 移植用的脚本集合。**所有脚本都不写死本机路径**，�
 | `wsl_build_py311_src.sh` | 源码编译安装 CPython 3.11（buildozer 要求宿主 python ≤ 3.11） |
 | `wsl_fetch_deps.sh` | 取 PySide6 / shiboken6 的 `android_aarch64` wheel(cp311) |
 | `wsl_fetch_ort.sh` | 取 ONNX Runtime：arm64 用 `android-qnn` AAR、x86_64 用普通 `android` AAR（`-qnn` 只有 arm64）+ NuGet 头文件 + linux 库 |
-| `wsl_fetch_qnn.sh` | 取高通 QNN 运行时 `com.qualcomm.qti:qnn-runtime` AAR |
+| `wsl_fetch_qnn.sh` | 取高通 QNN 运行时 `com.qualcomm.qti:qnn-runtime` AAR → `libs/<abi>`（**NPU 的唯一来源**，缺库真机就退回 CPU）。`--libs-dir` 指定目标目录，末尾自动跑 `qnn_manifest.py verify` |
 
 ### 2. 模型准备
 
@@ -86,7 +86,7 @@ Android 移植用的脚本集合。**所有脚本都不写死本机路径**，�
 | --- | --- |
 | `patch_buildozer_spec.py` | 注入 requirements / minSdk 34 / 自有 `.so` / 模型 assets / 应用图标（`--abi` 决定 `android.archs`、`add_libs_<abi>`，并剔除 x86_64 上没有的 curl_cffi） |
 | `patch_android_manifest.py` | 注入 SAF 桥组件（Service + 透明 Activity）到 p4a **模板**与渲染产物、删掉多余的存储权限、把 `android/java` 拷进 dist（幂等） |
-| `pin_min_sdk.sh` | 把 deploy 生成的工程钉到 Android 14(API 34) 并加入 NPU 模型资产 |
+| `pin_min_sdk.sh` | 把 deploy 生成的工程钉到 Android 14(API 34)、加入 NPU 模型资产，并按 `libs/<abi>` 实际内容生成 `android.add_libs_<abi>`（旧的 `android.local_libs` 不是 buildozer 认识的键，已删除） |
 | `fill_deploy_spec.py` | 把 wheel / NDK / SDK 的绝对路径与目标 arch 写进 `pysidedeploy.spec` |
 | `fix_ps_bom.ps1` | 给 `android/tools` 下的 `.ps1` 补 UTF-8 BOM |
 
@@ -97,6 +97,8 @@ Android 移植用的脚本集合。**所有脚本都不写死本机路径**，�
 | `wsl_check_sync.sh` | 检查 Windows 仓库与 WSL 构建树是否一致（避免改完代码却拿旧包验证） |
 | `wsl_check_minsdk.sh` | 从 AndroidManifest 读 minSdk / targetSdk / extractNativeLibs |
 | `wsl_check_qnn_libs.py` | 查 `onnxruntime-android-qnn` 的 POM 依赖，以及各版本 AAR 是否自带 QNN 运行时 |
+| `qnn_guard.sh` | **打包前闸门**：`libs/<abi>` 缺 QNN 运行库就自动补（`QNN_AUTO_FETCH=0` 可关），补不上直接失败。`JM_QNN=0` 可显式打纯 CPU 对照包 |
+| `qnn_manifest.py` | QNN 库清单/校验的唯一事实来源：`list`（供 add_libs）、`verify`（缺库/Stub-Skel 配对/ELF 架构）、`verify-apk`（成品包断言）、`prune`（裁掉 80MB 的 Prepare 与多余 HTP 架构） |
 | `wsl_check_bundle_content.sh` | 解出 APK 里的 `libpybundle.so`（其实是 tar），确认 Python 运行时依赖齐 |
 | `wsl_verify_new_apk.sh` | 深度校验新 APK：包信息 / 原生库 / Qt 插件 / private.tar 里的模型 |
 | `wsl_collect_apk.sh` | APK 产出后：校验 + 搬回 Windows 仓库 |
@@ -145,6 +147,45 @@ Android 移植用的脚本集合。**所有脚本都不写死本机路径**，�
 | `probe_pillow_android.sh` | 查看打好的 APK 里 Pillow 到底带了哪些编解码器 |
 | `probe_apk_icon.py` | 逐像素比对 APK 里的启动器图标与源图 |
 | `probe_cffi_backend.py` | 检查 `curl_cffi` 在设备上用的是哪个后端 |
+
+## QNN / NPU 排障（"超分未使用 NPU"）
+
+出现这条提示说明超分跑在 **CPU EP** 上（单块 0.4s，整页数十秒）。按下面顺序查，
+三步都能在一分钟内定位：
+
+```bash
+# 1) 库目录对不对：必需库、Stub/Skel 配对、ELF 架构
+bash android/tools/qnn_manifest.py verify --libs-dir android/libs/arm64-v8a
+
+# 2) 成品包里到底有没有：这一步最容易漏（QNN 库不在 QtLoader 的清单里，由 C++ 自己 dlopen）
+bash android/tools/qnn_manifest.py verify-apk --apk android/JMComic-<版本>-arm64-v8a-debug.apk
+
+# 3) 缺就补（构建时也会自动补，这里是手动版），然后重打
+bash android/tools/wsl_fetch_qnn.sh --libs-dir android/libs/arm64-v8a
+```
+
+三条历史教训（都已在脚本里堵死）：
+
+1. **`android/libs/` 不进仓库**（`.gitignore` + `wsl_sync.sh` 双重排除），QNN 库只活在
+   "跑过 `wsl_fetch_qnn.sh` 的那棵树"里。换棵树构建就一个 QNN 库都没有 —— 而
+   `add_libs` 是**按目录 glob** 的，目录空只会少几条配置，buildozer 全程成功。
+   现在：`qnn_guard.sh` 在打包前硬校验（缺库自动补，补不上直接失败，`JM_QNN=0` 可显式放行）。
+2. **`android.local_libs` 是无效键** —— buildozer 只认 `android.add_libs_<abi>`
+   （`targets/android.py` 的固定映射表）。以前 `pin_min_sdk.sh` 往里写了一份**不含 Skel**
+   的清单，日志里看着"已经配好了"，实际包里没有；现在改成按目录实际内容生成 `add_libs`。
+3. **ADSP_LIBRARY_PATH 的顺序**：`/vendor/dsp` 里那份 Skel 是高通签过名的，零售机只认它；
+   打进 APK 的未签名 Skel 只能兜底。所以 App 自己的 lib 目录必须排在厂商目录**之后**
+   （C++ `PrepareQnnSearchPath` 与 python `_PrepareQnnEnv` 已对齐）。
+
+真机上确认生效（`httpx`/`count` 都要为正）：
+
+```bash
+adb logcat -s python | grep -E "sr_qnn loaded|backend|ADSP_LIBRARY_PATH"
+# 期望：sr_qnn loaded(进程模式): ..., htp:1, backend:Qualcomm Hexagon NPU (QNN HTP, fp16)
+# 失败时会打印具体原因：缺 libQnnHtp.so / libcdsprpc.so 不可用 / QNN SetupBackend failed ...
+```
+
+界面提示也带原因了：`超分未使用 NPU（CPU (ONNX Runtime, 缺 libQnnHtp.so)）：打包时缺少 QNN 运行库`。
 
 ## 约定
 

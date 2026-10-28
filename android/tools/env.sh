@@ -25,7 +25,10 @@
 JM_TOOLS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 : "${JM_REPO:=$(cd "$JM_TOOLS_DIR/../.." && pwd)}"
-: "${JM_WORK:=/root/jmcomic-build}"
+# 默认放在当前用户的 home 下：写死 /root/jmcomic-build 时非 root 用户(如 wq159)
+# 跑任何脚本都会在 mkdir 那一步"Permission denied"，而错误信息和路径配置毫无关系，
+# 很容易被误判成"权限/挂载"问题。
+: "${JM_WORK:=$HOME/jmcomic-build}"
 : "${JM_SRC:=$JM_WORK/src}"
 : "${JM_SDK:=$JM_WORK/android-sdk}"
 : "${JM_NDK:=$JM_SDK/ndk/26.1.10909125}"

@@ -87,6 +87,25 @@ def GetEngineName():
     return "None"
 
 
+def GetNoNpuReason():
+    """ 没用上 NPU 的具体原因；已经用上(或不是 QNN 引擎)时返回空串
+
+    界面只提示"超分未使用 NPU"的话，用户和维护者都不知道该查哪儿：
+    最常见的是"这个 APK 打包时漏了 QNN 运行库"，其次是机型拿不到 FastRPC。
+    这两种的处理方式完全不同，所以把原因带出来。
+    """
+    if not IsQnn():
+        return ""
+    try:
+        import sr_qnn
+        info = sr_qnn.GetBackendInfo() or ""
+        if sr_qnn.HasHtp() and "CPU" not in info:
+            return ""
+        return sr_qnn.Diagnose()
+    except Exception as es:
+        return str(es)
+
+
 def CanUseSubProcessProbe():
     """ Android 下不能 fork 出 python 子进程，跳过 sr_vulkan 的崩溃探测 """
     return platform_mobile.SupportSubProcessProbe

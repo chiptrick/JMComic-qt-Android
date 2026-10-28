@@ -568,6 +568,30 @@ def _HasQnnRuntime():
     return bool(_SearchFile(QnnBackendLib))
 
 
+def Diagnose():
+    """ 一句话说明"现在为什么没有用上 NPU"(界面提示/自检用)
+
+    排障顺序按"最可能且最可操作"排：
+      1. 包里根本没有 QNN 运行库(打包问题，占绝大多数)
+      2. 进程模式起不来(有库但拿不到 FastRPC)
+      3. 有库、进程也起着，但 QNN 后端在本机建不起来(机型/SDK 版本/HTP 架构)
+    """
+    if not _SearchFile(QnnBackendLib):
+        return "打包时缺少 QNN 运行库({})".format(QnnBackendLib)
+    if _proc is None:
+        if _procError:
+            return _procError
+        return "超分进程模式未启动(QNN 需要它才能拿到 /vendor/lib64 的 FastRPC)"
+    try:
+        info = GetBackendInfo() or ""
+        err = _proc.htpError or ""
+    except Exception:
+        info, err = "", ""
+    if info and "QNN" in info and "CPU" not in info:
+        return ""
+    return err or info or "QNN 后端在本机不可用"
+
+
 def _StartProcEngine(modelDir):
     """ 尝试启动进程模式引擎(优先路径)；失败返回 None，调用方再走 ctypes 兜底
 
@@ -582,9 +606,12 @@ def _StartProcEngine(modelDir):
     if os.environ.get("JM_SR_PROC", "1") == "0":
         return None
     if os.environ.get("JM_SR_PROC", "1") != "force" and not _HasQnnRuntime():
-        _procError = "没有 QNN 运行库({})，跳过进程模式，直接用 ctypes + CPU EP".format(
-            QnnBackendLib)
+        _procError = ("没有 QNN 运行库({})，跳过进程模式，直接用 ctypes + CPU EP"
+                      "(找过: {})").format(QnnBackendLib,
+                                           platform_mobile.GetNativeLibDirs() or "<空>")
         Log.Warn(_procError)
+        Log.Warn("这是打包问题：APK 的 lib/ 下缺 QNN 运行库。"
+                 "用 android/tools/qnn_manifest.py verify-apk 核对产物")
         return None
     exe = _SearchFile(ProcName)
     if not exe or not os.path.exists(exe):
@@ -699,10 +726,16 @@ def LoadEngine(modelDir=None):
 
 
 def _PrepareQnnEnv(libDir):
-    """ QNN HTP 需要 ADSP_LIBRARY_PATH 指向 DSP skel 库所在目录 """
+    """ QNN HTP 需要 ADSP_LIBRARY_PATH 指向 DSP skel 库所在目录
+
+    顺序与 C++ 侧 PrepareQnnSearchPath 保持一致：**厂商目录在前、App 目录在后**。
+    设备 /vendor/dsp 里那份 Skel 是高通签过名的，零售机只认它；打进 APK 的
+    未签名 Skel 只是兜底，排在后面才不会把签名那份挡住。
+    """
     try:
         old = os.environ.get("ADSP_LIBRARY_PATH", "")
-        need = ["/dsp", "/vendor/dsp", "/system/lib/rfsa/adsp", libDir]
+        need = ["/dsp", "/vendor/dsp", "/vendor/lib/rfsa/adsp",
+                "/system/lib/rfsa/adsp", libDir]
         items = [v for v in old.split(";") if v]
         for v in need:
             if v not in items:

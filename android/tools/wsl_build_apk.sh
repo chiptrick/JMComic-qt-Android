@@ -97,6 +97,18 @@ if [ ! -f "$ANDROID/libs/$JM_ABI/libsr_qnn.so" ]; then
     echo "       JM_ABI=$JM_ABI bash android/tools/wsl_build_native.sh"
 fi
 
+# QNN 运行库：以前这里**什么都不查**，libs/arm64-v8a 里没有 libQnnHtp.so 时
+# add_libs 只是少几条，buildozer 照样成功 -> 真机上 QNN EP 起不来 ->
+# 超分静默退回 CPU(界面"超分未使用 NPU")。现在改成硬闸门：缺了就自动补，
+# 补不上直接失败，绝不放一个"没有 NPU 的 arm64 包"出去。
+echo "===== [$(date +%T)] 0.4 QNN 运行库闸门(libs/$JM_ABI) ====="
+bash "$JM_REPO/android/tools/qnn_guard.sh" --android "$ANDROID" --abi "$JM_ABI" || {
+    echo "[FATAL] QNN 运行库缺失/不合规：这个包在真机上会退回 CPU 超分"
+    echo "        手动补：bash android/tools/wsl_fetch_qnn.sh --libs-dir $ANDROID/libs/$JM_ABI"
+    echo "        确实要打纯 CPU 对照包：JM_QNN=0 bash $(basename "$0") --abi $JM_ABI"
+    exit 1
+}
+
 [ -x "$VPY" ] || { echo "缺少 venv311(先跑 wsl_build_py311_src.sh)"; exit 1; }
 echo "宿主 python: $($VPY --version)"
 if ! "$VPY" -c "import pythonforandroid" 2>/dev/null; then
@@ -279,6 +291,16 @@ fi
 "$VPY" "$ANDROID/tools/check_apk_qt_libs.py" "$NEW_APK" --abi "$JM_ABI" --aapt "$AAPT_BIN" || {
     echo "[FATAL] APK 校验失败：加载清单与包内 .so 不一致，这个包装上去会闪退"
     echo "        排查：aapt dump --values resources 看 array/qt_libs 与 array/load_local_libs"
+    exit 1
+}
+
+echo "===== [$(date +%T)] 4.6 校验 APK：NPU 运行库是否真的进包 ====="
+# 上一步只核对 QtLoader 的清单；QNN 库不在那份清单里(由 C++/python 自己 dlopen)，
+# 所以必须单独断言：libQnnHtp.so / libQnnSystem.so / 至少一个 Stub /
+# libsr_qnn_proc.so 缺任何一个，真机上 NPU 都起不来。
+"$VPY" "$ANDROID/tools/qnn_manifest.py" verify-apk --apk "$NEW_APK" --abi "$JM_ABI" || {
+    echo "[FATAL] 包内缺 QNN 运行库：装到真机上超分会静默退回 CPU"
+    echo "        修好后重打：bash android/tools/wsl_fetch_qnn.sh --libs-dir $ANDROID/libs/$JM_ABI"
     exit 1
 }
 

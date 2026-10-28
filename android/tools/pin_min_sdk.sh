@@ -29,6 +29,11 @@ SetKey() {
     fi
 }
 
+DelKey() {
+    local file="$1" key="$2"
+    sed -i -E "/^[#[:space:]]*${key}[[:space:]]*=/d" "$file"
+}
+
 # --------------------------------------------------------------- buildozer.spec
 mapfile -t SPECS < <(find "${HERE}" -name buildozer.spec -not -path '*/.venv/*' 2>/dev/null || true)
 if [[ ${#SPECS[@]} -eq 0 ]]; then
@@ -49,14 +54,32 @@ else
         else
             warn "  sr_qnn/models 没有 onnx，跳过 add_assets(用 adb push 推送模型)"
         fi
-        # 确保原生库打进 APK（QNN 那套只有 arm64 上有，x86_64 模拟器没有 NPU）
-        if [[ "${ABI}" == arm64* ]]; then
-            SetKey "${spec}" "android.local_libs" \
-                "libsr_qnn.so,libonnxruntime.so,libQnnHtp.so,libQnnSystem.so,libQnnHtpPrepare.so,libQnnHtpV68Stub.so,libQnnHtpV69Stub.so,libQnnHtpV73Stub.so,libQnnHtpV75Stub.so"
-        else
-            SetKey "${spec}" "android.local_libs" "libsr_qnn.so,libonnxruntime.so"
+        # 原生库清单：buildozer **只认** android.add_libs_<abi>（targets/android.py
+        # 里那张固定映射表），而 android.local_libs 不是 buildozer/p4a 认识任何一个键
+        # (grep 整个包都没有这个字符串) —— 写它只会给人"已经配好"的错觉。
+        # 历史事故：arm64 的 NPU 库缺失时，日志里只看到 local_libs 里赫然列着
+        # libQnnHtp.so，实际包里一个都没有。现在改成按目录**实际内容**生成，
+        # 目录里没有的库不会出现在清单里，也就不会盖住问题。
+        libs_dir="${HERE}/libs/${ABI}"
+        add_libs=""
+        if [ -d "$libs_dir" ]; then
+            add_libs="$(python3 "${HERE}/tools/qnn_manifest.py" list \
+                --libs-dir "$libs_dir" --prefix "libs/${ABI}" 2>/dev/null || true)"
         fi
-        SetKey "${spec}" "android.no_compile_pyo" "False"
+        if [ -n "$add_libs" ]; then
+            SetKey "$spec" "android.add_libs_$(printf '%s' "${ABI}" | tr '-' '_')" "$add_libs"
+            log "  add_libs_$(printf '%s' "${ABI}" | tr '-' '_'): $(printf '%s' "$add_libs" | tr ',' '\n' | wc -l | tr -d ' ') 个 .so"
+        else
+            warn "  libs/${ABI} 里没有 .so，跳过 add_libs(超分/原生库都不会进包)"
+        fi
+        # 另一架构的 add_libs 整行删掉：留着它，buildozer 会去读一个本 ABI 不存在的
+        # 目录，日志里全是空 file_matches，真缺库时反而看不出问题在哪。
+        for other in arm64_v8a x86_64; do
+            [ "$other" = "$(printf '%s' "${ABI}" | tr '-' '_')" ] && continue
+            DelKey "$spec" "android.add_libs_${other}"
+        done
+        DelKey "$spec" "android.local_libs"
+        SetKey "$spec" "android.no_compile_pyo" "False"
     done
 fi
 
@@ -74,6 +97,16 @@ for manifest in "${MANIFESTS[@]:-}"; do
         sed -i -E "0,/<application/s|(<manifest[^>]*>)|\1\n    <uses-permission android:name=\"android.permission.INTERNET\" />|" "${manifest}"
     fi
 done
+
+# --------------------------------------------------------------- QNN 体检
+# 这里只做提示：真正的硬闸门在打包前(tools/qnn_guard.sh)与打包后
+# (qnn_manifest.py verify-apk)。放这里是为了让"手工跑一次 pin_min_sdk.sh"
+# 也能立刻看到 libs 目录到底缺什么。
+if [[ "${ABI}" == arm64* ]]; then
+    python3 "${HERE}/tools/qnn_manifest.py" verify --libs-dir "${HERE}/libs/${ABI}" || \
+        warn "libs/${ABI} 的 QNN 运行库不合规：真机上超分会退回 CPU。补齐命令：
+       bash android/tools/wsl_fetch_qnn.sh --libs-dir ${HERE}/libs/${ABI}"
+fi
 
 log "完成：API=${API}, minSdk=${MINAPI}, 屏幕方向=${ORIENTATION}"
 log "重新执行 pyside6-android-deploy 即可让补丁生效"

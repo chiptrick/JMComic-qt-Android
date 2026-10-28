@@ -804,10 +804,11 @@ bool HasQnnLib() {
     if (!EnvStr("JM_QNN_BACKEND").empty()) {
         return true;
     }
-    // libQnnHtp.so 与 libsr_qnn.so 同目录
+    // libQnnHtp.so 与 libsr_qnn.so 同目录(APK 的 lib/<abi>/ 解压目录)
     Dl_info info;
+    std::string dir;
     if (dladdr(reinterpret_cast<void*>(&srq_init), &info) != 0 && info.dli_fname != nullptr) {
-        std::string dir = DirName(info.dli_fname);
+        dir = DirName(info.dli_fname);
         if (FileExists(JoinPath(dir, "libQnnHtp.so"))) {
             return true;
         }
@@ -816,6 +817,16 @@ bool HasQnnLib() {
     if (handle != nullptr) {
         dlclose(handle);
         return true;
+    }
+    // 打不开就把"找过哪儿、为什么打不开"写进日志：缺库时 QNN EP 会安静地不接任何
+    // 节点，最终表现只是"超分很慢"，从日志里完全看不出是打包少了库。
+    static bool logged = false;
+    if (!logged) {
+        logged = true;
+        const char* reason = dlerror();
+        printf("[sr_qnn] 未找到 QNN 运行库(libQnnHtp.so)：本库目录=%s，dlopen 失败原因=%s"
+               " -> 只能用 CPU EP(打包时漏了 QNN 运行库？见 tools/qnn_manifest.py verify)\n",
+               dir.empty() ? "<未知>" : dir.c_str(), reason != nullptr ? reason : "unknown");
     }
     return false;
 }
@@ -849,16 +860,50 @@ void PrepareQnnSearchPath() {
         return;
     }
     std::string dir = DirName(info.dli_fname);
+    // 顺序很重要：设备 /vendor/dsp 里那份 Skel 是高通签过名的，零售机只认它；
+    // 我们把 AAR 里的 Skel 一起打进 APK 只是兜底(未签名的 DSP 库在锁定的机器上
+    // 会被 FastRPC 拒载)。**App 目录必须排在厂商目录之后**，否则未签名那份会先被
+    // 命中、签名校验失败，表现就是"HTP 起不来、QNN 0 分区"。
+    // 与 python 侧 _PrepareQnnEnv 的顺序保持一致，别两边不一样。
+    const char* kVendorDirs[] = {"/dsp", "/vendor/dsp", "/vendor/lib/rfsa/adsp",
+                                 "/system/lib/rfsa/adsp"};
     std::string adsp = EnvStr("ADSP_LIBRARY_PATH");
-    if (adsp.find(dir) == std::string::npos) {
-        adsp += (adsp.empty() ? "" : ";");
-        adsp += dir + ";/dsp;/vendor/dsp;/system/lib/rfsa/adsp";
-        setenv("ADSP_LIBRARY_PATH", adsp.c_str(), 1);
+    std::vector<std::string> items;
+    size_t start = 0;
+    while (start <= adsp.size() && !adsp.empty()) {
+        size_t pos = adsp.find(';', start);
+        std::string item = adsp.substr(start, pos == std::string::npos ? std::string::npos : pos - start);
+        if (!item.empty()) {
+            items.push_back(item);
+        }
+        if (pos == std::string::npos) {
+            break;
+        }
+        start = pos + 1;
     }
+    auto addIfMissing = [&](const std::string& path) {
+        if (std::find(items.begin(), items.end(), path) == items.end()) {
+            items.push_back(path);
+        }
+    };
+    for (const char* vendor : kVendorDirs) {
+        addIfMissing(vendor);
+    }
+    addIfMissing(dir);      // App 自己的 lib 目录放最后
+    std::string joined;
+    for (size_t i = 0; i < items.size(); ++i) {
+        joined += (i == 0 ? "" : ";");
+        joined += items[i];
+    }
+    setenv("ADSP_LIBRARY_PATH", joined.c_str(), 1);
+
     std::string ld = EnvStr("LD_LIBRARY_PATH");
     if (ld.find(dir) == std::string::npos) {
         ld = dir + (ld.empty() ? "" : ":" + ld);
         setenv("LD_LIBRARY_PATH", ld.c_str(), 1);
+    }
+    if (g_debug) {
+        printf("[sr_qnn] ADSP_LIBRARY_PATH=%s\n", joined.c_str());
     }
     return;
 }
@@ -1772,7 +1817,9 @@ const char* srq_get_backend_info(void) {
     } else if (HasQnnLib()) {
         buffer = "CPU (ONNX Runtime, QNN 未生效)";
     } else {
-        buffer = "CPU (ONNX Runtime)";
+        // 连库都没有：界面"超分未使用 NPU（...）"里直接带上这句，用户/维护者
+        // 一眼就知道是包的问题，不是机型不支持
+        buffer = "CPU (ONNX Runtime, 缺 libQnnHtp.so)";
     }
     return buffer.c_str();
 }
