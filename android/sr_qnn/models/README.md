@@ -35,8 +35,8 @@ python android/tools/simplify_models.py android/sr_qnn/models --write --backup /
 
 实测：**257 → 79 节点，只剩 Conv/LeakyRelu/Relu/Sigmoid/GlobalAveragePool/Mul/Add/
 Pad/Expand/ConvTranspose/Clip（全部在 QNN 白名单内），输出与改写前逐位相同
-（max|Δ| = 0）**。仓库里现在这 31 个模型（9 waifu2x + 17 Real-CUGAN +
-5 Real-ESRGAN）全部是静态化后的版本：非 QNN 算子为 0，且都与 PyTorch 参考输出
+（max|Δ| = 0）**。仓库里现在这 27 个模型（5 waifu2x + 17 Real-CUGAN +
+5 Real-ESRGAN；4 个 cunet up1x 纯降噪模型不随包分发，需要时按 models.txt 自备）全部是静态化后的版本：非 QNN 算子为 0，且都与 PyTorch 参考输出
 对账过（CUGAN/ESRGAN 的 max|Δ| ≤ 3.5e-5）。
 
 > 换了模型文件后 context 缓存会自动失效：缓存的 key 现在是
@@ -44,8 +44,9 @@ Pad/Expand/ConvTranspose/Clip（全部在 QNN 白名单内），输出与改写�
 
 ## 生成模型
 
-仓库现有的 31 个模型来自**官方 PyTorch 权重直接导出**（waifu2x upcunet 9 个、
-Real-CUGAN 17 个、Real-ESRGAN 5 个），导出/静态化/对账脚本在
+仓库现有的 27 个模型来自**官方 PyTorch 权重直接导出**（waifu2x upcunet 5 个、
+Real-CUGAN 17 个、Real-ESRGAN 5 个；另有 4 个 cunet up1x 纯降噪模型不随包分发，
+需要时自备同名 onnx），导出/静态化/对账脚本在
 `android/tools/models_stage/`（在 WSL 里跑，见其中的 README）。要点：
 
 * CUGAN 的 pro/se 只是前后缀变换不同（pro 输入 `x*0.7+0.15`、输出 `(y-0.15)/0.7`），
@@ -96,10 +97,11 @@ adb push android/sr_qnn/models/. \
 | `MODEL_REALESRGAN_*` | `realesrgan_*.onnx` | 5 个全部随 APK 分发 |
 
 models.txt 的 41 条引用对应 **31 个唯一 onnx**（waifu2x 的 PHOTO/CUNET 条目按设计
-复用 ANIME 文件）。全部模型都是**官方 PyTorch 权重直接导出**（不是拿别人的 onnx 改
+复用 ANIME 文件）；其中 4 个 cunet up1x 纯降噪模型**不随包分发**，随包实际为 27 个，
+引擎在文件缺失时会跳过它们（界面也只列出可用的）。全部模型都是**官方 PyTorch 权重直接导出**（不是拿别人的 onnx 改
 shape），导出/静态化/对账工具链见 `android/tools/models_stage/README.md`；
-模型文件体积大（共约 218MB），按 `.gitignore` 规则不入库，由构建流程从工作区
-同步进 APK。
+模型文件体积大（随包 27 个共约 198MB），由构建流程同步进 APK；
+4 个 cunet up1x 纯降噪模型不入库，需要时自备（见上）。
 
 ### 模型来源（实测可用）
 
