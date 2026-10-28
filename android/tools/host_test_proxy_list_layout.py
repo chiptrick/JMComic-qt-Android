@@ -1,18 +1,19 @@
 # coding:utf-8
-""" 宿主自检：分流节点列表（方案A 卡片化）排版
+""" 宿主自检：分流节点列表（整页滚动版）
 
-背景：分流页原来是「5 列宽表 + 表格 min-height 2560 + 竖直滚动条 AlwaysOff」，
-竖屏 452px 内容宽下每列放不下字（名称被裁、IPv4 被裁、9 个 32 字符 IPv6 完全没戏），
-整页内容高 3281px ≈ 3.3 屏。现在改成「一行一张两行卡片」，列表吃满剩余高度。
+背景（真机截图反馈）：上一版把 6 条线路压成 2 行 chip，452px 宽下每格只剩 ~62px，
+主题的单选指示器又要 24px，"连接超时 / 4.71MB/s" 全被裁掉；列表还是自己滚。
 
-本脚本逐条断言改造后的排版契约：
+这一版的三条契约，逐条断言：
 
-  [1] 结构：代理通道 / 线路测速 / 节点列表 / 底栏都在，整页不再有滚动区
-  [2] 列表：26 个 ProxyIP + 24 个优选（含 9 个 IPv6）全部建行，行高=卡片高，
-          竖直滚动条没有被禁用，内容不越出卡片右边界
-  [3] 数据长度：360 / 478 / 520 三种宽度下，所有 IP（含 32 字符 IPv6）都不被省略
-  [4] 交互：分组筛选计数、排序、选中 -> 底栏状态、空分组占位
-  [5] 截图：导出 PNG 方便人眼复核
+  [1] 结构：线路区恢复 4 列 × 6 行；表格不再自己滚（高度=内容）；
+            底部「高级 / 测试 IP 分流」在滚动区之外，常驻可见
+  [2] 列表：50 个节点全部建行、行高与卡片一致、卡片内容不越界
+  [3] 数据长度：360 / 478 / 520 下 IPv4 / 32 字符 IPv6 一律不省略
+  [4] 整页滚动：滚到页面底部后，底栏几何不变、行高不变；
+            滚轮落在列表上会转发给页面（而不是被表格吃掉）
+  [5] 高级面板：OutBack 曲线、从 0 长到内容高、展开后有描边、收起后隐藏且描边撤掉
+  [6] 交互：分组筛选、排序、选中、空分组占位、密度、代理模式
 
 用法：python android/tools/host_test_proxy_list_layout.py
 """
@@ -25,8 +26,9 @@ sys.path.insert(0, os.path.join(ROOT, "src"))
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 try:
-    from PySide6.QtCore import Qt
-    from PySide6.QtWidgets import QApplication, QLabel, QWidget
+    from PySide6.QtCore import QPoint, QPointF, Qt
+    from PySide6.QtGui import QWheelEvent
+    from PySide6.QtWidgets import QApplication, QLabel, QScrollArea, QWidget
 except Exception as es:                      # pragma: no cover
     print("SKIP: 本机没有 PySide6 ({})".format(es))
     sys.exit(0)
@@ -45,7 +47,6 @@ def Check(ok, message):
 # ---------------------------------------------------------------- 数据
 def BuildItems():
     """ 用 GlobalConfig 里的真实节点 + 接近真机的测速结果（含 IPv6 / 长 ISP / 失败项） """
-    from component.list.proxy_node_card import TagKind
     from config.global_config import GlobalConfig
     from view.user.login_proxy_new_widget import IpItem
 
@@ -98,28 +99,21 @@ def BuildItems():
         item.delay = 44 + j * 12
         item.downloadDelay = 90 + j * 18
         if j == 6:
-            # 失败项延迟归零（真机里 isFail 时 delay 只会是 0）
             item.isFail = True
             item.st = 1024
             item.delay = 0
             item.downloadDelay = 0
         items[index] = item
         index += 1
-    assert [TagKind(items[i]) for i in items].count("proxy") == 26
     return items
 
 
 # ---------------------------------------------------------------- 页面
-class Owner(QWidget):
-    """ 只借用 Ui_LoginNew 的控件集合，充当 LoginProxyNewWidget 的 owner """
-
-
-def BuildPage(app, width, height=982):
+def BuildPage(app, width=478, height=982):
     from interface.ui_login_new import Ui_LoginNew
 
     class Owner(QWidget, Ui_LoginNew):
-        """ 只借用 Ui_LoginNew 的控件集合，充当 LoginProxyNewWidget 的 owner
-            （和 LoginNewView 一样：setupUi 把控件挂到 self 上） """
+        """ 只借用 Ui_LoginNew 的控件集合（和 LoginNewView 一样把控件挂到 self） """
 
         def __init__(self):
             QWidget.__init__(self)
@@ -135,7 +129,7 @@ def BuildPage(app, width, height=982):
 
 
 def BuildWidget(page):
-    """ 直接调真实驱动的方法（跳过 __init__ 里的网络/设置副作用） """
+    """ 调真实驱动的方法（跳过 __init__ 里的网络/设置副作用） """
     from view.user.login_proxy_new_widget import LoginProxyNewWidget
     widget = LoginProxyNewWidget.__new__(LoginProxyNewWidget)
     widget.owner = page
@@ -149,58 +143,64 @@ def BuildWidget(page):
     widget.lastResult = {}
     widget.systemProxyValue = ""
     widget.isInitProxy = False
-    # 与 __init__ 一致：给代理模式单选组固定 id 0..3，并默认"无代理"
     for mode in range(4):
         page.radioProxyGroup.setId(getattr(page, "proxy_" + str(mode)), mode)
     page.proxy_0.setChecked(True)
     widget.InitCardTable()
     widget.InitUi()
     widget.RenderList()
-    widget.UpdateAddrRow()          # 与 __init__ 一致：默认只显示"未启用代理"
+    widget.UpdateAddrRow()
     return widget
 
 
 # ---------------------------------------------------------------- 断言
 def TestStructure(app, page, widget):
-    print("\n[1] 结构：四块固定区 + 列表吃满剩余高度，整页不再滚动")
+    print("\n[1] 结构：线路恢复 4 列网格 / 表格不自滚 / 底栏在滚动区之外")
     table = page.tableWidget
 
-    Check(table.verticalScrollBarPolicy() != Qt.ScrollBarAlwaysOff,
-          "列表竖直滚动条没有被禁用（旧代码是 AlwaysOff）")
-    Check(table.horizontalScrollBarPolicy() == Qt.ScrollBarAlwaysOff,
-          "列表不需要横向滚动")
-    Check(table.columnCount() == 1, "表格退化成单列卡片容器({})".format(table.columnCount()))
-    Check(not table.horizontalHeader().isVisible(), "表头已隐藏（标题改由每张卡片自己承担）")
+    Check(isinstance(page.proxyScrollArea, QScrollArea), "存在整页滚动区 proxyScrollArea")
+    Check(table.verticalScrollBarPolicy() == Qt.ScrollBarAlwaysOff,
+          "表格竖直滚动条已关闭（改由页面统一滚动）")
+    Check(table.horizontalScrollBarPolicy() == Qt.ScrollBarAlwaysOff, "表格不需要横向滚动")
+    Check(table.columnCount() == 1, "表格仍是单列卡片容器({})".format(table.columnCount()))
 
-    pageHeight = page.height()
-    boxes = [page.proxyHeader, page.proxyModeBox, page.speedBox, page.proxyListBox, page.proxyFoot]
-    bottom = 0
-    for box in boxes:
-        assert box.isVisible()
-        bottom = max(bottom, box.y() + box.height())
-    Check(bottom <= pageHeight, "五块内容都在一屏内（底边 {} <= 页高 {}）".format(bottom, pageHeight))
+    content = page.proxyScrollContent
+    Check(page.proxyScrollArea.widget() is content, "滚动区内容控件就位")
+    pageH = content.sizeHint().height()
+    viewH = page.proxyScrollArea.viewport().height()
+    Check(pageH > viewH, "页面内容比视口高、确实需要整页滚动（{} > {}）".format(
+        int(pageH), viewH))
 
-    listHeight = page.proxyListBox.height()
-    Check(listHeight >= pageHeight * 0.5,
-          "列表拿到一半以上高度（{}px / {}px）".format(listHeight, pageHeight))
+    Check(not page.proxyScrollArea.isAncestorOf(page.proxyFoot),
+          "底栏不在滚动区里（滚动时不会跟着跑）")
+    Check(page.proxyFoot.isVisible(), "底栏可见")
+    Check(page.testIpButton.isVisible(), "「测试 IP 分流」常驻可见")
+    Check(page.proxyAdvButton.isVisible(), "「高级」常驻可见")
 
-    from PySide6.QtWidgets import QScrollArea
-    areas = page.findChildren(QScrollArea)
-    visible = [a for a in areas if a.isVisible() and a.verticalScrollBar().isVisible()]
-    Check(not visible, "分流页不再有整页滚动区（旧版 scrollArea_3 已移除）")
-    Check(page.proxyAdvPanel.isHidden(), "高级设置默认收起，不占列表高度")
+    rows = 0
+    for i in (1, 2, 3, 4, 5, 6):
+        if getattr(page, "radioButton_" + str(i)).isVisible():
+            rows += 1
+    Check(rows == 6, "线路网格 6 行都在（{}）".format(rows))
+    Check(page.label_18.isVisible() and page.label_19.isVisible()
+          and page.label_20.isVisible() and page.label_21.isVisible(),
+          "网格表头 Api分流 / 延迟 / 图片分流 / 速度 都在")
+    radio6 = page.radioButton_6
+    Check("US反代分流" == radio6.text(), "最长的一项名字是「{}」".format(radio6.text()))
+    Check(radio6.width() >= radio6.sizeHint().width(),
+          "「US反代分流」没有被挤窄（{} >= {}）".format(
+              radio6.width(), radio6.sizeHint().width()))
 
 
 def TestList(app, page, widget):
-    print("\n[2] 列表：全部节点都建了行，行高=卡片高，卡片内容不越界")
+    print("\n[2] 列表：全部节点建行、行高=卡片高、表格高度=内容")
     from component.list.proxy_node_card import ProxyNodeCard
 
     table = page.tableWidget
     total = len(widget.allItems)
-    Check(table.rowCount() == total, "全部 {} 个节点都建了行（当前 {}）".format(total, table.rowCount()))
+    Check(table.rowCount() == total, "全部 {} 个节点都建了行".format(total))
 
-    bad_height = []
-    bad_overflow = []
+    bad_height, bad_overflow = [], []
     for row in range(table.rowCount()):
         card = table.cellWidget(row, 0)
         if not isinstance(card, ProxyNodeCard):
@@ -211,35 +211,29 @@ def TestList(app, page, widget):
         limit = card.width() - 1
         for child in card.findChildren(QLabel):
             if child.geometry().right() > limit + 1:
-                bad_overflow.append((row, child.objectName() or child.text()[:8]))
-    Check(not bad_height, "行高与卡片高度一致（异常行 {}）".format(bad_height[:5]))
+                bad_overflow.append((row, child.text()[:8]))
+    Check(not bad_height, "行高与卡片高度一致（异常 {}）".format(bad_height[:5]))
     Check(not bad_overflow, "卡片内文字不越出右边界（异常 {}）".format(bad_overflow[:5]))
 
-    # 可见高度 -> 同屏几项
-    viewport = table.viewport().height()
-    rowHeight = table.rowHeight(0)
-    visible = viewport // rowHeight if rowHeight else 0
-    Check(visible >= 8, "同屏至少 8 项（{}px / 行高 {} = {}）".format(viewport, rowHeight, visible))
-
-    # 滚动到底能看到最后一项（旧版靠整页滚 3 屏）
-    table.scrollToBottom()
-    app.processEvents()
-    Check(table.verticalScrollBar().value() > 0, "列表内部可滚动，末项可到达")
+    expected = sum(table.rowHeight(r) for r in range(table.rowCount())) + 2
+    Check(abs(table.height() - expected) <= 2,
+          "表格高度=内容高度（{} ≈ {}）".format(table.height(), expected))
+    Check(table.verticalScrollBar().maximum() == 0,
+          "表格自身滚动范围为 0（不再有内部滚动）")
 
 
 def TestLengths(app):
-    print("\n[3] 数据长度：360 / 478 / 520 三种宽度，IP 一律不省略（含 32 字符 IPv6）")
+    print("\n[3] 数据长度：360 / 478 / 520，IP 一律不省略（含 32 字符 IPv6）")
     from component.list.proxy_node_card import ProxyNodeCard
 
     for width in (360, 478, 520):
         page = BuildPage(app, width)
         widget = BuildWidget(page)
         app.processEvents()
-        page.grab()          # 强制视图排版/绘制：cellWidget 的宽度这一步才定下来
+        page.grab()
         app.processEvents()
         table = page.tableWidget
-        elided = []
-        ipv6 = 0
+        elided, ipv6 = [], 0
         for row in range(table.rowCount()):
             card = table.cellWidget(row, 0)
             if not isinstance(card, ProxyNodeCard):
@@ -248,16 +242,9 @@ def TestLengths(app):
             if ":" in item.ip:
                 ipv6 += 1
             if card.ipLabel.text() != item.ip:
-                elided.append((item.ip, card.ipLabel.text()))
-        Check(not elided,
-              "{}px：{} 项全部完整显示（IPv6 {} 个，被省略 {}）".format(
-                  width, table.rowCount(), ipv6, len(elided)))
-        if elided:
-            print("       例: {}".format(elided[:2]))
-        widths = set(table.cellWidget(r, 0).width() for r in range(table.rowCount()))
-        Check(len(widths) == 1 and widths.pop() == table.viewport().width(),
-              "{}px：卡片宽度贴合视口（{} vs {}）".format(
-                  width, table.cellWidget(0, 0).width(), table.viewport().width()))
+                elided.append(item.ip)
+        Check(not elided, "{}px：{} 项全部完整显示（IPv6 {} 个，省略 {}）".format(
+            width, table.rowCount(), ipv6, len(elided)))
         if width == 478:
             page.grab().save(GrabPath())
         page.hide()
@@ -265,124 +252,161 @@ def TestLengths(app):
         app.processEvents()
 
 
-def TestInteract(app, page, widget):
-    print("\n[4] 交互：筛选计数 / 排序 / 选中状态 / 空分组占位")
-    from component.list.proxy_node_card import TagKind
+def TestPageScroll(app, page, widget):
+    print("\n[4] 整页滚动：底栏固定、行高不变、滚轮转发给页面")
+    area = page.proxyScrollArea
+    bar = area.verticalScrollBar()
+    table = page.tableWidget
 
-    widget.owner = page
-    widget.RenderList()
+    foot_before = page.proxyFoot.geometry()
+    heights_before = [table.rowHeight(r) for r in range(table.rowCount())]
 
-    allText = page.proxyFilterAll.text()
-    proxyText = page.proxyFilterProxy.text()
-    cfText = page.proxyFilterCf.text()
-    Check("全部 {}".format(len(widget.allItems)) == allText, "分组按钮带数量：{}".format(allText))
-    Check("ProxyIP 26" == proxyText, "ProxyIP 分组计数正确（{}）".format(proxyText))
-    Check("优选 24" == cfText, "优选分组计数正确（{}）".format(cfText))
-
-    widget.filter = "cf"
-    widget.RenderList()
+    # 先画一帧：QScrollArea 的滚动范围要等布局/绘制后才算出来（这里之前是 0）
+    page.grab()
     app.processEvents()
-    kinds = set(TagKind(widget.rowItems[r]) for r in widget.rowItems)
-    Check(page.tableWidget.rowCount() == 24 and kinds == {"cf"},
-          "只看优选：24 行且全是优选（{}/{}）".format(page.tableWidget.rowCount(), kinds))
+    bar.SetSmooth(False)          # SmoothScrollBar 是 500ms 动画，测试里先关掉才能立刻跳
+    bar.setValue(bar.maximum())
+    app.processEvents()
+
+    Check(bar.value() > 0, "页面滚到了底部（value={} / max={}）".format(bar.value(), bar.maximum()))
+    Check(page.proxyFoot.geometry() == foot_before, "滚动后底栏几何完全不变（固定的）")
+    Check([table.rowHeight(r) for r in range(table.rowCount())] == heights_before,
+          "滚动后各行行高不变（表格布局没被滚动影响）")
+    Check(page.proxyFoot.visibleRegion().boundingRect().height() >= page.proxyFoot.height() - 1,
+          "滚到底后底栏仍然完整可见")
+
+    # 滚轮落在列表上：应转发给页面，而不是被表格吃掉
+    bar.setValue(0)
+    app.processEvents()
+    viewport = table.viewport()
+    center = QPointF(viewport.rect().center())
+    event = QWheelEvent(center, center, QPoint(0, 0), QPoint(0, -120), Qt.NoButton,
+                        Qt.NoModifier, Qt.ScrollPhase.NoScrollPhase, False)
+    QApplication.sendEvent(viewport, event)
+    app.processEvents()
+    Check(bar.value() > 0, "滚轮落在列表上 -> 页面滚动（value={}）".format(bar.value()))
+    Check(table.verticalScrollBar().value() == 0, "表格自己没有跟着滚")
+    bar.SetSmooth(True)
+
+
+def TestAdvPanel(app, page, widget):
+    print("\n[5] 高级面板：OutBack 曲线 / 从 0 长上去 / 描边 / 收起后隐藏")
+    panel = page.proxyAdvPanel
+    frame = page.proxyAdvFrame
+    anim = widget.advAnim
+
+    from PySide6.QtCore import QEasingCurve
+    Check(anim.easingCurve().type() == QEasingCurve.OutBack,
+          "缓动曲线是 OutBack（{}）".format(anim.easingCurve().type()))
+    Check(not panel.isVisible(), "默认收起")
+    Check(frame.styleSheet() == "", "收起时没有描边")
+
+    widget.OnAdvClicked()
+    app.processEvents()
+    Check(panel.isVisible(), "点「高级」后面板可见")
+    Check(anim.state() == anim.State.Running, "动画正在跑（不是瞬间弹出）")
+    target = anim.endValue()
+    Check(target > 100, "目标高度=内容高度（{}px）".format(target))
+
+    # OutBack 曲线前半段低于目标、接近尾声会"过冲"超过目标再回落 —— 这两点合起来
+    # 才证明它是非线性（线性曲线永远 h <= target）
+    anim.setCurrentTime(int(anim.duration() * 0.30))
+    app.processEvents()
+    early = panel.height()
+    Check(0 < early < target, "30% 处高度 {} 还没到目标 {}".format(early, target))
+
+    anim.setCurrentTime(int(anim.duration() * 0.75))
+    app.processEvents()
+    overshoot = panel.height()
+    Check(overshoot > target, "75% 处过冲到 {} > 目标 {}（OutBack 特征）".format(overshoot, target))
+
+    anim.setCurrentTime(anim.duration())
+    app.processEvents()
+    Check(panel.height() == target, "结束时高度回到目标（{}）".format(panel.height()))
+    Check("border" in frame.styleSheet().lower(), "展开后有 1px 描边")
+
+    widget.OnAdvClicked()
+    app.processEvents()
+    widget.advAnim.setCurrentTime(widget.advAnim.duration())
+    app.processEvents()
+    Check(not panel.isVisible(), "再点一次收起后面板隐藏")
+    Check(frame.styleSheet() == "", "收起后描边被撤掉（不留亮线）")
+    Check(page.proxyAdvButton.text() == "高级", "按钮文案回到「高级」")
+
+
+def TestInteract(app, page, widget):
+    print("\n[6] 交互：分组计数 / 排序 / 选中 / 空分组 / 密度 / 代理模式")
+    widget.RenderList()
+    Check("全部 {}".format(len(widget.allItems)) == page.proxyFilterAll.text(),
+          "分组按钮带数量：{}".format(page.proxyFilterAll.text()))
 
     widget.filter = "proxy"
     widget.RenderList()
     app.processEvents()
-    Check(page.tableWidget.rowCount() == 26, "只看 ProxyIP：26 行（{}）".format(
-        page.tableWidget.rowCount()))
+    Check(page.tableWidget.rowCount() == 26,
+          "只看 ProxyIP：26 行（{}）".format(page.tableWidget.rowCount()))
 
     widget.filter = "all"
     widget.sortMode = "lat"
     widget.RenderList()
-    delays = [widget.rowItems[r].delay for r in range(page.tableWidget.rowCount())]
-    alive = [d for d in delays if d]
+    alive = [widget.rowItems[r].delay for r in range(page.tableWidget.rowCount())
+             if widget.rowItems[r].delay]
     bad = [i for i in range(1, len(alive)) if alive[i] < alive[i - 1]]
-    Check(not bad, "按延迟排序：{}...（逆序位置 {}）".format(alive[:6], bad[:3]))
+    Check(not bad, "按延迟排序（逆序位置 {}）".format(bad[:3]))
 
-    # 选中第 3 行 -> 底栏状态 + 卡片高亮
     page.tableWidget.selectRow(2)
     app.processEvents()
-    selected = widget.rowItems[2]
-    Check(selected.isSelect, "点行即选中（{}）".format(selected.ip))
-    Check(selected.ip in page.proxyStatusLabel.text(), "底栏显示已选节点（{}）".format(
-        page.proxyStatusLabel.text().replace("\n", " / ")))
-    from component.list.proxy_node_card import ProxyNodeCard
-    card = page.tableWidget.cellWidget(2, 0)
-    Check(isinstance(card, ProxyNodeCard) and card._selected, "选中卡片有高亮态")
+    Check(widget.rowItems[2].isSelect, "点行即选中（{}）".format(widget.rowItems[2].ip))
+    Check(widget.rowItems[2].ip in page.proxyStatusLabel.text(), "底栏显示已选节点")
 
-    # 空分组：全部为空时显示占位而不是白板
     saved = widget.allItems
     widget.allItems = {}
     widget.RenderList()
     app.processEvents()
-    Check(page.tableWidget.rowCount() == 0 and widget.emptyLabel.isVisible(),
-          "没有节点时显示占位提示")
+    Check(page.tableWidget.rowCount() == 0 and widget.emptyLabel.isVisible(), "空分组显示占位")
     widget.allItems = saved
     widget.RenderList()
     app.processEvents()
 
-    # 代理模式 -> 地址行只留一个控件
+    before = page.tableWidget.height()
+    page.proxyDensityButton.click()
+    app.processEvents()
+    Check(page.tableWidget.height() < before,
+          "紧凑密度后表格高度跟着变小（{} -> {}）".format(before, page.tableWidget.height()))
+    page.proxyDensityButton.click()
+    app.processEvents()
+
     for mode, expect in ((0, "proxyHint"), (1, "httpLine"), (2, "sockEdit"), (3, "checkLabel")):
         button = getattr(page, "proxy_" + str(mode))
         button.setChecked(True)
         widget.OnProxyModeChanged(button)
         app.processEvents()
-        shown = [name for name in ("proxyHint", "httpLine", "sockEdit", "proxyLabel", "checkLabel")
-                 if getattr(page, name).isVisible()]
-        Check(shown == [expect] or (mode == 3 and set(shown) <= {"proxyLabel", "checkLabel"}
-                                    and expect in shown),
-              "代理模式 {} 只显示 {}".format(mode, shown))
-
-    # 密度：紧凑后行高变小、同屏更多
-    before = page.tableWidget.rowHeight(0)
-    widget.OnDensityClicked()
-    app.processEvents()
-    after = page.tableWidget.rowHeight(0)
-    Check(after < before, "紧凑密度行高变小（{} -> {}）".format(before, after))
-    widget.OnDensityClicked()
-
-    # 高级面板展开后仍然不把底栏顶出屏幕
-    widget.OnAdvClicked()
-    app.processEvents()
-    Check(page.proxyAdvPanel.isVisible(), "高级面板可展开")
-    Check(page.proxyFoot.y() + page.proxyFoot.height() <= page.height(),
-          "展开高级后底栏仍在屏内（{} <= {}）".format(
-              page.proxyFoot.y() + page.proxyFoot.height(), page.height()))
-    Check(page.proxyListBox.height() > 120, "展开高级后列表仍保留可用高度（{}px）".format(
-        page.proxyListBox.height()))
-    widget.OnAdvClicked()
+        shown = [n for n in ("proxyHint", "httpLine", "sockEdit", "proxyLabel", "checkLabel")
+                 if getattr(page, n).isVisible()]
+        Check(shown == [expect], "代理模式 {} 只显示 {}".format(mode, shown))
 
 
 def LoadRealFonts():
     """ 离屏环境常常一个字体族都没有（Qt 回退成"每字符固定 13px"的占位字体），
-        在这种度量下算出来的"放不下"是假的。这里显式加载系统里的等宽字体，
-        让测量接近真机。 """
+        那种度量下算出来的"放不下"是假象。显式加载系统等宽字体让测量接近真机。 """
     from PySide6.QtGui import QFontDatabase
-    candidates = [
-        r"C://Windows//Fonts//consola.ttf",
-        r"C://Windows//Fonts//CascadiaMono.ttf",
-        r"C://Windows//Fonts//cour.ttf",
-        "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
-        "/System/Library/Fonts/Menlo.ttc",
-    ]
-    for path in candidates:
+    for path in (r"C://Windows//Fonts//consola.ttf",
+                 r"C://Windows//Fonts//CascadiaMono.ttf",
+                 r"C://Windows//Fonts//cour.ttf",
+                 "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf"):
         if os.path.exists(path) and QFontDatabase.addApplicationFont(path) >= 0:
             return path
     return ""
 
 
 def GrabPath():
-    return os.path.join(os.environ.get("TEMP", ROOT), "proxy_list_layout.png")
+    return os.path.join(os.environ.get("TEMP", ROOT), "proxy_page_scroll.png")
 
 
 def main():
     app = QApplication([])
     print("PySide6 {} / offscreen".format(__import__("PySide6").__version__))
-    fontPath = LoadRealFonts()
-    print("字体源：{}".format(fontPath or "（无，度量可能失真）"))
-    if not fontPath:
-        print("注意：没有可用的真实字体，关于是否省略的断言仅供参考")
+    print("字体源：{}".format(LoadRealFonts() or "（无，度量可能失真）"))
 
     page = BuildPage(app, 478)
     widget = BuildWidget(page)
@@ -390,6 +414,8 @@ def main():
 
     TestStructure(app, page, widget)
     TestList(app, page, widget)
+    TestPageScroll(app, page, widget)
+    TestAdvPanel(app, page, widget)
     TestInteract(app, page, widget)
     TestLengths(app)
 

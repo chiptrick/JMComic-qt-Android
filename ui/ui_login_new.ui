@@ -650,225 +650,69 @@
        <property name="bottomMargin">
         <number>0</number>
        </property>
-             <item>
-              <widget class="QWidget" name="proxyHeader" native="true">
-               <layout class="QHBoxLayout" name="proxyHeaderLayout">
-                <property name="spacing">
-   <number>8</number>
+            <item>
+             <widget class="SmoothScrollArea" name="proxyScrollArea">
+              <property name="frameShape">
+  <enum>QFrame::NoFrame</enum>
+ </property>
+              <property name="horizontalScrollBarPolicy">
+  <enum>Qt::ScrollBarAlwaysOff</enum>
+ </property>
+              <property name="widgetResizable">
+  <bool>true</bool>
+ </property>
+              <widget class="QWidget" name="proxyScrollContent">
+               <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>452</width>
+    <height>3400</height>
+   </rect>
   </property>
+               <layout class="QVBoxLayout" name="proxyScrollLayout">
+                <property name="spacing">
+    <number>0</number>
+   </property>
                 <property name="leftMargin">
-                 <number>12</number>
+                 <number>0</number>
                 </property>
                 <property name="topMargin">
                  <number>0</number>
                 </property>
                 <property name="rightMargin">
-                 <number>12</number>
+                 <number>0</number>
                 </property>
                 <property name="bottomMargin">
                  <number>0</number>
                 </property>
                 <item>
-                 <widget class="QLabel" name="proxyTitleLabel">
-                  <property name="text">
-                   <string>分流设置</string>
-                  </property>
-                 </widget>
-                </item>
-<item>
-                 <spacer name="proxyHeaderSpacer">
-                  <property name="orientation">
-                   <enum>Qt::Horizontal</enum>
-                  </property>
-                  <property name="sizeHint" stdset="0">
-                   <size>
-                    <width>40</width>
-                    <height>10</height>
-                   </size>
-                  </property>
-                 </spacer>
-                </item>
-                <item>
-                 <widget class="QCommandLinkButton" name="cdnLinkButton">
-                  <property name="text">
-                   <string>说明</string>
-                  </property>
-                 </widget>
-                </item>
-               </layout>
-              </widget>
-             </item>
-             <item>
-              <widget class="QWidget" name="proxyModeBox" native="true">
-               <layout class="QVBoxLayout" name="proxyModeLayout">
-                <property name="spacing">
-   <number>5</number>
-  </property>
-                <property name="leftMargin">
-                 <number>12</number>
-                </property>
-                <property name="topMargin">
-                 <number>2</number>
-                </property>
-                <property name="rightMargin">
-                 <number>12</number>
-                </property>
-                <property name="bottomMargin">
-                 <number>6</number>
-                </property>
-                <item>
-   <layout class="QHBoxLayout" name="proxyModeRow">
-                  <property name="spacing">
-     <number>6</number>
-    </property>
-                  <item>
-                   <widget class="QRadioButton" name="proxy_0">
-                    <property name="text">
-                     <string>无代理</string>
-                    </property>
-                    <attribute name="buttonGroup">
-                     <string notr="true">radioProxyGroup</string>
-                    </attribute>
-                   </widget>
-                  </item>
-                  <item>
-                   <widget class="QRadioButton" name="proxy_1">
-                    <property name="text">
-                     <string>HTTP</string>
-                    </property>
-                    <attribute name="buttonGroup">
-                     <string notr="true">radioProxyGroup</string>
-                    </attribute>
-                   </widget>
-                  </item>
-                  <item>
-                   <widget class="QRadioButton" name="proxy_2">
-                    <property name="text">
-                     <string>Socks5</string>
-                    </property>
-                    <attribute name="buttonGroup">
-                     <string notr="true">radioProxyGroup</string>
-                    </attribute>
-                   </widget>
-                  </item>
-                  <item>
-                   <widget class="QRadioButton" name="proxy_3">
-                    <property name="text">
-                     <string>系统</string>
-                    </property>
-                    <attribute name="buttonGroup">
-                     <string notr="true">radioProxyGroup</string>
-                    </attribute>
-                   </widget>
-                  </item>
-<item>
-                   <spacer name="proxyModeSpacer">
-                    <property name="orientation">
-                     <enum>Qt::Horizontal</enum>
-                    </property>
-                    <property name="sizeHint" stdset="0">
-                     <size>
-                      <width>20</width>
-                      <height>10</height>
-                     </size>
-                    </property>
-                   </spacer>
-                  </item>
-                 </layout>
-  </item>
-                <item>
-   <layout class="QHBoxLayout" name="proxyAddrRow">
-                  <property name="spacing">
-     <number>6</number>
-    </property>
-                  <item>
-                   <widget class="QLabel" name="label_13">
-                    <property name="text">
-                     <string>代理地址</string>
-                    </property>
-                   </widget>
-                  </item>
-                  <item>
-                   <widget class="QLineEdit" name="httpLine">
-                    <property name="toolTip">
-                     <string>http://127.0.0.1:10809</string>
-                    </property>
-                    <property name="placeholderText">
-                     <string/>
-                    </property>
-                   </widget>
-                  </item>
-                  <item>
-                   <widget class="QLineEdit" name="sockEdit">
-                    <property name="toolTip">
-                     <string>127.0.0.1:10808</string>
-                    </property>
-                    <property name="placeholderText">
-                     <string/>
-                    </property>
-                   </widget>
-                  </item>
-                  <item>
-                   <widget class="QLabel" name="proxyLabel">
-                    <property name="text">
-                     <string></string>
-                    </property>
-                   </widget>
-                  </item>
-                  <item>
-                   <widget class="QLabel" name="checkLabel">
-                    <property name="styleSheet">
-                     <string notr="true">color:rgb(255, 0, 0)</string>
-                    </property>
-                    <property name="text">
-                     <string>未检测到系统代理</string>
-                    </property>
-                   </widget>
-                  </item>
-                  <item>
-                   <widget class="QLabel" name="proxyHint">
-                    <property name="text">
-                     <string>未启用代理</string>
-                    </property>
-                   </widget>
-                  </item>
-                 </layout>
-  </item>
-               </layout>
-              </widget>
-             </item>
-             <item>
-              <widget class="QWidget" name="speedBox" native="true">
-               <layout class="QVBoxLayout" name="speedLayout">
-                <property name="spacing">
-   <number>4</number>
-  </property>
-                <property name="leftMargin">
-                 <number>12</number>
-                </property>
-                <property name="topMargin">
-                 <number>2</number>
-                </property>
-                <property name="rightMargin">
-                 <number>12</number>
-                </property>
-                <property name="bottomMargin">
-                 <number>4</number>
-                </property>
-                <item>
-   <layout class="QHBoxLayout" name="speedCapRow">
-                  <property name="spacing">
-     <number>6</number>
-    </property>
-                  <item>
-                   <widget class="QLabel" name="speedCapLabel">
-                    <property name="text">
-                     <string>线路测速</string>
-                    </property>
-                   </widget>
-                  </item>
-<item>
-                    <spacer name="speedCapSpacer">
+                 <widget class="QWidget" name="proxyHeader" native="true">
+                  <layout class="QHBoxLayout" name="proxyHeaderLayout">
+                   <property name="spacing">
+    <number>8</number>
+   </property>
+                   <property name="leftMargin">
+                    <number>12</number>
+                   </property>
+                   <property name="topMargin">
+                    <number>2</number>
+                   </property>
+                   <property name="rightMargin">
+                    <number>12</number>
+                   </property>
+                   <property name="bottomMargin">
+                    <number>2</number>
+                   </property>
+                   <item>
+                    <widget class="QLabel" name="proxyTitleLabel">
+                     <property name="text">
+                      <string>分流设置</string>
+                     </property>
+                    </widget>
+                   </item>
+                   <item>
+                    <spacer name="proxyHeaderSpacer">
                      <property name="orientation">
                       <enum>Qt::Horizontal</enum>
                      </property>
@@ -880,574 +724,1053 @@
                      </property>
                     </spacer>
                    </item>
-                  <item>
-                   <widget class="QLabel" name="speedUnitLabel">
-                    <property name="text">
-                     <string>延迟 / 下载 · ms</string>
-                    </property>
-                   </widget>
-                  </item>
-                 </layout>
-  </item>
+                   <item>
+                    <widget class="QCommandLinkButton" name="cdnLinkButton">
+                     <property name="text">
+                      <string>说明</string>
+                     </property>
+                    </widget>
+                   </item>
+                  </layout>
+ </widget>
+                </item>
                 <item>
-   <layout class="QHBoxLayout" name="speedBody">
+                 <widget class="QWidget" name="proxyModeBox" native="true">
+                  <layout class="QVBoxLayout" name="proxyModeLayout">
+                   <property name="spacing">
+    <number>5</number>
+   </property>
+                   <property name="leftMargin">
+                    <number>12</number>
+                   </property>
+                   <property name="topMargin">
+                    <number>2</number>
+                   </property>
+                   <property name="rightMargin">
+                    <number>12</number>
+                   </property>
+                   <property name="bottomMargin">
+                    <number>6</number>
+                   </property>
+                   <item>
+    <layout class="QHBoxLayout" name="proxyModeRow">
+                     <property name="spacing">
+      <number>6</number>
+     </property>
+                     <item>
+                      <widget class="QRadioButton" name="proxy_0">
+                       <property name="text">
+                        <string>无代理</string>
+                       </property>
+                       <attribute name="buttonGroup">
+                        <string notr="true">radioProxyGroup</string>
+                       </attribute>
+                      </widget>
+                     </item>
+                     <item>
+                      <widget class="QRadioButton" name="proxy_1">
+                       <property name="text">
+                        <string>HTTP</string>
+                       </property>
+                       <attribute name="buttonGroup">
+                        <string notr="true">radioProxyGroup</string>
+                       </attribute>
+                      </widget>
+                     </item>
+                     <item>
+                      <widget class="QRadioButton" name="proxy_2">
+                       <property name="text">
+                        <string>Socks5</string>
+                       </property>
+                       <attribute name="buttonGroup">
+                        <string notr="true">radioProxyGroup</string>
+                       </attribute>
+                      </widget>
+                     </item>
+                     <item>
+                      <widget class="QRadioButton" name="proxy_3">
+                       <property name="text">
+                        <string>系统</string>
+                       </property>
+                       <attribute name="buttonGroup">
+                        <string notr="true">radioProxyGroup</string>
+                       </attribute>
+                      </widget>
+                     </item>
+                     <item>
+                      <spacer name="proxyModeSpacer">
+                       <property name="orientation">
+                        <enum>Qt::Horizontal</enum>
+                       </property>
+                       <property name="sizeHint" stdset="0">
+                        <size>
+                         <width>40</width>
+                         <height>10</height>
+                        </size>
+                       </property>
+                      </spacer>
+                     </item>
+                    </layout>
+   </item>
+                   <item>
+    <layout class="QHBoxLayout" name="proxyAddrRow">
+                     <property name="spacing">
+      <number>6</number>
+     </property>
+                     <item>
+                      <widget class="QLabel" name="label_13">
+                       <property name="text">
+                        <string>代理地址</string>
+                       </property>
+                      </widget>
+                     </item>
+                     <item>
+                      <widget class="QLineEdit" name="httpLine">
+                       <property name="toolTip">
+                        <string>http://127.0.0.1:10809</string>
+                       </property>
+                       <property name="placeholderText">
+                        <string/>
+                       </property>
+                      </widget>
+                     </item>
+                     <item>
+                      <widget class="QLineEdit" name="sockEdit">
+                       <property name="toolTip">
+                        <string>127.0.0.1:10808</string>
+                       </property>
+                       <property name="placeholderText">
+                        <string/>
+                       </property>
+                      </widget>
+                     </item>
+                     <item>
+                      <widget class="QLabel" name="proxyLabel">
+                       <property name="text">
+                        <string></string>
+                       </property>
+                      </widget>
+                     </item>
+                     <item>
+                      <widget class="QLabel" name="checkLabel">
+                       <property name="styleSheet">
+                        <string notr="true">color:rgb(255, 0, 0)</string>
+                       </property>
+                       <property name="text">
+                        <string>未检测到系统代理</string>
+                       </property>
+                      </widget>
+                     </item>
+                     <item>
+                      <widget class="QLabel" name="proxyHint">
+                       <property name="text">
+                        <string>未启用代理</string>
+                       </property>
+                      </widget>
+                     </item>
+                    </layout>
+   </item>
+                  </layout>
+ </widget>
+                </item>
+                <item>
+                 <widget class="QWidget" name="speedBox" native="true">
+                  <layout class="QVBoxLayout" name="speedLayout">
+                   <property name="spacing">
+    <number>2</number>
+   </property>
+                   <property name="leftMargin">
+                    <number>12</number>
+                   </property>
+                   <property name="topMargin">
+                    <number>2</number>
+                   </property>
+                   <property name="rightMargin">
+                    <number>12</number>
+                   </property>
+                   <property name="bottomMargin">
+                    <number>6</number>
+                   </property>
+                   <item>
+    <layout class="QHBoxLayout" name="speedCapRow">
+                     <property name="spacing">
+      <number>6</number>
+     </property>
+                     <item>
+                      <widget class="QLabel" name="speedCapLabel">
+                       <property name="text">
+                        <string>线路测速</string>
+                       </property>
+                      </widget>
+                     </item>
+                     <item>
+                      <spacer name="speedCapSpacer">
+                       <property name="orientation">
+                        <enum>Qt::Horizontal</enum>
+                       </property>
+                       <property name="sizeHint" stdset="0">
+                        <size>
+                         <width>40</width>
+                         <height>10</height>
+                        </size>
+                       </property>
+                      </spacer>
+                     </item>
+                     <item>
+                      <widget class="QPushButton" name="testSpeedButton">
+                       <property name="text">
+                        <string>测速</string>
+                       </property>
+                      </widget>
+                     </item>
+                    </layout>
+   </item>
+                   <item>
+    <layout class="QGridLayout" name="speedGrid">
+                     <property name="horizontalSpacing">
+      <number>6</number>
+     </property>
+                     <property name="verticalSpacing">
+      <number>0</number>
+     </property>
+                     <item row="0" column="0">
+                      <widget class="QLabel" name="label_18">
+                       <property name="text">
+                        <string>Api分流</string>
+                       </property>
+                      </widget>
+                     </item>
+                     <item row="0" column="1">
+                      <widget class="QLabel" name="label_20">
+                       <property name="text">
+                        <string>延迟</string>
+                       </property>
+                       <property name="alignment">
+                        <set>Qt::AlignCenter</set>
+                       </property>
+                      </widget>
+                     </item>
+                     <item row="0" column="2">
+                      <widget class="QLabel" name="label_21">
+                       <property name="text">
+                        <string>图片分流</string>
+                       </property>
+                      </widget>
+                     </item>
+                     <item row="0" column="3">
+                      <widget class="QLabel" name="label_19">
+                       <property name="text">
+                        <string>速度</string>
+                       </property>
+                       <property name="alignment">
+                        <set>Qt::AlignCenter</set>
+                       </property>
+                      </widget>
+                     </item>
+                     <item row="1" column="0" colspan="4">
+                      <widget class="QFrame" name="speedLine1">
+                       <property name="minimumSize">
+                        <size>
+                         <width>0</width>
+                         <height>1</height>
+                        </size>
+                       </property>
+                       <property name="maximumSize">
+                        <size>
+                         <width>16777215</width>
+                         <height>1</height>
+                        </size>
+                       </property>
+                       <property name="frameShape">
+                        <enum>QFrame::HLine</enum>
+                       </property>
+                       <property name="frameShadow">
+                        <enum>QFrame::Plain</enum>
+                       </property>
+                      </widget>
+                     </item>
+                     <item row="2" column="0">
+                      <widget class="QRadioButton" name="radioButton_1">
+                       <property name="text">
+                        <string>分流1</string>
+                       </property>
+                       <attribute name="buttonGroup">
+                        <string notr="true">radioApiGroup</string>
+                       </attribute>
+                      </widget>
+                     </item>
+                     <item row="2" column="1">
+                      <widget class="QLabel" name="label_api_1">
+                       <property name="text">
+                        <string/>
+                       </property>
+                       <property name="alignment">
+                        <set>Qt::AlignCenter</set>
+                       </property>
+                      </widget>
+                     </item>
+                     <item row="2" column="2">
+                      <widget class="QRadioButton" name="radio_img_1">
+                       <property name="text">
+                        <string>分流1</string>
+                       </property>
+                       <attribute name="buttonGroup">
+                        <string notr="true">radioImgGroup</string>
+                       </attribute>
+                      </widget>
+                     </item>
+                     <item row="2" column="3">
+                      <widget class="QLabel" name="label_img_1">
+                       <property name="text">
+                        <string/>
+                       </property>
+                       <property name="alignment">
+                        <set>Qt::AlignCenter</set>
+                       </property>
+                      </widget>
+                     </item>
+                     <item row="3" column="0" colspan="4">
+                      <widget class="QFrame" name="speedLine2">
+                       <property name="minimumSize">
+                        <size>
+                         <width>0</width>
+                         <height>1</height>
+                        </size>
+                       </property>
+                       <property name="maximumSize">
+                        <size>
+                         <width>16777215</width>
+                         <height>1</height>
+                        </size>
+                       </property>
+                       <property name="frameShape">
+                        <enum>QFrame::HLine</enum>
+                       </property>
+                       <property name="frameShadow">
+                        <enum>QFrame::Plain</enum>
+                       </property>
+                      </widget>
+                     </item>
+                     <item row="4" column="0">
+                      <widget class="QRadioButton" name="radioButton_2">
+                       <property name="text">
+                        <string>分流2</string>
+                       </property>
+                       <attribute name="buttonGroup">
+                        <string notr="true">radioApiGroup</string>
+                       </attribute>
+                      </widget>
+                     </item>
+                     <item row="4" column="1">
+                      <widget class="QLabel" name="label_api_2">
+                       <property name="text">
+                        <string/>
+                       </property>
+                       <property name="alignment">
+                        <set>Qt::AlignCenter</set>
+                       </property>
+                      </widget>
+                     </item>
+                     <item row="4" column="2">
+                      <widget class="QRadioButton" name="radio_img_2">
+                       <property name="text">
+                        <string>分流2</string>
+                       </property>
+                       <attribute name="buttonGroup">
+                        <string notr="true">radioImgGroup</string>
+                       </attribute>
+                      </widget>
+                     </item>
+                     <item row="4" column="3">
+                      <widget class="QLabel" name="label_img_2">
+                       <property name="text">
+                        <string/>
+                       </property>
+                       <property name="alignment">
+                        <set>Qt::AlignCenter</set>
+                       </property>
+                      </widget>
+                     </item>
+                     <item row="5" column="0" colspan="4">
+                      <widget class="QFrame" name="speedLine3">
+                       <property name="minimumSize">
+                        <size>
+                         <width>0</width>
+                         <height>1</height>
+                        </size>
+                       </property>
+                       <property name="maximumSize">
+                        <size>
+                         <width>16777215</width>
+                         <height>1</height>
+                        </size>
+                       </property>
+                       <property name="frameShape">
+                        <enum>QFrame::HLine</enum>
+                       </property>
+                       <property name="frameShadow">
+                        <enum>QFrame::Plain</enum>
+                       </property>
+                      </widget>
+                     </item>
+                     <item row="6" column="0">
+                      <widget class="QRadioButton" name="radioButton_3">
+                       <property name="text">
+                        <string>分流3</string>
+                       </property>
+                       <attribute name="buttonGroup">
+                        <string notr="true">radioApiGroup</string>
+                       </attribute>
+                      </widget>
+                     </item>
+                     <item row="6" column="1">
+                      <widget class="QLabel" name="label_api_3">
+                       <property name="text">
+                        <string/>
+                       </property>
+                       <property name="alignment">
+                        <set>Qt::AlignCenter</set>
+                       </property>
+                      </widget>
+                     </item>
+                     <item row="6" column="2">
+                      <widget class="QRadioButton" name="radio_img_3">
+                       <property name="text">
+                        <string>分流3</string>
+                       </property>
+                       <attribute name="buttonGroup">
+                        <string notr="true">radioImgGroup</string>
+                       </attribute>
+                      </widget>
+                     </item>
+                     <item row="6" column="3">
+                      <widget class="QLabel" name="label_img_3">
+                       <property name="text">
+                        <string/>
+                       </property>
+                       <property name="alignment">
+                        <set>Qt::AlignCenter</set>
+                       </property>
+                      </widget>
+                     </item>
+                     <item row="7" column="0" colspan="4">
+                      <widget class="QFrame" name="speedLine4">
+                       <property name="minimumSize">
+                        <size>
+                         <width>0</width>
+                         <height>1</height>
+                        </size>
+                       </property>
+                       <property name="maximumSize">
+                        <size>
+                         <width>16777215</width>
+                         <height>1</height>
+                        </size>
+                       </property>
+                       <property name="frameShape">
+                        <enum>QFrame::HLine</enum>
+                       </property>
+                       <property name="frameShadow">
+                        <enum>QFrame::Plain</enum>
+                       </property>
+                      </widget>
+                     </item>
+                     <item row="8" column="0">
+                      <widget class="QRadioButton" name="radioButton_4">
+                       <property name="text">
+                        <string>分流4</string>
+                       </property>
+                       <attribute name="buttonGroup">
+                        <string notr="true">radioApiGroup</string>
+                       </attribute>
+                      </widget>
+                     </item>
+                     <item row="8" column="1">
+                      <widget class="QLabel" name="label_api_4">
+                       <property name="text">
+                        <string/>
+                       </property>
+                       <property name="alignment">
+                        <set>Qt::AlignCenter</set>
+                       </property>
+                      </widget>
+                     </item>
+                     <item row="8" column="2">
+                      <widget class="QRadioButton" name="radio_img_4">
+                       <property name="text">
+                        <string>分流4</string>
+                       </property>
+                       <attribute name="buttonGroup">
+                        <string notr="true">radioImgGroup</string>
+                       </attribute>
+                      </widget>
+                     </item>
+                     <item row="8" column="3">
+                      <widget class="QLabel" name="label_img_4">
+                       <property name="text">
+                        <string/>
+                       </property>
+                       <property name="alignment">
+                        <set>Qt::AlignCenter</set>
+                       </property>
+                      </widget>
+                     </item>
+                     <item row="9" column="0" colspan="4">
+                      <widget class="QFrame" name="speedLine5">
+                       <property name="minimumSize">
+                        <size>
+                         <width>0</width>
+                         <height>1</height>
+                        </size>
+                       </property>
+                       <property name="maximumSize">
+                        <size>
+                         <width>16777215</width>
+                         <height>1</height>
+                        </size>
+                       </property>
+                       <property name="frameShape">
+                        <enum>QFrame::HLine</enum>
+                       </property>
+                       <property name="frameShadow">
+                        <enum>QFrame::Plain</enum>
+                       </property>
+                      </widget>
+                     </item>
+                     <item row="10" column="0">
+                      <widget class="QRadioButton" name="radioButton_6">
+                       <property name="text">
+                        <string>US反代分流</string>
+                       </property>
+                       <attribute name="buttonGroup">
+                        <string notr="true">radioApiGroup</string>
+                       </attribute>
+                      </widget>
+                     </item>
+                     <item row="10" column="1">
+                      <widget class="QLabel" name="label_api_6">
+                       <property name="text">
+                        <string/>
+                       </property>
+                       <property name="alignment">
+                        <set>Qt::AlignCenter</set>
+                       </property>
+                      </widget>
+                     </item>
+                     <item row="10" column="2">
+                      <widget class="QRadioButton" name="radio_img_6">
+                       <property name="text">
+                        <string>US反代分流</string>
+                       </property>
+                       <attribute name="buttonGroup">
+                        <string notr="true">radioImgGroup</string>
+                       </attribute>
+                      </widget>
+                     </item>
+                     <item row="10" column="3">
+                      <widget class="QLabel" name="label_img_6">
+                       <property name="text">
+                        <string/>
+                       </property>
+                       <property name="alignment">
+                        <set>Qt::AlignCenter</set>
+                       </property>
+                      </widget>
+                     </item>
+                     <item row="11" column="0" colspan="4">
+                      <widget class="QFrame" name="speedLine6">
+                       <property name="minimumSize">
+                        <size>
+                         <width>0</width>
+                         <height>1</height>
+                        </size>
+                       </property>
+                       <property name="maximumSize">
+                        <size>
+                         <width>16777215</width>
+                         <height>1</height>
+                        </size>
+                       </property>
+                       <property name="frameShape">
+                        <enum>QFrame::HLine</enum>
+                       </property>
+                       <property name="frameShadow">
+                        <enum>QFrame::Plain</enum>
+                       </property>
+                      </widget>
+                     </item>
+                     <item row="12" column="0">
+                      <widget class="QRadioButton" name="radioButton_5">
+                       <property name="text">
+                        <string>IP分流</string>
+                       </property>
+                       <attribute name="buttonGroup">
+                        <string notr="true">radioApiGroup</string>
+                       </attribute>
+                      </widget>
+                     </item>
+                     <item row="12" column="1">
+                      <widget class="QLabel" name="label_api_5">
+                       <property name="text">
+                        <string/>
+                       </property>
+                       <property name="alignment">
+                        <set>Qt::AlignCenter</set>
+                       </property>
+                      </widget>
+                     </item>
+                     <item row="12" column="2">
+                      <widget class="QRadioButton" name="radio_img_5">
+                       <property name="text">
+                        <string>IP分流</string>
+                       </property>
+                       <attribute name="buttonGroup">
+                        <string notr="true">radioImgGroup</string>
+                       </attribute>
+                      </widget>
+                     </item>
+                     <item row="12" column="3">
+                      <widget class="QLabel" name="label_img_5">
+                       <property name="text">
+                        <string/>
+                       </property>
+                       <property name="alignment">
+                        <set>Qt::AlignCenter</set>
+                       </property>
+                      </widget>
+                     </item>
+                    </layout>
+   </item>
+                  </layout>
+ </widget>
+                </item>
+                <item>
+                 <widget class="QWidget" name="proxyListBox" native="true">
+                  <layout class="QVBoxLayout" name="proxyListLayout">
+                   <property name="spacing">
+    <number>0</number>
+   </property>
+                   <property name="leftMargin">
+                    <number>0</number>
+                   </property>
+                   <property name="topMargin">
+                    <number>4</number>
+                   </property>
+                   <property name="rightMargin">
+                    <number>0</number>
+                   </property>
+                   <property name="bottomMargin">
+                    <number>0</number>
+                   </property>
+                   <item>
+    <widget class="QWidget" name="proxyListHead" native="true">
+                     <layout class="QHBoxLayout" name="proxyListHeadLayout">
+                      <property name="spacing">
+       <number>6</number>
+      </property>
+                      <property name="leftMargin">
+                       <number>12</number>
+                      </property>
+                      <property name="topMargin">
+                       <number>0</number>
+                      </property>
+                      <property name="rightMargin">
+                       <number>12</number>
+                      </property>
+                      <property name="bottomMargin">
+                       <number>0</number>
+                      </property>
+                      <item>
+                       <widget class="QLabel" name="proxyListTitle">
+                        <property name="text">
+                         <string>节点列表</string>
+                        </property>
+                       </widget>
+                      </item>
+                      <item>
+                       <widget class="QLabel" name="proxyCountLabel">
+                        <property name="text">
+                         <string></string>
+                        </property>
+                       </widget>
+                      </item>
+                      <item>
+                       <spacer name="proxyHeadSpacer">
+                        <property name="orientation">
+                         <enum>Qt::Horizontal</enum>
+                        </property>
+                        <property name="sizeHint" stdset="0">
+                         <size>
+                          <width>40</width>
+                          <height>10</height>
+                         </size>
+                        </property>
+                       </spacer>
+                      </item>
+                      <item>
+                       <widget class="QPushButton" name="proxySortButton">
+                        <property name="text">
+                         <string>智能排序 ▾</string>
+                        </property>
+                       </widget>
+                      </item>
+                      <item>
+                       <widget class="QPushButton" name="proxyDensityButton">
+                        <property name="maximumSize">
+                         <size>
+                          <width>34</width>
+                          <height>16777215</height>
+                         </size>
+                        </property>
+                        <property name="toolTip">
+                         <string>紧凑 / 舒适</string>
+                        </property>
+                        <property name="text">
+                         <string>≡</string>
+                        </property>
+                       </widget>
+                      </item>
+                     </layout>
+    </widget>
+   </item>
+                   <item>
+    <widget class="QWidget" name="proxyFilterBar" native="true">
+                     <layout class="QHBoxLayout" name="proxyFilterLayout">
+                      <property name="spacing">
+       <number>5</number>
+      </property>
+                      <property name="leftMargin">
+                       <number>12</number>
+                      </property>
+                      <property name="topMargin">
+                       <number>0</number>
+                      </property>
+                      <property name="rightMargin">
+                       <number>12</number>
+                      </property>
+                      <property name="bottomMargin">
+                       <number>0</number>
+                      </property>
+                      <item>
+                       <widget class="QPushButton" name="proxyFilterAll">
+       <property name="checkable">
+        <bool>true</bool>
+       </property>
+       <property name="checked">
+        <bool>true</bool>
+       </property>
+        <attribute name="buttonGroup">
+         <string notr="true">proxyFilterGroup</string>
+        </attribute>
+        <property name="text">
+         <string>全部</string>
+        </property>
+       </widget>
+                      </item>
+                      <item>
+                       <widget class="QPushButton" name="proxyFilterProxy">
+       <property name="checkable">
+        <bool>true</bool>
+       </property>
+        <attribute name="buttonGroup">
+         <string notr="true">proxyFilterGroup</string>
+        </attribute>
+        <property name="text">
+         <string>ProxyIP</string>
+        </property>
+       </widget>
+                      </item>
+                      <item>
+                       <widget class="QPushButton" name="proxyFilterCf">
+       <property name="checkable">
+        <bool>true</bool>
+       </property>
+        <attribute name="buttonGroup">
+         <string notr="true">proxyFilterGroup</string>
+        </attribute>
+        <property name="text">
+         <string>优选</string>
+        </property>
+       </widget>
+                      </item>
+                      <item>
+                       <spacer name="proxyFilterSpacer">
+                        <property name="orientation">
+                         <enum>Qt::Horizontal</enum>
+                        </property>
+                        <property name="sizeHint" stdset="0">
+                         <size>
+                          <width>40</width>
+                          <height>10</height>
+                         </size>
+                        </property>
+                       </spacer>
+                      </item>
+                      <item>
+                       <widget class="QLabel" name="proxyCutLabel">
+                        <property name="text">
+                         <string></string>
+                        </property>
+                       </widget>
+                      </item>
+                     </layout>
+    </widget>
+   </item>
+                   <item>
+    <widget class="QWidget" name="proxyColHead" native="true">
+                     <layout class="QHBoxLayout" name="proxyColHeadLayout">
+                      <property name="spacing">
+       <number>8</number>
+      </property>
+                      <property name="leftMargin">
+                       <number>34</number>
+                      </property>
+                      <property name="topMargin">
+                       <number>0</number>
+                      </property>
+                      <property name="rightMargin">
+                       <number>12</number>
+                      </property>
+                      <property name="bottomMargin">
+                       <number>0</number>
+                      </property>
+                      <item>
+                       <widget class="QLabel" name="colNameLabel">
+                        <property name="text">
+                         <string>节点 / 地区 · ISP</string>
+                        </property>
+                       </widget>
+                      </item>
+                      <item>
+                       <widget class="QLabel" name="colSpeedLabel">
+                        <property name="minimumSize">
+                         <size>
+                          <width>86</width>
+                          <height>0</height>
+                         </size>
+                        </property>
+                        <property name="text">
+                         <string>延迟 / 下载</string>
+                        </property>
+                        <property name="alignment">
+                         <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+                        </property>
+                       </widget>
+                      </item>
+                     </layout>
+    </widget>
+   </item>
+                   <item>
+                    <widget class="BaseTableWidget" name="tableWidget">
+                     <property name="verticalScrollBarPolicy">
+      <enum>Qt::ScrollBarAlwaysOff</enum>
+     </property>
+                     <property name="horizontalScrollBarPolicy">
+      <enum>Qt::ScrollBarAlwaysOff</enum>
+     </property>
+                     <column>
+      <property name="text">
+       <string>节点</string>
+      </property>
+     </column>
+                    </widget>
+                   </item>
+                   <item>
+    <spacer name="proxyListBottomSpacer">
+     <property name="orientation">
+      <enum>Qt::Vertical</enum>
+     </property>
+     <property name="sizeType">
+      <enum>QSizePolicy::Fixed</enum>
+     </property>
+     <property name="sizeHint" stdset="0">
+      <size>
+       <width>20</width>
+       <height>8</height>
+      </size>
+     </property>
+    </spacer>
+   </item>
+                  </layout>
+ </widget>
+                </item>
+               </layout>
+              </widget>
+             </widget>
+            </item>
+            <item>
+             <widget class="QWidget" name="proxyAdvPanel" native="true">
+              <property name="visible">
+  <bool>false</bool>
+ </property>
+              <layout class="QVBoxLayout" name="proxyAdvOuterLayout">
+               <property name="spacing">
+   <number>0</number>
+  </property>
+               <property name="leftMargin">
+                <number>8</number>
+               </property>
+               <property name="topMargin">
+                <number>4</number>
+               </property>
+               <property name="rightMargin">
+                <number>8</number>
+               </property>
+               <property name="bottomMargin">
+                <number>0</number>
+               </property>
+               <item>
+                <widget class="QWidget" name="proxyAdvFrame" native="true">
+                 <layout class="QVBoxLayout" name="proxyAdvLayout">
                   <property name="spacing">
-     <number>8</number>
-    </property>
+      <number>2</number>
+     </property>
+                  <property name="leftMargin">
+                   <number>10</number>
+                  </property>
+                  <property name="topMargin">
+                   <number>8</number>
+                  </property>
+                  <property name="rightMargin">
+                   <number>10</number>
+                  </property>
+                  <property name="bottomMargin">
+                   <number>8</number>
+                  </property>
                   <item>
-                   <widget class="QPushButton" name="testSpeedButton">
-                    <property name="minimumSize">
-                     <size>
-                      <width>46</width>
-                      <height>0</height>
-                     </size>
-                    </property>
-                    <property name="maximumSize">
-                     <size>
-                      <width>46</width>
-                      <height>16777215</height>
-                     </size>
-                    </property>
-                    <property name="text">
-                     <string>测速</string>
-                    </property>
-                   </widget>
-                  </item>
+      <layout class="QHBoxLayout" name="proxyTimeoutRow">
+                    <property name="spacing">
+        <number>6</number>
+       </property>
+                    <item>
+                     <widget class="QLabel" name="label_15">
+                      <property name="text">
+                       <string>API超时</string>
+                      </property>
+                     </widget>
+                    </item>
+                    <item>
+                     <widget class="WheelComboBox" name="apiTimeout">
+                      <item>
+                       <property name="text">
+                        <string>2</string>
+                       </property>
+                      </item>
+                      <item>
+                       <property name="text">
+                        <string>5</string>
+                       </property>
+                      </item>
+                      <item>
+                       <property name="text">
+                        <string>7</string>
+                       </property>
+                      </item>
+                     </widget>
+                    </item>
+                    <item>
+                     <widget class="QLabel" name="label_16">
+                      <property name="text">
+                       <string>图片超时</string>
+                      </property>
+                     </widget>
+                    </item>
+                    <item>
+                     <widget class="WheelComboBox" name="imgTimeout">
+                      <item>
+                       <property name="text">
+                        <string>2</string>
+                       </property>
+                      </item>
+                      <item>
+                       <property name="text">
+                        <string>5</string>
+                       </property>
+                      </item>
+                      <item>
+                       <property name="text">
+                        <string>7</string>
+                       </property>
+                      </item>
+                      <item>
+                       <property name="text">
+                        <string>10</string>
+                       </property>
+                      </item>
+                      <item>
+                       <property name="text">
+                        <string>15</string>
+                       </property>
+                      </item>
+                     </widget>
+                    </item>
+                    <item>
+                     <spacer name="proxyTimeoutSpacer">
+                      <property name="orientation">
+                       <enum>Qt::Horizontal</enum>
+                      </property>
+                      <property name="sizeHint" stdset="0">
+                       <size>
+                        <width>40</width>
+                        <height>10</height>
+                       </size>
+                      </property>
+                     </spacer>
+                    </item>
+                   </layout>
+     </item>
                   <item>
-     <layout class="QGridLayout" name="speedGrid">
-                    <property name="horizontalSpacing">
-       <number>4</number>
-      </property>
-                    <property name="verticalSpacing">
-       <number>3</number>
-      </property>
-                    <item row="0" column="0">
-                     <widget class="QWidget" name="chipApi1" native="true">
-                      <layout class="QHBoxLayout" name="chipApi1Layout">
-                       <property name="spacing">
-                        <number>2</number>
-                       </property>
-                       <property name="leftMargin">
-                        <number>0</number>
-                       </property>
-                       <property name="topMargin">
-                        <number>0</number>
-                       </property>
-                       <property name="rightMargin">
-                        <number>0</number>
-                       </property>
-                       <property name="bottomMargin">
-                        <number>0</number>
-                       </property>
-                       <item>
-                       <widget class="QRadioButton" name="radioButton_1">
-                        <property name="text">
-                         <string>1</string>
-                        </property>
-                        <attribute name="buttonGroup">
-                         <string notr="true">radioApiGroup</string>
-                        </attribute>
-                       </widget>
-
-                       </item>
-                       <item>
-                        <widget class="QLabel" name="label_api_1">
-                         <property name="text">
-                          <string/>
-                         </property>
-                        </widget>
-                       </item>
-                      </layout>
+      <layout class="QHBoxLayout" name="proxyDohRow">
+                    <property name="spacing">
+        <number>6</number>
+       </property>
+                    <item>
+                     <widget class="QLabel" name="label_17">
+                      <property name="text">
+                       <string>DOH</string>
+                      </property>
                      </widget>
                     </item>
-                    <item row="0" column="1">
-                     <widget class="QWidget" name="chipApi2" native="true">
-                      <layout class="QHBoxLayout" name="chipApi2Layout">
-                       <property name="spacing">
-                        <number>2</number>
-                       </property>
-                       <property name="leftMargin">
-                        <number>0</number>
-                       </property>
-                       <property name="topMargin">
-                        <number>0</number>
-                       </property>
-                       <property name="rightMargin">
-                        <number>0</number>
-                       </property>
-                       <property name="bottomMargin">
-                        <number>0</number>
-                       </property>
-                       <item>
-                       <widget class="QRadioButton" name="radioButton_2">
-                        <property name="text">
-                         <string>2</string>
-                        </property>
-                        <attribute name="buttonGroup">
-                         <string notr="true">radioApiGroup</string>
-                        </attribute>
-                       </widget>
-
-                       </item>
-                       <item>
-                        <widget class="QLabel" name="label_api_2">
-                         <property name="text">
-                          <string/>
-                         </property>
-                        </widget>
-                       </item>
-                      </layout>
+                    <item>
+                     <widget class="TipLineEdit" name="dohLine">
+                      <property name="readOnly">
+                       <bool>true</bool>
+                      </property>
                      </widget>
                     </item>
-                    <item row="0" column="2">
-                     <widget class="QWidget" name="chipApi3" native="true">
-                      <layout class="QHBoxLayout" name="chipApi3Layout">
-                       <property name="spacing">
-                        <number>2</number>
-                       </property>
-                       <property name="leftMargin">
-                        <number>0</number>
-                       </property>
-                       <property name="topMargin">
-                        <number>0</number>
-                       </property>
-                       <property name="rightMargin">
-                        <number>0</number>
-                       </property>
-                       <property name="bottomMargin">
-                        <number>0</number>
-                       </property>
-                       <item>
-                       <widget class="QRadioButton" name="radioButton_3">
-                        <property name="text">
-                         <string>3</string>
-                        </property>
-                        <attribute name="buttonGroup">
-                         <string notr="true">radioApiGroup</string>
-                        </attribute>
-                       </widget>
-
-                       </item>
-                       <item>
-                        <widget class="QLabel" name="label_api_3">
-                         <property name="text">
-                          <string/>
-                         </property>
-                        </widget>
-                       </item>
-                      </layout>
-                     </widget>
-                    </item>
-                    <item row="0" column="3">
-                     <widget class="QWidget" name="chipApi4" native="true">
-                      <layout class="QHBoxLayout" name="chipApi4Layout">
-                       <property name="spacing">
-                        <number>2</number>
-                       </property>
-                       <property name="leftMargin">
-                        <number>0</number>
-                       </property>
-                       <property name="topMargin">
-                        <number>0</number>
-                       </property>
-                       <property name="rightMargin">
-                        <number>0</number>
-                       </property>
-                       <property name="bottomMargin">
-                        <number>0</number>
-                       </property>
-                       <item>
-                       <widget class="QRadioButton" name="radioButton_4">
-                        <property name="text">
-                         <string>4</string>
-                        </property>
-                        <attribute name="buttonGroup">
-                         <string notr="true">radioApiGroup</string>
-                        </attribute>
-                       </widget>
-
-                       </item>
-                       <item>
-                        <widget class="QLabel" name="label_api_4">
-                         <property name="text">
-                          <string/>
-                         </property>
-                        </widget>
-                       </item>
-                      </layout>
-                     </widget>
-                    </item>
-                    <item row="0" column="4">
-                     <widget class="QWidget" name="chipApi5" native="true">
-                      <layout class="QHBoxLayout" name="chipApi5Layout">
-                       <property name="spacing">
-                        <number>2</number>
-                       </property>
-                       <property name="leftMargin">
-                        <number>0</number>
-                       </property>
-                       <property name="topMargin">
-                        <number>0</number>
-                       </property>
-                       <property name="rightMargin">
-                        <number>0</number>
-                       </property>
-                       <property name="bottomMargin">
-                        <number>0</number>
-                       </property>
-                       <item>
-                       <widget class="QRadioButton" name="radioButton_5">
-                        <property name="text">
-                         <string>IP</string>
-                        </property>
-                        <attribute name="buttonGroup">
-                         <string notr="true">radioApiGroup</string>
-                        </attribute>
-                       </widget>
-
-                       </item>
-                       <item>
-                        <widget class="QLabel" name="label_api_5">
-                         <property name="text">
-                          <string/>
-                         </property>
-                        </widget>
-                       </item>
-                      </layout>
-                     </widget>
-                    </item>
-                    <item row="0" column="5">
-                     <widget class="QWidget" name="chipApi6" native="true">
-                      <layout class="QHBoxLayout" name="chipApi6Layout">
-                       <property name="spacing">
-                        <number>2</number>
-                       </property>
-                       <property name="leftMargin">
-                        <number>0</number>
-                       </property>
-                       <property name="topMargin">
-                        <number>0</number>
-                       </property>
-                       <property name="rightMargin">
-                        <number>0</number>
-                       </property>
-                       <property name="bottomMargin">
-                        <number>0</number>
-                       </property>
-                       <item>
-                       <widget class="QRadioButton" name="radioButton_6">
-                        <property name="text">
-                         <string>6</string>
-                        </property>
-                        <attribute name="buttonGroup">
-                         <string notr="true">radioApiGroup</string>
-                        </attribute>
-                       </widget>
-
-                       </item>
-                       <item>
-                        <widget class="QLabel" name="label_api_6">
-                         <property name="text">
-                          <string/>
-                         </property>
-                        </widget>
-                       </item>
-                      </layout>
-                     </widget>
-                    </item>
-                    <item row="1" column="0">
-                     <widget class="QWidget" name="chipImg1" native="true">
-                      <layout class="QHBoxLayout" name="chipImg1Layout">
-                       <property name="spacing">
-                        <number>2</number>
-                       </property>
-                       <property name="leftMargin">
-                        <number>0</number>
-                       </property>
-                       <property name="topMargin">
-                        <number>0</number>
-                       </property>
-                       <property name="rightMargin">
-                        <number>0</number>
-                       </property>
-                       <property name="bottomMargin">
-                        <number>0</number>
-                       </property>
-                       <item>
-                       <widget class="QRadioButton" name="radio_img_1">
-                        <property name="text">
-                         <string>1</string>
-                        </property>
-                        <attribute name="buttonGroup">
-                         <string notr="true">radioImgGroup</string>
-                        </attribute>
-                       </widget>
-
-                       </item>
-                       <item>
-                        <widget class="QLabel" name="label_img_1">
-                         <property name="text">
-                          <string/>
-                         </property>
-                        </widget>
-                       </item>
-                      </layout>
-                     </widget>
-                    </item>
-                    <item row="1" column="1">
-                     <widget class="QWidget" name="chipImg2" native="true">
-                      <layout class="QHBoxLayout" name="chipImg2Layout">
-                       <property name="spacing">
-                        <number>2</number>
-                       </property>
-                       <property name="leftMargin">
-                        <number>0</number>
-                       </property>
-                       <property name="topMargin">
-                        <number>0</number>
-                       </property>
-                       <property name="rightMargin">
-                        <number>0</number>
-                       </property>
-                       <property name="bottomMargin">
-                        <number>0</number>
-                       </property>
-                       <item>
-                       <widget class="QRadioButton" name="radio_img_2">
-                        <property name="text">
-                         <string>2</string>
-                        </property>
-                        <attribute name="buttonGroup">
-                         <string notr="true">radioImgGroup</string>
-                        </attribute>
-                       </widget>
-
-                       </item>
-                       <item>
-                        <widget class="QLabel" name="label_img_2">
-                         <property name="text">
-                          <string/>
-                         </property>
-                        </widget>
-                       </item>
-                      </layout>
-                     </widget>
-                    </item>
-                    <item row="1" column="2">
-                     <widget class="QWidget" name="chipImg3" native="true">
-                      <layout class="QHBoxLayout" name="chipImg3Layout">
-                       <property name="spacing">
-                        <number>2</number>
-                       </property>
-                       <property name="leftMargin">
-                        <number>0</number>
-                       </property>
-                       <property name="topMargin">
-                        <number>0</number>
-                       </property>
-                       <property name="rightMargin">
-                        <number>0</number>
-                       </property>
-                       <property name="bottomMargin">
-                        <number>0</number>
-                       </property>
-                       <item>
-                       <widget class="QRadioButton" name="radio_img_3">
-                        <property name="text">
-                         <string>3</string>
-                        </property>
-                        <attribute name="buttonGroup">
-                         <string notr="true">radioImgGroup</string>
-                        </attribute>
-                       </widget>
-
-                       </item>
-                       <item>
-                        <widget class="QLabel" name="label_img_3">
-                         <property name="text">
-                          <string/>
-                         </property>
-                        </widget>
-                       </item>
-                      </layout>
-                     </widget>
-                    </item>
-                    <item row="1" column="3">
-                     <widget class="QWidget" name="chipImg4" native="true">
-                      <layout class="QHBoxLayout" name="chipImg4Layout">
-                       <property name="spacing">
-                        <number>2</number>
-                       </property>
-                       <property name="leftMargin">
-                        <number>0</number>
-                       </property>
-                       <property name="topMargin">
-                        <number>0</number>
-                       </property>
-                       <property name="rightMargin">
-                        <number>0</number>
-                       </property>
-                       <property name="bottomMargin">
-                        <number>0</number>
-                       </property>
-                       <item>
-                       <widget class="QRadioButton" name="radio_img_4">
-                        <property name="text">
-                         <string>4</string>
-                        </property>
-                        <attribute name="buttonGroup">
-                         <string notr="true">radioImgGroup</string>
-                        </attribute>
-                       </widget>
-
-                       </item>
-                       <item>
-                        <widget class="QLabel" name="label_img_4">
-                         <property name="text">
-                          <string/>
-                         </property>
-                        </widget>
-                       </item>
-                      </layout>
-                     </widget>
-                    </item>
-                    <item row="1" column="4">
-                     <widget class="QWidget" name="chipImg5" native="true">
-                      <layout class="QHBoxLayout" name="chipImg5Layout">
-                       <property name="spacing">
-                        <number>2</number>
-                       </property>
-                       <property name="leftMargin">
-                        <number>0</number>
-                       </property>
-                       <property name="topMargin">
-                        <number>0</number>
-                       </property>
-                       <property name="rightMargin">
-                        <number>0</number>
-                       </property>
-                       <property name="bottomMargin">
-                        <number>0</number>
-                       </property>
-                       <item>
-                       <widget class="QRadioButton" name="radio_img_5">
-                        <property name="text">
-                         <string>IP</string>
-                        </property>
-                        <attribute name="buttonGroup">
-                         <string notr="true">radioImgGroup</string>
-                        </attribute>
-                       </widget>
-
-                       </item>
-                       <item>
-                        <widget class="QLabel" name="label_img_5">
-                         <property name="text">
-                          <string/>
-                         </property>
-                        </widget>
-                       </item>
-                      </layout>
-                     </widget>
-                    </item>
-                    <item row="1" column="5">
-                     <widget class="QWidget" name="chipImg6" native="true">
-                      <layout class="QHBoxLayout" name="chipImg6Layout">
-                       <property name="spacing">
-                        <number>2</number>
-                       </property>
-                       <property name="leftMargin">
-                        <number>0</number>
-                       </property>
-                       <property name="topMargin">
-                        <number>0</number>
-                       </property>
-                       <property name="rightMargin">
-                        <number>0</number>
-                       </property>
-                       <property name="bottomMargin">
-                        <number>0</number>
-                       </property>
-                       <item>
-                       <widget class="QRadioButton" name="radio_img_6">
-                        <property name="text">
-                         <string>6</string>
-                        </property>
-                        <attribute name="buttonGroup">
-                         <string notr="true">radioImgGroup</string>
-                        </attribute>
-                       </widget>
-
-                       </item>
-                       <item>
-                        <widget class="QLabel" name="label_img_6">
-                         <property name="text">
-                          <string/>
-                         </property>
-                        </widget>
-                       </item>
-                      </layout>
+                    <item>
+                     <widget class="QToolButton" name="dohTool">
+                      <property name="text">
+                       <string/>
+                      </property>
                      </widget>
                     </item>
                    </layout>
-    </item>
-                 </layout>
-  </item>
-               </layout>
-              </widget>
-             </item>
-             <item>
-              <widget class="QWidget" name="proxyListBox" native="true">
-               <layout class="QVBoxLayout" name="proxyListLayout">
-                <property name="spacing">
-   <number>0</number>
-  </property>
-                <property name="leftMargin">
-                 <number>0</number>
-                </property>
-                <property name="topMargin">
-                 <number>0</number>
-                </property>
-                <property name="rightMargin">
-                 <number>0</number>
-                </property>
-                <property name="bottomMargin">
-                 <number>0</number>
-                </property>
-                <item>
-   <widget class="QWidget" name="proxyListHead" native="true">
-                  <layout class="QHBoxLayout" name="proxyListHeadLayout">
-                   <property name="spacing">
-      <number>6</number>
-     </property>
-                   <property name="leftMargin">
-                    <number>12</number>
-                   </property>
-                   <property name="topMargin">
-                    <number>0</number>
-                   </property>
-                   <property name="rightMargin">
-                    <number>12</number>
-                   </property>
-                   <property name="bottomMargin">
-                    <number>0</number>
-                   </property>
-                   <item>
-                    <widget class="QLabel" name="proxyListTitle">
-                     <property name="text">
-                      <string>节点列表</string>
-                     </property>
-                    </widget>
-                   </item>
-                   <item>
-                    <widget class="QLabel" name="proxyCountLabel">
-                     <property name="text">
-                      <string></string>
-                     </property>
-                    </widget>
-                   </item>
-<item>
-                     <spacer name="proxyHeadSpacer">
+     </item>
+                  <item>
+      <layout class="QHBoxLayout" name="proxyTlsRow">
+                    <property name="spacing">
+        <number>10</number>
+       </property>
+                    <item>
+                     <widget class="QCheckBox" name="echBox">
+                      <property name="text">
+                       <string>启用 ECH</string>
+                      </property>
+                       <property name="checked">
+                        <bool>true</bool>
+                       </property>
+                     </widget>
+                    </item>
+                    <item>
+                     <widget class="QCheckBox" name="http3Box">
+                      <property name="text">
+                       <string>启用 HTTP3</string>
+                      </property>
+                     </widget>
+                    </item>
+                    <item>
+                     <spacer name="proxyTlsSpacer">
                       <property name="orientation">
                        <enum>Qt::Horizontal</enum>
                       </property>
@@ -1459,94 +1782,42 @@
                       </property>
                      </spacer>
                     </item>
-                   <item>
-                    <widget class="QPushButton" name="proxySortButton">
-                     <property name="text">
-                      <string>智能排序 ▾</string>
-                     </property>
-                    </widget>
-                   </item>
-                   <item>
-                    <widget class="QPushButton" name="proxyDensityButton">
-                     <property name="maximumSize">
-                      <size>
-                       <width>34</width>
-                       <height>16777215</height>
-                      </size>
-                     </property>
-                     <property name="toolTip">
-                      <string>紧凑 / 舒适</string>
-                     </property>
-                     <property name="text">
-                      <string>≡</string>
-                     </property>
-                    </widget>
-                   </item>
-                  </layout>
-   </widget>
-  </item>
-                <item>
-   <widget class="QWidget" name="proxyFilterBar" native="true">
-                  <layout class="QHBoxLayout" name="proxyFilterLayout">
-                   <property name="spacing">
-      <number>5</number>
-     </property>
-                   <property name="leftMargin">
-                    <number>12</number>
-                   </property>
-                   <property name="topMargin">
-                    <number>0</number>
-                   </property>
-                   <property name="rightMargin">
-                    <number>12</number>
-                   </property>
-                   <property name="bottomMargin">
-                    <number>0</number>
-                   </property>
-                   <item>
-                    <widget class="QPushButton" name="proxyFilterAll">
-                      <property name="checkable">
+                   </layout>
+     </item>
+                  <item>
+      <layout class="QHBoxLayout" name="proxyRegionRow">
+                    <property name="spacing">
+        <number>6</number>
+       </property>
+                    <item>
+                     <widget class="QLabel" name="label_26">
+                      <property name="text">
+                       <string>获取地区</string>
+                      </property>
+                     </widget>
+                    </item>
+                    <item>
+                     <widget class="TipLineEdit" name="proxyIpEdit">
+                      <property name="readOnly">
                        <bool>true</bool>
                       </property>
-                      <property name="checked">
-                       <bool>true</bool>
+                      <property name="maximumSize">
+                       <size>
+                        <width>110</width>
+                        <height>16777215</height>
+                       </size>
                       </property>
-                      <attribute name="buttonGroup">
-                       <string notr="true">proxyFilterGroup</string>
-                      </attribute>
-                     <property name="text">
-                      <string>全部</string>
-                     </property>
-                    </widget>
-                   </item>
-                   <item>
-                    <widget class="QPushButton" name="proxyFilterProxy">
-                      <property name="checkable">
-                       <bool>true</bool>
+                     </widget>
+                    </item>
+                    <item>
+                     <widget class="QLabel" name="proxyIpLabel">
+                      <property name="text">
+                       <string></string>
                       </property>
-                      <attribute name="buttonGroup">
-                       <string notr="true">proxyFilterGroup</string>
-                      </attribute>
-                     <property name="text">
-                      <string>ProxyIP</string>
-                     </property>
-                    </widget>
-                   </item>
-                   <item>
-                    <widget class="QPushButton" name="proxyFilterCf">
-                      <property name="checkable">
-                       <bool>true</bool>
-                      </property>
-                      <attribute name="buttonGroup">
-                       <string notr="true">proxyFilterGroup</string>
-                      </attribute>
-                     <property name="text">
-                      <string>优选</string>
-                     </property>
-                    </widget>
-                   </item>
-<item>
-                     <spacer name="proxyFilterSpacer">
+                     </widget>
+                    </item>
+                    <item>
+                     <spacer name="proxyRegionSpacer">
                       <property name="orientation">
                        <enum>Qt::Horizontal</enum>
                       </property>
@@ -1558,349 +1829,80 @@
                       </property>
                      </spacer>
                     </item>
-                   <item>
-                    <widget class="QLabel" name="proxyCutLabel">
-                     <property name="text">
-                      <string></string>
-                     </property>
-                    </widget>
-                   </item>
-                  </layout>
+                   </layout>
+     </item>
+                  <item>
+      <layout class="QHBoxLayout" name="proxyIpListRow">
+                    <property name="spacing">
+        <number>6</number>
+       </property>
+                    <item>
+                     <widget class="QLabel" name="label_22">
+                      <property name="text">
+                       <string>自定义 IP</string>
+                      </property>
+                     </widget>
+                    </item>
+                    <item>
+                     <widget class="QLineEdit" name="ipListEdit"/>
+                    </item>
+                   </layout>
+     </item>
+                  <item>
+<widget class="QLabel" name="label_25">
+ <property name="text">
+  <string>*使用代理时IP分流不生效，推荐开启ECH功能</string>
+ </property>
+</widget>
+                  </item>
+                 </layout>
    </widget>
-  </item>
-                <item>
-   <widget class="QWidget" name="proxyColHead" native="true">
-                  <layout class="QHBoxLayout" name="proxyColHeadLayout">
-                   <property name="spacing">
-      <number>8</number>
-     </property>
-                   <property name="leftMargin">
-                    <number>34</number>
-                   </property>
-                   <property name="topMargin">
-                    <number>0</number>
-                   </property>
-                   <property name="rightMargin">
-                    <number>12</number>
-                   </property>
-                   <property name="bottomMargin">
-                    <number>0</number>
-                   </property>
-                   <item>
-                    <widget class="QLabel" name="colNameLabel">
-                     <property name="text">
-                      <string>节点 / 地区 · ISP</string>
-                     </property>
-                    </widget>
-                   </item>
-                   <item>
-                    <widget class="QLabel" name="colSpeedLabel">
-                     <property name="minimumSize">
-                      <size>
-                       <width>86</width>
-                       <height>0</height>
-                      </size>
-                     </property>
-                     <property name="text">
-                      <string>延迟 / 下载</string>
-                     </property>
-                     <property name="alignment">
-                      <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
-                     </property>
-                    </widget>
-                   </item>
-                  </layout>
-   </widget>
-  </item>
-                <item>
-                 <widget class="BaseTableWidget" name="tableWidget">
-                  <column>
-     <property name="text">
-      <string>节点</string>
-     </property>
-    </column>
-                 </widget>
-                </item>
-               </layout>
-              </widget>
-             </item>
-             <item>
-              <widget class="QWidget" name="proxyAdvPanel" native="true">
-               <property name="visible">
-                <bool>false</bool>
-               </property>
-               <layout class="QVBoxLayout" name="proxyAdvLayout">
-                <property name="spacing">
-   <number>4</number>
-  </property>
-                <property name="leftMargin">
-                 <number>12</number>
-                </property>
-                <property name="topMargin">
-                 <number>4</number>
-                </property>
-                <property name="rightMargin">
-                 <number>12</number>
-                </property>
-                <property name="bottomMargin">
-                 <number>6</number>
-                </property>
-                <item>
-   <layout class="QHBoxLayout" name="proxyTimeoutRow">
-                  <property name="spacing">
-     <number>6</number>
-    </property>
-                  <item>
-                   <widget class="QLabel" name="label_15">
-                    <property name="text">
-                     <string>API超时</string>
-                    </property>
-                   </widget>
-                  </item>
-                  <item>
-                   <widget class="WheelComboBox" name="apiTimeout">
-                    <item>
-                     <property name="text">
-                      <string>2</string>
-                     </property>
-                    </item>
-                    <item>
-                     <property name="text">
-                      <string>5</string>
-                     </property>
-                    </item>
-                    <item>
-                     <property name="text">
-                      <string>7</string>
-                     </property>
-                    </item>
-                   </widget>
-                  </item>
-                  <item>
-                   <widget class="QLabel" name="label_16">
-                    <property name="text">
-                     <string>图片超时</string>
-                    </property>
-                   </widget>
-                  </item>
-                  <item>
-                   <widget class="WheelComboBox" name="imgTimeout">
-                    <item>
-                     <property name="text">
-                      <string>2</string>
-                     </property>
-                    </item>
-                    <item>
-                     <property name="text">
-                      <string>5</string>
-                     </property>
-                    </item>
-                    <item>
-                     <property name="text">
-                      <string>7</string>
-                     </property>
-                    </item>
-                    <item>
-                     <property name="text">
-                      <string>10</string>
-                     </property>
-                    </item>
-                    <item>
-                     <property name="text">
-                      <string>15</string>
-                     </property>
-                    </item>
-                   </widget>
-                  </item>
-<item>
-                   <spacer name="proxyTimeoutSpacer">
-                    <property name="orientation">
-                     <enum>Qt::Horizontal</enum>
-                    </property>
-                    <property name="sizeHint" stdset="0">
-                     <size>
-                      <width>20</width>
-                      <height>10</height>
-                     </size>
-                    </property>
-                   </spacer>
-                  </item>
-                 </layout>
-  </item>
-                <item>
-   <layout class="QHBoxLayout" name="proxyDohRow">
-                  <property name="spacing">
-     <number>6</number>
-    </property>
-                  <item>
-                   <widget class="QLabel" name="label_17">
-                    <property name="text">
-                     <string>DOH</string>
-                    </property>
-                   </widget>
-                  </item>
-                  <item>
-                   <widget class="TipLineEdit" name="dohLine"/>
-                  </item>
-                  <item>
-                   <widget class="QToolButton" name="dohTool">
-                    <property name="text">
-                     <string/>
-                    </property>
-                   </widget>
-                  </item>
-                 </layout>
-  </item>
-                <item>
-   <layout class="QHBoxLayout" name="proxyTlsRow">
-                  <property name="spacing">
-     <number>10</number>
-    </property>
-                  <item>
-                   <widget class="QCheckBox" name="echBox">
-                    <property name="text">
-                     <string>启用 ECH</string>
-                    </property>
-                    <property name="checked">
-                     <bool>true</bool>
-                    </property>
-                   </widget>
-                  </item>
-                  <item>
-                   <widget class="QCheckBox" name="http3Box">
-                    <property name="text">
-                     <string>启用 HTTP3</string>
-                    </property>
-                   </widget>
-                  </item>
-<item>
-                   <spacer name="proxyTlsSpacer">
-                    <property name="orientation">
-                     <enum>Qt::Horizontal</enum>
-                    </property>
-                    <property name="sizeHint" stdset="0">
-                     <size>
-                      <width>20</width>
-                      <height>10</height>
-                     </size>
-                    </property>
-                   </spacer>
-                  </item>
-                 </layout>
-  </item>
-                <item>
-   <layout class="QHBoxLayout" name="proxyRegionRow">
-                  <property name="spacing">
-     <number>6</number>
-    </property>
-                  <item>
-                   <widget class="QLabel" name="label_26">
-                    <property name="text">
-                     <string>获取地区</string>
-                    </property>
-                   </widget>
-                  </item>
-                  <item>
-                   <widget class="TipLineEdit" name="proxyIpEdit">
-                    <property name="maximumSize">
-                     <size>
-                      <width>110</width>
-                      <height>16777215</height>
-                     </size>
-                    </property>
-                   </widget>
-                  </item>
-                  <item>
-                   <widget class="QLabel" name="proxyIpLabel">
-                    <property name="text">
-                     <string></string>
-                    </property>
-                   </widget>
-                  </item>
-<item>
-                   <spacer name="proxyRegionSpacer">
-                    <property name="orientation">
-                     <enum>Qt::Horizontal</enum>
-                    </property>
-                    <property name="sizeHint" stdset="0">
-                     <size>
-                      <width>20</width>
-                      <height>10</height>
-                     </size>
-                    </property>
-                   </spacer>
-                  </item>
-                 </layout>
-  </item>
-                <item>
-   <layout class="QHBoxLayout" name="proxyIpListRow">
-                  <property name="spacing">
-     <number>6</number>
-    </property>
-                  <item>
-                   <widget class="QLabel" name="label_22">
-                    <property name="text">
-                     <string>自定义 IP</string>
-                    </property>
-                   </widget>
-                  </item>
-                  <item>
-                   <widget class="QLineEdit" name="ipListEdit"/>
-                  </item>
-                 </layout>
-  </item>
-                <item>
-                 <widget class="QLabel" name="label_25">
-                  <property name="text">
-                   <string>*使用代理时IP分流不生效，推荐开启ECH功能</string>
-                  </property>
-                 </widget>
-                </item>
-               </layout>
-              </widget>
-             </item>
-             <item>
-              <widget class="QWidget" name="proxyFoot" native="true">
-               <layout class="QHBoxLayout" name="proxyFootLayout">
-                <property name="spacing">
+               </item>
+              </layout>
+             </widget>
+            </item>
+            <item>
+             <widget class="QWidget" name="proxyFoot" native="true">
+              <layout class="QHBoxLayout" name="proxyFootLayout">
+               <property name="spacing">
    <number>8</number>
   </property>
-                <property name="leftMargin">
-                 <number>12</number>
-                </property>
-                <property name="topMargin">
-                 <number>4</number>
-                </property>
-                <property name="rightMargin">
-                 <number>12</number>
-                </property>
-                <property name="bottomMargin">
-                 <number>6</number>
-                </property>
-                <item>
-                 <widget class="QLabel" name="proxyStatusLabel">
-                  <property name="text">
-                   <string></string>
-                  </property>
-                 </widget>
-                </item>
-                <item>
-                 <widget class="QPushButton" name="proxyAdvButton">
-                  <property name="text">
-                   <string>高级</string>
-                  </property>
-                 </widget>
-                </item>
-                <item>
-                 <widget class="QPushButton" name="testIpButton">
-                  <property name="text">
-                   <string>测试 IP 分流</string>
-                  </property>
-                 </widget>
-                </item>
-               </layout>
-              </widget>
-             </item>
+               <property name="leftMargin">
+                <number>12</number>
+               </property>
+               <property name="topMargin">
+                <number>4</number>
+               </property>
+               <property name="rightMargin">
+                <number>12</number>
+               </property>
+               <property name="bottomMargin">
+                <number>6</number>
+               </property>
+               <item>
+                <widget class="QLabel" name="proxyStatusLabel">
+                 <property name="text">
+                  <string></string>
+                 </property>
+                </widget>
+               </item>
+               <item>
+                <widget class="QPushButton" name="proxyAdvButton">
+                 <property name="text">
+                  <string>高级</string>
+                 </property>
+                </widget>
+               </item>
+               <item>
+                <widget class="QPushButton" name="testIpButton">
+                 <property name="text">
+                  <string>测试 IP 分流</string>
+                 </property>
+                </widget>
+               </item>
+              </layout>
+             </widget>
+            </item>
       </layout>
      </widget>
     </widget>

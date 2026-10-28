@@ -1,0 +1,1072 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>高级设置下拉交互修复 · Demo</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: radial-gradient(1100px 620px at 18% -12%, #24262c 0%, #17181c 58%, #121316 100%);
+    color: #e7eaee;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+    -webkit-font-smoothing: antialiased;
+    min-height: 100vh;
+  }
+  body::before {
+    content: ""; position: fixed; inset: 0; pointer-events: none;
+    background-image: linear-gradient(rgba(255,255,255,.022) 1px, transparent 1px),
+                      linear-gradient(90deg, rgba(255,255,255,.022) 1px, transparent 1px);
+    background-size: 32px 32px;
+    -webkit-mask-image: radial-gradient(800px 500px at 50% 0%, #000 20%, transparent 80%);
+    mask-image: radial-gradient(800px 500px at 50% 0%, #000 20%, transparent 80%);
+  }
+
+  .wrap { position: relative; display: flex; gap: 24px; padding: 26px 26px 48px; align-items: flex-start; max-width: 1320px; margin: 0 auto; }
+
+  /* ---------------- 左侧 ---------------- */
+  /* 左栏：视口够高时自然铺开；不够高时自己滚，右侧手机保持不动 */
+  .side {
+    width: 408px; flex: none; position: sticky; top: 24px;
+    max-height: calc(100vh - 48px); overflow-y: auto; overflow-x: hidden;
+    padding-right: 4px; scrollbar-width: thin;
+  }
+  .side::-webkit-scrollbar { width: 4px; }
+  .side::-webkit-scrollbar-thumb { background: rgba(255,255,255,.16); border-radius: 2px; }
+  .side h1 { font-size: 19px; line-height: 1.3; margin: 0 0 5px; }
+  .side h1 em { font-style: normal; color: #ef8b45; }
+  .side .sub { margin: 0 0 12px; font-size: 12.5px; color: #969da7; line-height: 1.65; }
+  .badge-tip {
+    display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: #9ad0b2;
+    background: rgba(92,189,143,.1); border: 1px solid rgba(92,189,143,.28);
+    border-radius: 999px; padding: 3px 9px; margin-bottom: 12px;
+  }
+  .badge-tip::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: #5cbd8f; }
+
+  .block { background: rgba(255,255,255,.028); border: 1px solid rgba(255,255,255,.06); border-radius: 10px; padding: 10px 12px; margin-bottom: 9px; }
+  .block > h2 { font-size: 11px; font-weight: 600; letter-spacing: .12em; color: #79818b; margin: 0 0 10px; }
+
+  .seg { display: flex; gap: 6px; }
+  .seg button {
+    flex: 1; appearance: none; cursor: pointer; background: #1d1f24; border: 1px solid #34383f;
+    color: #b3bac3; font-size: 12px; padding: 6px 4px; border-radius: 7px; font-family: inherit; line-height: 1.25;
+  }
+  .seg button:hover { border-color: #4a5058; color: #dfe4ea; }
+  .seg button.on { background: rgba(224,118,42,.14); border-color: #e0762a; color: #f2a061; font-weight: 600; }
+  .seg button span { display: block; font-size: 9.5px; color: #7d848d; font-weight: 400; margin-top: 2px; }
+  .seg button.on span { color: #c98a5a; }
+
+  .curvebox { display: flex; gap: 12px; align-items: center; margin-top: 10px; }
+  .curvebox svg { flex: none; background: rgba(0,0,0,.28); border: 1px solid rgba(255,255,255,.07); border-radius: 8px; }
+  .curvebox .meta { font-size: 11px; color: #8b939c; line-height: 1.6; min-width: 0; }
+  .curvebox .meta b { color: #dfe4ea; font-weight: 600; display: block; font-size: 12px; }
+  .curvebox code { font-family: ui-monospace, Consolas, monospace; font-size: 10px; color: #d7b892; word-break: break-all; }
+
+  .contract { list-style: none; margin: 0; padding: 0; font-size: 12px; line-height: 1.5; }
+  .contract li { display: flex; gap: 7px; padding: 3px 0; color: #b4bbc4; border-bottom: 1px solid rgba(255,255,255,.045); }
+  .contract li:last-child { border-bottom: none; }
+  .contract li .mk { flex: none; width: 13px; text-align: center; color: #5cbd8f; font-weight: 700; }
+  .contract li.bad .mk { color: #d9534f; }
+  .contract li.bad { color: #8e8f92; text-decoration: line-through; text-decoration-color: rgba(217,83,79,.5); }
+  .contract li code { font-family: ui-monospace, Consolas, monospace; font-size: 10.5px; background: rgba(255,255,255,.06); padding: 0 3px; border-radius: 3px; color: #d7b892; }
+
+  .stats { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 10px; font-size: 11.5px; }
+  .stats div { display: flex; justify-content: space-between; gap: 8px; padding: 3px 0; border-bottom: 1px solid rgba(255,255,255,.05); }
+  .stats span { color: #8b939c; }
+  .stats b { color: #e3e8ee; font-weight: 600; font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  .notes { margin: 0; padding-left: 15px; font-size: 11.5px; line-height: 1.62; color: #b4bbc4; }
+  .notes li { margin-bottom: 5px; }
+  .notes b { color: #e3e8ee; font-weight: 600; }
+  .notes code { font-family: ui-monospace, Consolas, monospace; font-size: 10.5px; background: rgba(255,255,255,.06); padding: 1px 4px; border-radius: 3px; color: #d7b892; word-break: break-all; }
+
+  .jump { display: flex; gap: 6px; margin-top: 10px; }
+  .jump button {
+    flex: 1; appearance: none; cursor: pointer; background: transparent; border: 1px solid #34383f;
+    color: #9aa2ac; font-size: 11px; padding: 7px 4px; border-radius: 6px; font-family: inherit;
+  }
+  .jump button:hover { border-color: #4a5058; color: #dfe4ea; }
+
+  /* ---------------- 手机 ---------------- */
+  .stage { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 12px; min-width: 0; }
+  .phone {
+    width: 470px; height: 918px; padding: 9px; border-radius: 30px;
+    background: linear-gradient(180deg, #101114, #0a0b0d);
+    box-shadow: 0 30px 70px -20px rgba(0,0,0,.85), 0 0 0 1px rgba(255,255,255,.05);
+  }
+  .screen {
+    width: 452px; height: 900px; border-radius: 23px; overflow: hidden; position: relative; isolation: isolate;
+    background: #2f3237; display: flex; flex-direction: column;
+  }
+  .hintline { font-size: 11.5px; color: #79818b; text-align: center; max-width: 470px; line-height: 1.6; }
+
+  .nav { height: 46px; flex: none; display: flex; align-items: center; gap: 8px; padding: 0 12px; background: #2b2e33; border-bottom: 1px solid #41454b; }
+  .nav .back { font-size: 12.5px; color: #c8cfd7; }
+  .nav .menu { padding: 3px 11px; border: 1px solid #e0762a; color: #f09a58; font-size: 12px; border-radius: 2px; }
+  .nav .arrow { color: #868d96; font-size: 12px; }
+  .nav .cur { padding: 4px 11px; background: #43464c; color: #eef1f4; font-size: 12px; }
+  .nav .sp { flex: 1; }
+  .tabs { height: 34px; flex: none; display: flex; align-items: flex-end; gap: 18px; padding: 0 12px; background: #2b2e33; border-bottom: 1px solid #41454b; }
+  .tabs span { font-size: 12px; color: #9aa2ac; padding-bottom: 6px; }
+  .tabs span.on { color: #f0a05c; font-weight: 600; box-shadow: inset 0 -2px 0 #e0762a; }
+
+  .scroll { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; scrollbar-width: thin; }
+  .scroll::-webkit-scrollbar { width: 4px; }
+  .scroll::-webkit-scrollbar-thumb { background: rgba(255,255,255,.22); border-radius: 2px; }
+  .scroll::-webkit-scrollbar-track { background: rgba(255,255,255,.04); }
+
+  .phead { display: flex; align-items: center; justify-content: space-between; padding: 8px 12px 2px; }
+  .phead .t { font-size: 12.5px; color: #c8cfd7; }
+  .phead .doc { font-size: 11px; color: #9aa2ac; border-bottom: 1px dashed #5d646d; padding-bottom: 1px; }
+
+  .modes { display: flex; gap: 10px; padding: 4px 12px 0; flex-wrap: nowrap; }
+  .modes label { display: inline-flex; align-items: center; gap: 4px; font-size: 11.5px; color: #dfe4ea; white-space: nowrap; }
+  .rd { width: 14px; height: 14px; border-radius: 50%; border: 1.5px solid #6d747d; flex: none; position: relative; }
+  .rd.on { border-color: #f0a05c; }
+  .rd.on::after { content: ""; position: absolute; inset: 2px; border-radius: 50%; background: #f0a05c; }
+  .hintline-sm { padding: 5px 12px 0; font-size: 10.5px; color: #7d848d; }
+
+  .speed { padding: 6px 12px 4px; }
+  .speed-head { display: flex; align-items: center; justify-content: space-between; padding: 2px 0 4px; }
+  .speed-head .t { font-size: 12px; color: #c8cfd7; }
+  .speed-head .b { font-size: 10.5px; color: #f0a05c; border: 1px solid #7d5230; border-radius: 3px; padding: 1px 8px; }
+  .sgrid { display: flex; flex-direction: column; }
+  .sgrid .srow { display: grid; grid-template-columns: minmax(0,1fr) 52px minmax(0,1fr) 72px; gap: 1px 6px; align-items: center; padding: 2px 0; }
+  .sgrid .srow + .srow { border-top: 1px solid rgba(255,255,255,.10); }
+  .sgrid .h { font-size: 9.5px; color: #79818b; text-align: center; padding-bottom: 2px; }
+  .sgrid label { display: flex; align-items: center; gap: 3px; font-size: 10px; color: #c8cfd7; padding: 1px 0; min-width: 0; }
+  .sgrid label span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .sgrid .v { font-size: 10px; text-align: center; font-variant-numeric: tabular-nums; color: #9ea6af; }
+  .sgrid .v.ok { color: #6cc99a; }
+  .sgrid .v.bad { color: #d9736b; }
+
+  .tools { display: flex; align-items: center; gap: 6px; padding: 8px 12px 6px; border-top: 1px solid #3b3f45; margin-top: 6px; }
+  .tools .t { font-size: 12px; color: #dfe4ea; }
+  .tools .cnt { font-size: 10.5px; color: #8b939c; }
+  .tools .sp { flex: 1; }
+  .tools .b { font-size: 10.5px; color: #b3bac3; border: 1px solid #454a52; border-radius: 3px; padding: 2px 7px; }
+  .tools .b.on { color: #f0a05c; border-color: #e0762a; background: rgba(224,118,42,.12); }
+  .colhead { display: grid; grid-template-columns: 18px minmax(0,1fr) 78px; gap: 8px; padding: 3px 12px; background: #34383e; border-top: 1px solid #3e4248; border-bottom: 1px solid #3e4248; font-size: 9.5px; color: #9aa2ac; }
+  .colhead .r { text-align: right; }
+
+  .rows { padding: 0 11px; }
+  .row { display: grid; grid-template-columns: 18px minmax(0,1fr); gap: 8px; align-items: center; height: 58px; padding: 0 1px; border-bottom: 1px solid #3e4248; }
+  .row.sel { background: #8d5a2b; }
+  .rmain { min-width: 0; }
+  .rtop { display: grid; grid-template-columns: minmax(0,1fr) 74px; gap: 8px; align-items: baseline; }
+  .ip { font-family: ui-monospace, Consolas, "Courier New", monospace; font-size: 12px; color: #e7eaee; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .spd { font-size: 10.5px; color: #b9c0c8; text-align: right; font-variant-numeric: tabular-nums; }
+  .spd b { color: #6cc99a; font-weight: 600; }
+  .spd b.slow { color: #e8b96a; }
+  .rsub { display: flex; align-items: center; gap: 6px; margin-top: 2px; min-width: 0; }
+  .tag { flex: none; width: 62px; font-size: 9.5px; color: #f0a05c; background: rgba(224,118,42,.13); border-radius: 2px; padding: 1px 3px; text-align: center; }
+  .geo { font-size: 10px; color: #8b939c; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .empty { padding: 22px 12px; text-align: center; font-size: 11px; color: #7d848d; }
+
+  /* ================= 高级面板 ================= */
+  .advwrap { padding: 8px 10px 4px; }
+  .adv {
+    border: 1px solid rgba(224,118,42,.75); border-radius: 6px;
+    background: rgba(255,255,255,.022); overflow: hidden; position: relative;
+    box-shadow: 0 -6px 14px -10px rgba(224,118,42,.5), inset 0 1px 0 rgba(255,255,255,.04);
+    transition: height .2s cubic-bezier(.34, 1.56, .64, 1);
+  }
+  .adv-inner { padding: 8px 10px 6px; }
+  .arow { display: flex; align-items: center; gap: 6px; min-height: 34px; }
+  .arow .k { font-size: 11.5px; color: #d8dde3; flex: none; }
+
+  /* 可点开下拉的输入框 */
+  .fld {
+    height: 26px; border-radius: 2px; background: #232427; border: 1px solid #3a3b40; border-bottom: 2px solid #e0762a;
+    display: flex; align-items: center; gap: 4px; padding: 0 6px; cursor: pointer; position: relative;
+    font-size: 10.5px; color: #f0a05c; min-width: 0; transition: border-color .16s, box-shadow .16s;
+  }
+  .fld:hover { border-color: #4a4e56; border-bottom-color: #f0904a; }
+  .fld.open { box-shadow: 0 0 0 2px rgba(224,118,42,.16); border-bottom-color: #f0904a; }
+  .fld .txt { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-family: ui-monospace, Consolas, monospace; }
+  .fld .caret { flex: none; font-size: 8px; color: #b9805a; transition: transform .2s; }
+  .fld.open .caret { transform: rotate(180deg); }
+  .fld.flash { animation: flashRed .38s ease; }
+  @keyframes flashRed { 0%,100% { box-shadow: 0 0 0 0 rgba(217,83,79,0); } 40% { box-shadow: 0 0 0 2px rgba(217,83,79,.55); } }
+
+  .spin { height: 30px; width: 56px; flex: none; display: flex; align-items: center; justify-content: center; gap: 3px;
+          background: #232427; border: 1px solid #3a3b40; border-bottom: 2px solid #e0762a; border-radius: 2px; cursor: pointer; }
+  .spin b { font-size: 11.5px; color: #f0a05c; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .spin i { font-style: normal; font-size: 8px; color: #b9805a; }
+  .spin.open { box-shadow: 0 0 0 2px rgba(224,118,42,.16); }
+
+  .tickbtn { flex: none; width: 26px; height: 26px; border-radius: 50%; background: #4a9e46; color: #f2f7f2;
+             display: flex; align-items: center; justify-content: center; font-size: 12px; }
+  .stats-txt { font-size: 10.5px; color: #d71345; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  .stats-txt.ok { color: #6cc99a; }
+
+  .chk { display: inline-flex; align-items: center; gap: 4px; font-size: 11.5px; color: #dfe4ea; }
+  .chk .bx { width: 16px; height: 16px; border: 1.5px solid #e0762a; border-radius: 2px; display: flex; align-items: center; justify-content: center; }
+  .chk .bx::after { content: ""; width: 8px; height: 8px; background: #e0762a; opacity: 0; }
+  .chk.on .bx::after { opacity: 1; }
+
+  .foot-note { font-size: 10px; color: #a9b0b9; padding: 5px 0 0; line-height: 1.5; }
+
+  .foot { flex: none; height: 54px; display: flex; align-items: center; gap: 8px; padding: 0 12px; background: #2b2e33; border-top: 1px solid #41454b; }
+  .foot .st { font-size: 11.5px; color: #9aa2ac; flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .foot .btn { height: 30px; padding: 0 16px; border: 1px solid #e0762a; border-radius: 3px; color: #f0a05c; font-size: 12px; display: flex; align-items: center; }
+  .foot .btn.ghost { border-color: #4a4e56; color: #6d747d; }
+  .foot .btn:active { background: rgba(224,118,42,.14); }
+
+  /* ================= 下拉弹层 ================= */
+  .pop {
+    position: absolute; left: 0; top: 0; z-index: 40; display: none;
+    background: #26282d; border: 1px solid #e0762a; border-radius: 5px;
+    box-shadow: 0 14px 28px -10px rgba(0,0,0,.8), 0 0 0 1px rgba(0,0,0,.4);
+    transform-origin: top center; overflow: hidden;
+    /* 展开：位移 + 轻微放大 + 淡入；曲线由 --pop-ease 决定（非线性） */
+    opacity: 0; transform: translateY(-6px) scale(.955);
+    transition: opacity .2s ease-out,
+                transform .32s var(--pop-ease, cubic-bezier(.34, 1.56, .64, 1));
+  }
+  .pop.show { opacity: 1; transform: none; }
+  .pop.closing {
+    opacity: 0; transform: translateY(-4px) scale(.985);
+    transition: opacity .13s cubic-bezier(.4,0,1,1), transform .13s cubic-bezier(.4,0,1,1);
+  }
+  .pop-cap { display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 5px 8px 4px; font-size: 9px; letter-spacing: .1em; color: #79818b; border-bottom: 1px solid #3a3e44; }
+  .pop-cap em { font-style: normal; color: #b9805a; letter-spacing: 0; }
+  .pop-list { max-height: 288px; overflow-y: auto; scrollbar-width: thin; }
+  .pop-list::-webkit-scrollbar { width: 3px; }
+  .pop-list::-webkit-scrollbar-thumb { background: rgba(255,255,255,.2); border-radius: 2px; }
+  .pop-item { display: flex; align-items: center; gap: 7px; padding: 0 8px; height: 32px; font-size: 11.5px; color: #dfe4ea; cursor: pointer; }
+  .pop-item:hover { background: rgba(224,118,42,.13); }
+  .pop-item .nm { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .pop-item .code { flex: none; font-size: 9px; color: #b9805a; border: 1px solid #5a3b23; border-radius: 2px; padding: 0 3px; }
+  .pop-item .num { flex: none; font-size: 9.5px; color: #7d848d; font-variant-numeric: tabular-nums; }
+  .pop-item .mk { flex: none; width: 10px; font-size: 10px; color: #6cc99a; }
+  .pop-item.cur { background: rgba(224,118,42,.08); }
+  .pop-item.cur .nm { color: #f2a061; }
+
+  /* 「添加 DOH 地址」一栏：未解锁时整行不接收输入 */
+  .pop-add { display: flex; align-items: center; gap: 6px; padding: 6px 8px; border-top: 1px solid #3a3e44; background: rgba(255,255,255,.02); cursor: pointer; }
+  .pop-add .plus { flex: none; width: 20px; height: 20px; border: 1px dashed #9a6236; border-radius: 2px; background: rgba(224,118,42,.1); color: #f0a05c; font-size: 12px; line-height: 1; display: flex; align-items: center; justify-content: center; }
+  .pop-add .addfld {
+    flex: 1; min-width: 0; height: 24px; background: #1d1f23; border: 1px solid #3a3b40; border-radius: 2px;
+    color: #8b939c; font-size: 10.5px; padding: 0 5px; font-family: ui-monospace, Consolas, monospace;
+    pointer-events: none; outline: none;
+  }
+  .pop-add .addfld::placeholder { color: #6d747d; }
+  .pop-add.editing { background: rgba(224,118,42,.08); cursor: default; }
+  .pop-add.editing .addfld { pointer-events: auto; color: #f0a05c; border-color: #e0762a; border-bottom: 2px solid #e0762a; }
+  .pop-add.editing .plus { display: none; }
+  .pop-add .ok, .pop-add .no { display: none; flex: none; width: 22px; height: 22px; border-radius: 3px; font-size: 11px; align-items: center; justify-content: center; cursor: pointer; }
+  .pop-add.editing .ok, .pop-add.editing .no { display: flex; }
+  .pop-add .ok { background: #4a9e46; color: #f2f7f2; }
+  .pop-add .no { background: #3a3e44; color: #b3bac3; }
+  .pop-add .ok.hint { animation: flashRed .38s ease; }
+  .pop-add .tip { flex: none; font-size: 9px; color: #7d848d; }
+  .pop-note { padding: 6px 8px; border-top: 1px solid #3a3e44; font-size: 9.5px; color: #7d848d; line-height: 1.5; }
+
+  .toast {
+    position: absolute; left: 50%; bottom: 66px; transform: translate(-50%, 8px);
+    background: rgba(20,21,24,.95); border: 1px solid rgba(255,255,255,.1); color: #e7eaee;
+    font-size: 11px; padding: 7px 11px; border-radius: 5px; max-width: 400px; line-height: 1.45;
+    opacity: 0; pointer-events: none; transition: opacity .18s, transform .26s cubic-bezier(.34,1.56,.64,1); z-index: 60;
+  }
+  .toast.show { opacity: 1; transform: translate(-50%, 0); }
+  .toast.bad { border-color: rgba(217,83,79,.5); color: #f0c0bd; }
+
+  .scrim { position: absolute; inset: 0; background: rgba(0,0,0,.12); opacity: 0; pointer-events: none; transition: opacity .18s; z-index: 30; }
+  .scrim.show { opacity: 1; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <aside class="side">
+    <h1>高级设置下拉交互修复 <em>· Demo</em></h1>
+    <p class="sub">地区候选由已获取节点生成、点框即展开、点条目即生效；DOH 列表可开可选，自定义地址走「添加一栏 + ✓ 保存」；所有点按唤出的下拉统一非线性过渡。</p>
+    <div class="badge-tip">仅新增本文件，未改动 ui/ 与 src/</div>
+
+    <div class="block">
+      <h2>视图</h2>
+      <div class="seg" id="segView">
+        <button data-view="old">现状<span>点不开 / 点不中</span></button>
+        <button data-view="new" class="on">修复方案<span>可点可选</span></button>
+      </div>
+    </div>
+
+    <div class="block">
+      <h2>下拉过渡曲线</h2>
+      <div class="seg" id="segEase">
+        <button data-ease="back" class="on">回弹<span>OutBack</span></button>
+        <button data-ease="quint">缓出<span>OutQuint</span></button>
+        <button data-ease="spring">弹性<span>Spring</span></button>
+        <button data-ease="linear">线性<span>对照</span></button>
+      </div>
+      <div class="curvebox">
+        <svg id="curve" width="112" height="76" viewBox="0 0 112 76"></svg>
+        <div class="meta">
+          <b id="easeName">OutBack · 320ms</b>
+          <code id="easeCode">cubic-bezier(.34, 1.56, .64, 1)</code>
+          <div style="margin-top:5px">点手机里「获取地区 / DOH / 超时」任一输入框即可感受落点。</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="block">
+      <h2>交互契约</h2>
+      <ul class="contract" id="contract">
+        <li data-k="region"><span class="mk">✓</span><span>地区候选在获取节点后填充：<code>8</code> 个地区 / <code>50</code> 个节点</span></li>
+        <li data-k="open"><span class="mk">✓</span><span>点按文本框即展开（已聚焦时再点一次也能展开）</span></li>
+        <li data-k="apply"><span class="mk">✓</span><span>点条目 → 写入输入框 + 按该地区重新取节点</span></li>
+        <li data-k="doh"><span class="mk">✓</span><span>DOH 列表可唤出、可选中，选中后校验图标更新</span></li>
+        <li data-k="add"><span class="mk">✓</span><span>自定义 DOH：「添加」一栏未解锁前不触发输入</span></li>
+        <li data-k="save"><span class="mk">✓</span><span>输入后点 ✓ 保存并立即应用；点 ✕ 放弃</span></li>
+        <li data-k="anim"><span class="mk">✓</span><span>所有下拉展开/收起均带非线性过渡</span></li>
+      </ul>
+    </div>
+
+    <div class="block">
+      <h2>实测状态</h2>
+      <div class="stats">
+        <div><span>地区候选</span><b id="sRegions">8 / 50 节点</b></div>
+        <div><span>当前地区</span><b id="sRegion">全部地区</b></div>
+        <div><span>DOH 条目</span><b id="sDohCount">4</b></div>
+        <div><span>当前 DOH</span><b id="sDoh">parse.jpacg.cc</b></div>
+        <div><span>列表项</span><b id="sRows">50</b></div>
+        <div><span>曲线</span><b id="sEase">OutBack 320ms</b></div>
+      </div>
+    </div>
+
+    <div class="block">
+      <h2>为什么现在点不开 / 点不中</h2>
+      <ul class="notes">
+        <li><b>地区候选从来没被填过。</b>全仓库只有 <code>dohLine.SetWordData()</code>，<code>proxyIpEdit</code> 一次都没设过候选 —— 弹出来也是空盒子。</li>
+        <li><b>已聚焦时再点不弹。</b><code>ShowListView()</code> 只挂在 <code>focusInEvent</code> 上，而 <code>_FocusInput()</code> 在已聚焦时直接 <code>return False</code>，不再触发聚焦事件。</li>
+        <li><b>按在弹层上第一下就被判成“点外面”。</b><code>_OutsideHider</code> 用 <code>widget.isAncestorOf(obj)</code> 判断，而手机上 <code>obj</code> 是宿主窗口 → 落下瞬间弹层就收起，<code>clicked</code> 永远不发。</li>
+        <li><b>超时下拉是原生 QComboBox</b>（<code>WheelComboBox</code>），弹层是独立 popup 窗口 —— 与“第二个顶层窗口在 Android 上点不动”同源。</li>
+      </ul>
+    </div>
+
+    <div class="block">
+      <h2>确认后的落地改动</h2>
+      <ul class="notes">
+        <li><code>login_proxy_new_widget.py</code>：<code>GetProxyIpBack()</code> 后按 <code>item.country</code> 去重 → <code>SetWordData()</code>；选中时写 <code>Setting.ProxyIpCountry</code> 并重发请求。</li>
+        <li><code>tip_line_edit.py</code>：新增 <code>Popover()</code>，点击/聚焦都走它（已聚焦也能唤出）；DOH 弹层底部加「添加」行。</li>
+        <li><code>popup_list.py</code>：<code>_OutsideHider</code> 改用<b>触点坐标</b>与弹层矩形比较；加 <code>QPropertyAnimation</code> + <code>OutBack</code> 240ms；<code>wheel_combo_box.py</code> 复用同一套。</li>
+      </ul>
+    </div>
+
+    <div class="jump">
+      <button id="jRegion">展开地区下拉</button>
+      <button id="jDoh">展开 DOH 下拉</button>
+      <button id="jAdd">添加 DOH 行</button>
+    </div>
+  </aside>
+
+  <div class="stage">
+    <div class="phone">
+      <div class="screen" id="screen">
+        <div class="nav">
+          <span class="back">←</span><span class="menu">菜单</span><span class="arrow">›</span>
+          <span class="cur">个人</span><span class="sp"></span><span class="arrow">≡</span>
+        </div>
+        <div class="tabs"><span>账号</span><span class="on">分流</span><span>设置</span></div>
+
+        <div class="scroll" id="scroll">
+          <div class="phead"><span class="t">代理通道</span><span class="doc">说明</span></div>
+          <div class="modes">
+            <label><i class="rd on"></i>无代理</label>
+            <label><i class="rd"></i>HTTP</label>
+            <label><i class="rd"></i>SOCKS5</label>
+            <label><i class="rd"></i>上游</label>
+          </div>
+          <div class="hintline-sm">未启用代理，直连访问</div>
+
+          <div class="speed">
+            <div class="speed-head"><span class="t">线路测速</span><span class="b">测速</span></div>
+            <div class="sgrid" id="sgrid"></div>
+          </div>
+
+          <div class="tools">
+            <span class="t">节点列表</span><span class="cnt" id="listCnt">共 50 项</span>
+            <span class="sp"></span>
+            <span class="b on">全部</span><span class="b">ProxyIP</span><span class="b">优选</span>
+            <span class="b">智能 ▾</span>
+          </div>
+          <div class="colhead"><span></span><span>节点 / 地区</span><span class="r">延迟·下载</span></div>
+          <div class="rows" id="rows"></div>
+
+          <div class="advwrap">
+            <div class="adv" id="adv">
+              <div class="adv-inner" id="advInner">
+                <div class="arow">
+                  <span class="k">API超时</span>
+                  <div class="spin" id="spinApi"><b>5</b><i>▾</i></div>
+                  <span class="k" style="margin-left:2px">图片超时</span>
+                  <div class="spin" id="spinImg"><b>5</b><i>▾</i></div>
+                </div>
+
+                <div class="arow" style="margin-top:4px">
+                  <span class="k">DOH</span>
+                  <div class="fld" id="dohFld" style="flex:1">
+                    <span class="txt" id="dohTxt">https://parse.jpacg.cc/parse</span>
+                    <span class="caret">▾</span>
+                  </div>
+                  <span class="tickbtn" id="dohTick">✓</span>
+                </div>
+
+                <div class="arow" style="margin-top:2px">
+                  <span class="chk on"><i class="bx"></i>启用 ECH</span>
+                  <span class="chk" style="margin-left:12px"><i class="bx"></i>启用 HTTP3</span>
+                </div>
+
+                <div class="arow" style="margin-top:2px">
+                  <span class="k">获取地区</span>
+                  <div class="fld" id="regionFld" style="width:110px;flex:none">
+                    <span class="txt" id="regionTxt">全部地区</span>
+                    <span class="caret">▾</span>
+                  </div>
+                  <span class="stats-txt" id="regionStat">成功获取50个节点</span>
+                </div>
+
+                <div class="arow" style="margin-top:2px">
+                  <span class="k">自定义 IP</span>
+                  <div class="fld" style="flex:1;border-bottom-color:#5c616a">
+                    <span class="txt">59.89.104.19,229.139,104.21.73.214</span>
+                  </div>
+                </div>
+                <div class="foot-note">*使用代理时IP分流不生效，推荐开启ECH功能</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="foot">
+          <span class="st">未选择节点</span>
+          <span class="btn" id="advBtn">收起</span>
+          <span class="btn ghost">测试 IP 分流</span>
+        </div>
+
+        <div class="scrim" id="scrim"></div>
+        <div class="pop" id="pop"></div>
+        <div class="toast" id="toast"></div>
+      </div>
+    </div>
+    <div class="hintline">点输入框展开下拉；橙框是弹层，当前项带 ✓。左侧可切换 现状 / 修复方案 与过渡曲线。</div>
+  </div>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  /* ================= 缓动函数 ================= */
+  function bezierFn(x1, y1, x2, y2) {
+    function bez(p1, p2, t) { var u = 1 - t; return 3 * u * u * t * p1 + 3 * u * t * t * p2 + t * t * t; }
+    return function (x) {
+      if (x <= 0) return 0;
+      if (x >= 1) return 1;
+      var lo = 0, hi = 1, mid = 0.5;
+      for (var i = 0; i < 22; i++) {
+        mid = (lo + hi) / 2;
+        if (bez(x1, x2, mid) < x) lo = mid; else hi = mid;
+      }
+      return bez(y1, y2, mid);
+    };
+  }
+
+  var springSample = (function () {
+    var out = [];
+    for (var i = 0; i <= 60; i++) {
+      var t = i / 60;
+      out.push(1 - Math.exp(-6.2 * t) * Math.cos(10.5 * t));
+    }
+    out[60] = 1;
+    return out;
+  })();
+
+  function springFn(x) {
+    if (x <= 0) return 0;
+    if (x >= 1) return 1;
+    var f = x * 60, i0 = Math.floor(f), r = f - i0;
+    return springSample[i0] + (springSample[Math.min(60, i0 + 1)] - springSample[i0]) * r;
+  }
+
+  var eases = {
+    back:   { fn: bezierFn(.34, 1.56, .64, 1), dur: 320, name: "OutBack · 320ms",  code: "cubic-bezier(.34, 1.56, .64, 1)", cps: [.34, 1.56, .64, 1] },
+    quint:  { fn: bezierFn(.22, 1, .36, 1),    dur: 280, name: "OutQuint · 280ms", code: "cubic-bezier(.22, 1, .36, 1)",    cps: [.22, 1, .36, 1] },
+    spring: { fn: springFn,                    dur: 480, name: "Spring · 480ms",   code: "阻尼正弦 1 - e^-6.2t·cos10.5t",  cps: null },
+    linear: { fn: function (t) { return t; },  dur: 200, name: "Linear · 200ms",   code: "linear（仅作对照）",              cps: [0, 0, 1, 1] }
+  };
+
+  /* ================= 假数据 ================= */
+  var REGIONS = [
+    { key: "美国 · Los Angeles", code: "US", n: 12 },
+    { key: "美国 · San Jose",    code: "US", n: 6 },
+    { key: "日本 · Tokyo",       code: "JP", n: 8 },
+    { key: "中国香港 · Hong Kong", code: "HK", n: 8 },
+    { key: "新加坡 · Singapore",  code: "SG", n: 6 },
+    { key: "德国 · Frankfurt",    code: "DE", n: 4 },
+    { key: "英国 · London",       code: "GB", n: 3 },
+    { key: "韩国 · Seoul",        code: "KR", n: 3 }
+  ];
+  var ISPS = ["Cloudflare", "Hurricane Electric", "EGIHosting", "Iomart Cloud", "DigitalOcean", "Oracle Cloud"];
+
+  function seed(n) { var x = Math.sin(n * 12.9898) * 43758.5453; return x - Math.floor(x); }
+
+  var NODES = [];
+  (function () {
+    var i = 0;
+    REGIONS.forEach(function (r, ri) {
+      for (var k = 0; k < r.n; k++) {
+        i++;
+        var a = 1 + Math.floor(seed(i) * 250), b = 1 + Math.floor(seed(i + 91) * 250);
+        var prefix = ["104.17", "172.66", "104.18", "162.159", "188.114", "104.16"][ri % 6];
+        NODES.push({
+          ip: prefix + "." + a + "." + b,
+          region: r.key,
+          code: r.code,
+          isp: ISPS[(i + ri) % ISPS.length],
+          delay: 62 + Math.floor(seed(i + 7) * 270),
+          dl: (1.2 + seed(i + 3) * 6.4).toFixed(1),
+          tag: i <= 26 ? "ProxyIP " + i : "优选 " + (i - 26),
+          fail: i === 17
+        });
+      }
+    });
+  })();
+
+  var DOH_DEFAULT = ["https://parse.jpacg.cc/parse", "https://doh.pub/dns-query",
+                     "https://parse2.jpacg.cc/parse", "https://dot.pub/dns-query"];
+  var TIMEOUTS = ["3s", "5s", "8s", "10s", "15s", "20s"];
+  var LINES = [
+    { n: "分流 1", api: "96", img: "4.71" },
+    { n: "分流 2", api: "118", img: "3.92" },
+    { n: "分流 3", api: "142", img: "3.10" },
+    { n: "分流 4", api: "333", img: "2.44" },
+    { n: "US反代分流", api: "310", img: "2.05" },
+    { n: "IP 分流", api: "超时", img: "超时" }
+  ];
+
+  var state = {
+    view: "new", ease: "back", region: "全部地区",
+    dohList: DOH_DEFAULT.slice(), doh: DOH_DEFAULT[0],
+    api: 1, img: 1, popKind: null, popAnchor: null, adding: false
+  };
+
+  var screen = document.getElementById("screen");
+  var scroll = document.getElementById("scroll");
+  var pop = document.getElementById("pop");
+  var toastEl = document.getElementById("toast");
+  var scrim = document.getElementById("scrim");
+  var adv = document.getElementById("adv");
+  var dohFld = document.getElementById("dohFld");
+  var regionFld = document.getElementById("regionFld");
+  var spinApi = document.getElementById("spinApi");
+  var spinImg = document.getElementById("spinImg");
+
+  /* ================= 渲染 ================= */
+  function renderSpeed() {
+    // 每行包一层 .srow，行间用 border-top 画分割线（和真机的 QFrame HLine 一致）
+    var h = '<div class="srow">'
+      + '<div class="h">Api分流</div><div class="h">延迟</div><div class="h">图片分流</div><div class="h">速度</div></div>';
+    LINES.forEach(function (l, i) {
+      var on = i === 1 ? " on" : "";
+      var bad = l.api === "超时";
+      h += '<div class="srow">'
+         + '<label><i class="rd' + on + '"></i><span>' + l.n + "</span></label>"
+         + '<div class="v ' + (bad ? "bad" : "ok") + '">' + (bad ? "超时" : l.api + "ms") + "</div>"
+         + '<label><i class="rd"></i><span>' + l.n + "</span></label>"
+         + '<div class="v ' + (bad ? "bad" : "") + '">' + (bad ? "超时" : l.img + "MB/s") + "</div></div>";
+    });
+    document.getElementById("sgrid").innerHTML = h;
+  }
+
+  function visibleNodes() {
+    if (state.region === "全部地区") return NODES;
+    return NODES.filter(function (n) { return n.region === state.region; });
+  }
+
+  function renderRows() {
+    var list = visibleNodes();
+    var h = list.length ? "" : '<div class="empty">该地区暂无节点</div>';
+    list.forEach(function (n, i) {
+      var sel = i === 0 ? " sel" : "";
+      var d = n.fail ? '<b class="slow">超时</b>' : "<b>" + n.delay + "</b>";
+      h += '<div class="row' + sel + '">'
+         + '<i class="rd' + (i === 0 ? " on" : "") + '"></i>'
+         + '<div class="rmain"><div class="rtop"><span class="ip">' + n.ip + "</span>"
+         + '<span class="spd">' + d + " / " + (n.fail ? "—" : n.dl) + "</span></div>"
+         + '<div class="rsub"><span class="tag">' + n.tag + '</span><span class="geo">' + n.region + " · " + n.isp + "</span></div></div></div>";
+    });
+    document.getElementById("rows").innerHTML = h;
+    document.getElementById("listCnt").textContent = "共 " + list.length + " 项";
+    document.getElementById("sRows").textContent = list.length;
+  }
+
+  function shortDoh(url) { return url.replace(/^https?:\/\//, "").replace(/\/.*$/, ""); }
+
+  function updateStats() {
+    document.getElementById("sRegion").textContent = state.region;
+    document.getElementById("sDohCount").textContent = state.dohList.length;
+    document.getElementById("sDoh").textContent = shortDoh(state.doh);
+    document.getElementById("sEase").textContent = eases[state.ease].name.replace(" · ", " ");
+  }
+
+  /* ================= 弹层：CSS transition ================= */
+  // 展开/收起只切 class，曲线由 CSS 变量 --pop-ease 给：不依赖逐帧回调，
+  // 掉帧也不会停在“半透明”；四个下拉共用同一套时序。
+  var popToken = 0;
+  var springEaseCss = null;
+
+  function popEaseCss() {
+    var e = eases[state.ease];
+    if (e.cps) return "cubic-bezier(" + e.cps.join(",") + ")";
+    if (!springEaseCss) {
+      var supported = false;
+      try { supported = window.CSS && CSS.supports && CSS.supports("transition-timing-function", "linear(0, 0.5, 1)"); } catch (err) { supported = false; }
+      if (!supported) return "cubic-bezier(.34, 1.56, .64, 1)";
+      springEaseCss = "linear(" + springSample.map(function (v) { return v.toFixed(3); }).join(",") + ")";
+    }
+    return springEaseCss;
+  }
+
+  function animateOpen() {
+    pop.style.setProperty("--pop-ease", popEaseCss());
+    pop.classList.remove("show", "closing");
+    void pop.offsetHeight;             // 强制重排：确保从“收起态”过渡
+    pop.classList.add("show");
+  }
+
+  function resetPop() {
+    popToken++;
+    pop.classList.remove("show", "closing");
+    pop.style.display = "none";
+    state.popKind = null;
+    state.popAnchor = null;
+    regionFld.classList.remove("open");
+    dohFld.classList.remove("open");
+    spinApi.classList.remove("open");
+    spinImg.classList.remove("open");
+    scrim.classList.remove("show");
+  }
+
+  function closePop(fast) {
+    if (!state.popKind) return;
+    var kind = state.popKind;
+    var dur = fast ? 90 : 135;
+    state.popKind = null;
+    state.popAnchor = null;
+    regionFld.classList.remove("open");
+    dohFld.classList.remove("open");
+    spinApi.classList.remove("open");
+    spinImg.classList.remove("open");
+    scrim.classList.remove("show");
+
+    var my = ++popToken;
+    pop.classList.remove("show");
+    pop.classList.add("closing");
+    setTimeout(function () {
+      if (my !== popToken || state.popKind) return;   // 期间又开了新的：本次收尾作废
+      pop.classList.remove("closing");
+      pop.style.display = "none";
+    }, dur + 40);
+    return kind;
+  }
+
+  // 竖直方向只能落在"滚动可视区"内（底栏是固定的，弹层不许压到它上面）
+  function popGeometry(anchor, width, height) {
+    var sr = screen.getBoundingClientRect();
+    var vr = scroll.getBoundingClientRect();
+    var ar = anchor.getBoundingClientRect();
+    var minY = Math.max(sr.top, vr.top) + 2;
+    var maxY = Math.min(sr.bottom, vr.bottom) - 4;
+    var x = ar.left - sr.left;
+    if (x + width > sr.width - 6) x = sr.width - 6 - width;
+    x = Math.max(6, x);
+    var y = ar.bottom + 4;                       // 优先贴下方
+    if (y + height > maxY) {
+      var above = ar.top - height - 4;           // 放不下就翻到上方
+      y = (above >= minY) ? above : Math.max(minY, maxY - height);
+    }
+    return { x: x, y: y - sr.top };
+  }
+
+  function mountPop(anchor, width, html, cap) {
+    pop.style.width = width + "px";
+    pop.innerHTML = '<div class="pop-cap">' + cap + "</div>" + html;
+    pop.classList.remove("show", "closing");
+    pop.style.display = "block";
+    pop.style.left = "0px";
+    pop.style.top = "0px";
+    var pos = popGeometry(anchor, width, pop.offsetHeight);
+    // 内容比可视区还高：先压列表高度，再算一次位置（不然会顶到固定底栏）
+    var avail = scroll.getBoundingClientRect().height - 12;
+    if (pop.offsetHeight > avail) {
+      var list = pop.querySelector(".pop-list");
+      if (list) {
+        var chrome = pop.offsetHeight - list.offsetHeight;
+        list.style.maxHeight = Math.max(96, avail - chrome) + "px";
+        pos = popGeometry(anchor, width, pop.offsetHeight);
+      }
+    }
+    pop.style.left = pos.x + "px";
+    pop.style.top = pos.y + "px";
+    animateOpen();
+  }
+
+  // 滚动时让弹层跟着锚点走；锚点滚出可视区才收起
+  function repositionPop() {
+    if (!state.popKind || !state.popAnchor) return;
+    var sr = screen.getBoundingClientRect();
+    var ar = state.popAnchor.getBoundingClientRect();
+    if (ar.bottom < sr.top + 46 || ar.top > sr.bottom - 46) { closePop(true); return; }
+    var pos = popGeometry(state.popAnchor, pop.offsetWidth, pop.offsetHeight);
+    pop.style.left = pos.x + "px";
+    pop.style.top = pos.y + "px";
+  }
+
+  /* ---- 地区下拉 ---- */
+  function regionItem(name, code, num, cur) {
+    return '<div class="pop-item' + (cur ? " cur" : "") + '" data-region="' + name + '">'
+      + '<span class="mk">' + (cur ? "✓" : "") + "</span>"
+      + '<span class="nm">' + name + "</span>"
+      + (code ? '<span class="code">' + code + "</span>" : "")
+      + '<span class="num">' + num + "</span></div>";
+  }
+
+  function regionHtml() {
+    var h = '<div class="pop-list">' + regionItem("全部地区", "", NODES.length, state.region === "全部地区");
+    REGIONS.forEach(function (r) { h += regionItem(r.key, r.code, r.n, state.region === r.key); });
+    return h + "</div>";
+  }
+
+  function openRegion() {
+    if (state.view === "old") {
+      regionFld.classList.add("flash");
+      setTimeout(function () { regionFld.classList.remove("flash"); }, 420);
+      toast("现状：地区候选从未被填充，点按没有任何下拉（只能当自由输入框）", true);
+      return;
+    }
+    if (state.popKind === "region") { closePop(); return; }
+    resetPop();
+    state.popKind = "region";
+    state.popAnchor = regionFld;
+    regionFld.classList.add("open");
+    scrim.classList.add("show");
+    mountPop(regionFld, 268, regionHtml(), "选择地区 <em>按已获取节点去重</em>");
+  }
+
+  /* ---- DOH 下拉 ---- */
+  function dohHtml() {
+    var h = '<div class="pop-list">';
+    state.dohList.forEach(function (u) {
+      var cur = u === state.doh;
+      h += '<div class="pop-item' + (cur ? " cur" : "") + '" data-doh="' + u + '">'
+        + '<span class="mk">' + (cur ? "✓" : "") + "</span>"
+        + '<span class="nm" style="font-family:ui-monospace,Consolas,monospace;font-size:10.5px">' + u + "</span>"
+        + (cur ? '<span class="num">生效中</span>' : "") + "</div>";
+    });
+    h += "</div>";
+
+    if (state.view === "old") {
+      h += '<div class="pop-note">现状：没有「添加 DOH 地址」一栏，自定义地址只能改配置文件</div>';
+      return h;
+    }
+    h += '<div class="pop-add' + (state.adding ? " editing" : "") + '" id="popAdd">'
+      + '<span class="plus">＋</span>'
+      + '<input class="addfld" id="addFld" tabindex="-1" placeholder="添加 DOH 地址" value="">'
+      + '<span class="tip" id="addTip">' + (state.adding ? "点 ✓ 保存" : "先点 ＋") + "</span>"
+      + '<span class="ok" id="addOk">✓</span><span class="no" id="addNo">✕</span></div>';
+    return h;
+  }
+
+  function openDoh() {
+    if (state.popKind === "doh") { closePop(); return; }
+    resetPop();
+    state.popKind = "doh";
+    state.popAnchor = dohFld;
+    state.adding = false;
+    dohFld.classList.add("open");
+    scrim.classList.add("show");
+    mountPop(dohFld, 320, dohHtml(), "DOH 地址 <em>" + state.dohList.length + " 条 · 可自定义</em>");
+    bindAddRow();
+  }
+
+  function bindAddRow() {
+    var add = document.getElementById("popAdd");
+    if (!add) return;
+    var fld = document.getElementById("addFld");
+    var ok = document.getElementById("addOk");
+    var no = document.getElementById("addNo");
+
+    // 未解锁：整行任何位置都只是“解锁”，输入框本身 pointer-events:none，不会触发输入
+    add.addEventListener("pointerdown", function (ev) {
+      if (add.classList.contains("editing")) return;
+      ev.preventDefault();
+      ev.stopPropagation();
+      state.adding = true;
+      add.classList.add("editing");
+      fld.style.pointerEvents = "auto";
+      document.getElementById("addTip").textContent = "点 ✓ 保存";
+      fld.focus();
+      toast("已解锁：现在可以输入自定义 DOH 地址");
+    }, true);
+
+    no.addEventListener("pointerdown", function (ev) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      state.adding = false;
+      add.classList.remove("editing");
+      fld.value = "";
+      fld.style.pointerEvents = "";
+      fld.blur();
+      document.getElementById("addTip").textContent = "先点 ＋";
+    }, true);
+
+    ok.addEventListener("pointerdown", function (ev) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      var tip = document.getElementById("addTip");
+      var val = (fld.value || "").trim();
+      if (!val) {
+        ok.classList.add("hint");
+        setTimeout(function () { ok.classList.remove("hint"); }, 420);
+        tip.textContent = "不能为空";
+        return;
+      }
+      if (!/^https:\/\/\S+$/i.test(val)) {
+        ok.classList.add("hint");
+        setTimeout(function () { ok.classList.remove("hint"); }, 420);
+        tip.textContent = "需 https:// 开头";
+        return;
+      }
+      if (state.dohList.indexOf(val) < 0) state.dohList.unshift(val);
+      state.doh = val;
+      applyDoh("已添加并应用：" + shortDoh(val));
+      closePop();
+    }, true);
+  }
+
+  /* ---- 超时下拉 ---- */
+  function openTimeout(which) {
+    var anchor = which === "api" ? spinApi : spinImg;
+    var cur = TIMEOUTS[which === "api" ? state.api : state.img];
+    if (state.popKind === "timeout" && state.popAnchor === anchor) { closePop(); return; }
+    resetPop();
+    state.popKind = "timeout";
+    state.popAnchor = anchor;
+    anchor.classList.add("open");
+    scrim.classList.add("show");
+    var h = '<div class="pop-list">';
+    TIMEOUTS.forEach(function (t) {
+      var on = t === cur;
+      h += '<div class="pop-item' + (on ? " cur" : "") + '" data-timeout="' + t + '" data-which="' + which + '">'
+        + '<span class="mk">' + (on ? "✓" : "") + "</span>"
+        + '<span class="nm" style="text-align:center;font-variant-numeric:tabular-nums">' + t + "</span></div>";
+    });
+    mountPop(anchor, 104, h + "</div>", which === "api" ? "API 超时" : "图片超时");
+  }
+
+  /* ================= 应用 ================= */
+  function applyRegion(name) {
+    state.region = name;
+    document.getElementById("regionTxt").textContent = name;
+    var n = visibleNodes().length;
+    var st = document.getElementById("regionStat");
+    st.textContent = "已获取" + n + "个节点";
+    st.className = "stats-txt ok";
+    renderRows();
+    updateStats();
+    scrollToPanel();
+  }
+
+  function applyDoh(msg) {
+    document.getElementById("dohTxt").textContent = state.doh;
+    updateStats();
+    toast(msg);
+  }
+
+  function toast(msg, bad) {
+    toastEl.textContent = msg;
+    toastEl.className = "toast show" + (bad ? " bad" : "");
+    clearTimeout(toastEl._t);
+    toastEl._t = setTimeout(function () { toastEl.className = "toast" + (bad ? " bad" : ""); }, 2400);
+  }
+
+  function scrollToPanel() { scroll.scrollTop = scroll.scrollHeight; }
+
+  /* ================= 事件 ================= */
+  regionFld.addEventListener("click", openRegion);
+  dohFld.addEventListener("click", openDoh);
+  spinApi.addEventListener("click", function () { openTimeout("api"); });
+  spinImg.addEventListener("click", function () { openTimeout("img"); });
+
+  // 现状视图：故意复刻“手指一按下弹层就被收起”
+  pop.addEventListener("pointerdown", function (ev) {
+    if (!ev.target.closest) return;
+    var it = ev.target.closest(".pop-item");
+    if (!it || state.view !== "old" || state.popKind !== "doh") return;
+    ev.preventDefault();
+    ev.stopPropagation();
+    closePop();
+    toast("现状：手指一按下弹层就被收起，clicked 永远不发 —— 选不中", true);
+  }, true);
+
+  pop.addEventListener("click", function (ev) {
+    if (!ev.target.closest) return;
+    var it = ev.target.closest(".pop-item");
+    if (!it) return;
+
+    if (state.popKind === "region" && it.dataset.region) {
+      var name = it.dataset.region;
+      applyRegion(name);
+      closePop();
+      toast("已应用：" + name + " · 重新获取 " + visibleNodes().length + " 个节点");
+      return;
+    }
+    if (state.popKind === "doh" && it.dataset.doh) {
+      if (state.view === "old") return;
+      state.doh = it.dataset.doh;
+      applyDoh("已切换并校验：" + shortDoh(state.doh));
+      closePop();
+      return;
+    }
+    if (state.popKind === "timeout" && it.dataset.timeout) {
+      var which = it.dataset.which;
+      var idx = TIMEOUTS.indexOf(it.dataset.timeout);
+      if (which === "api") { state.api = idx; spinApi.querySelector("b").textContent = TIMEOUTS[idx].replace("s", ""); }
+      else { state.img = idx; spinImg.querySelector("b").textContent = TIMEOUTS[idx].replace("s", ""); }
+      closePop();
+      toast((which === "api" ? "API" : "图片") + "超时设为 " + TIMEOUTS[idx]);
+    }
+  });
+
+  document.addEventListener("pointerdown", function (ev) {
+    if (!state.popKind) return;
+    if (pop.contains(ev.target)) return;
+    if (regionFld.contains(ev.target) || dohFld.contains(ev.target)) return;
+    if (ev.target === spinApi || ev.target === spinImg) return;
+    closePop();
+  });
+  document.addEventListener("keydown", function (ev) { if (ev.key === "Escape") closePop(); });
+  scroll.addEventListener("scroll", repositionPop);
+
+  /* 折叠 / 展开高级面板（同一套 OutBack 曲线） */
+  var panelOpen = true;
+  document.getElementById("advBtn").addEventListener("click", function () {
+    closePop(true);
+    var btn = this;
+    if (panelOpen) {
+      adv.style.height = adv.offsetHeight + "px";
+      void adv.offsetHeight;
+      adv.style.height = "0px";
+      panelOpen = false;
+      btn.textContent = "高级";
+      setTimeout(function () { if (!panelOpen) adv.style.height = "0px"; }, 240);
+    } else {
+      adv.style.height = "0px";
+      void adv.offsetHeight;
+      adv.style.height = document.getElementById("advInner").offsetHeight + 2 + "px";
+      panelOpen = true;
+      btn.textContent = "收起";
+      setTimeout(function () { if (panelOpen) adv.style.height = "auto"; }, 240);
+      scrollToPanel();
+    }
+  });
+
+  /* 左侧控制 */
+  document.getElementById("segView").addEventListener("click", function (ev) {
+    var b = ev.target.closest("button");
+    if (!b) return;
+    state.view = b.dataset.view;
+    Array.prototype.forEach.call(this.querySelectorAll("button"), function (x) { x.classList.toggle("on", x === b); });
+    closePop(true);
+    Array.prototype.forEach.call(document.querySelectorAll("#contract li"), function (li) {
+      var bad = state.view === "old";
+      li.classList.toggle("bad", bad);
+      li.querySelector(".mk").textContent = bad ? "✕" : "✓";
+    });
+    toast(state.view === "old" ? "现状：地区点不开、DOH 点不中、无法自定义" : "修复方案：可点可选可添加", state.view === "old");
+  });
+
+  document.getElementById("segEase").addEventListener("click", function (ev) {
+    var b = ev.target.closest("button");
+    if (!b) return;
+    state.ease = b.dataset.ease;
+    Array.prototype.forEach.call(this.querySelectorAll("button"), function (x) { x.classList.toggle("on", x === b); });
+    drawCurve();
+    updateStats();
+  });
+
+  document.getElementById("jRegion").addEventListener("click", openRegion);
+  document.getElementById("jDoh").addEventListener("click", openDoh);
+
+  /* 曲线示意 */
+  function drawCurve() {
+    var e = eases[state.ease];
+    var W = 112, H = 76, padL = 8, padB = 9, padT = 9;
+    var w = W - padL - 4, h = H - padB - padT;
+    var pts = [];
+    for (var i = 0; i <= 60; i++) {
+      var t = i / 60, v = e.fn(t);
+      pts.push([padL + w * t, padT + h * (1 - Math.min(1.12, v))]);
+    }
+    var d = pts.map(function (p, i) { return (i ? "L" : "M") + p[0].toFixed(1) + " " + p[1].toFixed(1); }).join(" ");
+    document.getElementById("curve").innerHTML =
+      '<line x1="' + padL + '" y1="' + (padT + h) + '" x2="' + (W - 4) + '" y2="' + (padT + h) + '" stroke="#3a3e44" stroke-width="1"/>' +
+      '<line x1="' + padL + '" y1="' + padT + '" x2="' + padL + '" y2="' + (padT + h) + '" stroke="#3a3e44" stroke-width="1"/>' +
+      '<line x1="' + padL + '" y1="' + padT + '" x2="' + (W - 4) + '" y2="' + padT + '" stroke="#4a3a2c" stroke-width="1" stroke-dasharray="2 3"/>' +
+      '<path d="' + d + '" fill="none" stroke="#e0762a" stroke-width="1.6" stroke-linecap="round"/>';
+    document.getElementById("easeName").textContent = e.name;
+    document.getElementById("easeCode").textContent = e.code;
+  }
+
+  /* ================= 启动 ================= */
+  renderSpeed();
+  renderRows();
+  updateStats();
+  drawCurve();
+  document.getElementById("sRegions").textContent = REGIONS.length + " / " + NODES.length + " 节点";
+
+  // ?pop=region|doh|add|api & view=old|new & ease=back|quint|spring|linear
+  var q = {};
+  (location.search || "").replace(/^\?/, "").split("&").forEach(function (kv) {
+    var a = kv.split("=");
+    if (a[0]) q[a[0]] = a[1];
+  });
+  if (q.view === "old" || q.view === "new") {
+    state.view = q.view;
+    Array.prototype.forEach.call(document.querySelectorAll("#segView button"), function (b) {
+      b.classList.toggle("on", b.dataset.view === q.view);
+    });
+    if (q.view === "old") {
+      Array.prototype.forEach.call(document.querySelectorAll("#contract li"), function (li) {
+        li.classList.add("bad");
+        li.querySelector(".mk").textContent = "✕";
+      });
+    }
+  }
+  if (q.ease && eases[q.ease]) {
+    state.ease = q.ease;
+    Array.prototype.forEach.call(document.querySelectorAll("#segEase button"), function (b) {
+      b.classList.toggle("on", b.dataset.ease === q.ease);
+    });
+    drawCurve();
+    updateStats();
+  }
+
+  setTimeout(function () {
+    scrollToPanel();
+    if (q.pop === "region") openRegion();
+    else if (q.pop === "doh") openDoh();
+    else if (q.pop === "add") {
+      openDoh();
+      var add = document.getElementById("popAdd");
+      if (add) add.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, cancelable: true }));
+      var fld = document.getElementById("addFld");
+      if (fld) fld.value = "https://doh.example/dns-query";
+    } else if (q.pop === "api") openTimeout("api");
+  }, 80);
+})();
+</script>
+</body>
+</html>

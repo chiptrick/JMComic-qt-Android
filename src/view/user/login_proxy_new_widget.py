@@ -5,7 +5,8 @@ import re
 import urllib.request
 from functools import partial
 
-from PySide6.QtCore import QEvent, QObject, QSize, Qt
+from PySide6.QtCore import (QAbstractAnimation, QEasingCurve, QEvent, QObject,
+                            QSize, Qt, QVariantAnimation)
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (QAbstractItemView, QFrame, QHeaderView, QLabel)
 
@@ -16,20 +17,33 @@ from config.setting import Setting
 from qt_owner import QtOwner
 from server import req, Server
 from tools.log import Log
+from tools.region_code import RegionToCode, RegionToName
 from tools.str import Str
 
 
-class _ViewportWatcher(QObject):
-    """ 视口尺寸变化时回调（LoginProxyNewWidget 不是 QObject，不能自己当事件过滤器） """
+class _TableViewportWatcher(QObject):
+    """ 列表视口的事件旁路（LoginProxyNewWidget 不是 QObject，不能自己当过滤器）
 
-    def __init__(self, callback, parent=None):
+        - Resize：空占位文案要跟着视口大小走
+        - Wheel ：表格自己已经不能滚（高度=内容），滚轮要转发给整页滚动区，
+                  否则鼠标停在列表上滚轮什么都不动
+    """
+
+    def __init__(self, widget, parent=None):
         QObject.__init__(self, parent)
-        self.callback = callback
+        self.widget = widget
 
     def eventFilter(self, obj, event):
-        if event.type() == QEvent.Type.Resize:
-            self.callback()
+        kind = event.type()
+        if kind == QEvent.Type.Resize:
+            self.widget.UpdateEmpty()
+        elif kind == QEvent.Type.Wheel:
+            return self.widget.ForwardWheelToPage(event)
         return False
+
+
+# 「全部地区」= 不带子域（proxyip.cmliussss.net，全球节点）
+AllRegion = "全部地区"
 
 
 class IpItem(object):
@@ -153,6 +167,7 @@ class LoginProxyNewWidget(object):
         self.owner.dohLine.SetWordData(GlobalConfig.DohUrlList.value[:])
         self.owner.cdnLinkButton.clicked.connect(self.OpenUrl)
         self.owner.dohLine.editingFinished.connect(self.CheckDohReq)
+        self.InitDropdowns()
 
     # ---------------- 列表（一行一张卡片） ----------------
     def InitCardTable(self):
@@ -166,10 +181,9 @@ class LoginProxyNewWidget(object):
         table.setShowGrid(False)
         table.setWordWrap(False)
         table.setFrameShape(QFrame.NoFrame)
+        # 列表不再自己滚：高度 = 行数 × 行高，滚动交给外层 proxyScrollArea（整页）
         table.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        # 旧代码把竖直滚动条也关掉了 —— 列表比可视区高时根本滚不动，
-        # 这正是"后面的节点看不到"的另一半原因
-        table.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        table.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         table.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
         table.setHorizontalScrollMode(QAbstractItemView.ScrollPerPixel)
         table.setSelectionBehavior(QAbstractItemView.SelectRows)
@@ -186,14 +200,23 @@ class LoginProxyNewWidget(object):
         self.emptyLabel.setAlignment(Qt.AlignCenter)
         self.emptyLabel.setStyleSheet("color:#7C858E;background:transparent;")
         self.emptyLabel.hide()
-        self.viewportWatcher = _ViewportWatcher(self.UpdateEmpty, table.viewport())
+        self.viewportWatcher = _TableViewportWatcher(self, table.viewport())
         table.viewport().installEventFilter(self.viewportWatcher)
+        # 表格已经不滚了，绝不能再让 QScroller 抓住它的手势 —— 否则手指按在列表上
+        # 拖动会被"零滚动量的视图"吃掉，外层页面一动不动（详见 mobile_ui_touch.MakeScrollable）
+        self.DetachTableTouchScroll()
 
     def InitUi(self):
         """ 接上新布局上的筛选 / 排序 / 密度 / 高级面板 / 速度格子 """
         owner = self.owner
-        for col in range(6):
-            owner.speedGrid.setColumnStretch(col, 1)
+        # 线路网格：4 列 × 6 行（Api分流 / 延迟 / 图片分流 / 速度），
+        # 两个名字列吃剩余宽度，两个数值列固定宽 —— 这样"US反代分流"和
+        # "4.71MB/s" 都不会被挤掉（上一版 6 个 chip 挤一行时就死在这）
+        grid = owner.speedGrid
+        for col in range(4):
+            grid.setColumnStretch(col, 1 if col in (0, 2) else 0)
+        grid.setColumnMinimumWidth(1, 56)
+        grid.setColumnMinimumWidth(3, 80)
         small = ScaledFont(owner.font(), -1.8)
         for i in range(1, self.maxNum):
             for name in ("label_api_" + str(i), "label_img_" + str(i)):
@@ -201,6 +224,10 @@ class LoginProxyNewWidget(object):
                 if isinstance(label, QLabel):
                     label.setFont(small)
                     label.setAlignment(Qt.AlignCenter)
+        for name in ("label_18", "label_20", "label_21", "label_19"):
+            label = getattr(owner, name, None)
+            if isinstance(label, QLabel):
+                label.setFont(ScaledFont(owner.font(), -2.6))
 
         # 主题里 QPushButton 是 34px 高 + 左右 16px 内边距（桌面尺寸），塞进这几条紧凑栏
         # 会把行撑胖、把"测速/≡"这类窄按钮的文字挤掉。这里只覆盖度量，配色仍走主题。
@@ -220,7 +247,119 @@ class LoginProxyNewWidget(object):
         owner.testIpButton.clicked.connect(self.StartTestIp)
         owner.testSpeedButton.clicked.connect(self.SpeedTest)
         owner.radioProxyGroup.buttonClicked.connect(self.OnProxyModeChanged)
+        self.InitPageScroll()
+        self.InitAdvPanel()
         self.SyncFilterText()
+
+    # ---------------- 整页滚动 ----------------
+    def InitPageScroll(self):
+        """ 表格不再自己滚：把滚动交给外层 proxyScrollArea，并给它装上 QScroller
+
+            移动端：QScroller 提供"手指拖动 + 松手惯性"（和 App 其它页面同一套，
+                    见 mobile_ui_touch.MakeScrollable）。桌面端不装 QScroller ——
+                    那会把 SmoothScrollBar 的滚轮缓动关掉，鼠标滚轮就变成硬跳。
+        """
+        area = self.owner.proxyScrollArea
+        area.setWidgetResizable(True)
+        area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        try:
+            from tools.mobile_ui_base import IsEnabled
+            if IsEnabled():
+                from tools.mobile_ui_touch import MakeScrollable
+                MakeScrollable(area)
+        except Exception as es:
+            Log.Error(es)
+
+    def DetachTableTouchScroll(self):
+        """ 把表格从 QScroller 手里摘出来：它已经没有滚动量了，抓住手势只会让页面不动 """
+        table = self.owner.tableWidget
+        table._jmNoTouchScroll = True
+        try:
+            from PySide6.QtWidgets import QScroller
+            QScroller.ungrabGesture(table.viewport())
+        except Exception as es:
+            Log.Error(es)
+        try:
+            table.viewport().setAttribute(Qt.WA_AcceptTouchEvents, False)
+        except Exception:
+            pass
+        table._jmTouchScroll = False
+
+    def ForwardWheelToPage(self, event):
+        """ 滚轮落在列表上 -> 转给整页滚动区（沿用 SmoothScrollBar 的 500ms 缓动） """
+        step = -event.angleDelta().y()
+        if not step:
+            return False
+        area = self.owner.proxyScrollArea
+        bar = area.verticalScrollBar() if area is not None else None
+        if bar is None:
+            return False
+        scrollValue = getattr(bar, "ScrollValue", None)
+        if callable(scrollValue):
+            scrollValue(step)
+        else:
+            bar.setValue(bar.value() + step)
+        return True
+
+    def UpdateTableHeight(self):
+        """ 表格高度 = 所有行高之和（+2px 余量），页面靠内容撑高，滚动交给外层 """
+        table = self.owner.tableWidget
+        total = 0
+        for row in range(table.rowCount()):
+            total += table.rowHeight(row)
+        total = max(1, total + 2)
+        if table.height() != total or table.minimumHeight() != total:
+            table.setFixedHeight(total)
+        # 表格高度变了要"叫醒"滚动区重算范围：QScrollArea 只在内容控件 resize 时
+        # 调 updateScrollBars()，光改子控件高度它不知道（实测滚动条最大值一直是 0）
+        content = getattr(self.owner, "proxyScrollContent", None)
+        if content is not None and content.height() != content.sizeHint().height():
+            content.adjustSize()
+
+    # ---------------- 高级面板：OutBack 展开/收起 ----------------
+    def InitAdvPanel(self):
+        panel = self.owner.proxyAdvPanel
+        self.advOpen = False
+        self.advAnim = QVariantAnimation(self.owner)
+        self.advAnim.setDuration(320)
+        # 非线性：先冲过头再回弹（前端 OutBack 同款），比 linear 有"手感"
+        self.advAnim.setEasingCurve(QEasingCurve.OutBack)
+        self.advAnim.valueChanged.connect(self.ApplyAdvHeight)
+        self.advAnim.finished.connect(self.OnAdvAnimFinished)
+        # 普通 QWidget 默认不画样式表背景/描边，要显式打开（否则真机上可能只见到内容不见边框）
+        self.owner.proxyAdvFrame.setAttribute(Qt.WA_StyledBackground, True)
+        panel.setMinimumHeight(0)
+        panel.setMaximumHeight(0)
+
+    def ApplyAdvHeight(self, value):
+        panel = self.owner.proxyAdvPanel
+        height = max(0, int(value))
+        panel.setMinimumHeight(height)
+        panel.setMaximumHeight(height)
+
+    def OnAdvAnimFinished(self):
+        panel = self.owner.proxyAdvPanel
+        if self.advOpen:
+            # 交回布局：之后字体/内容变化时高度能自然跟着变
+            panel.setMinimumHeight(0)
+            panel.setMaximumHeight(16777215)
+        else:
+            panel.setVisible(False)
+            self.SetAdvBorder(False)
+
+    def SetAdvBorder(self, on):
+        """ 展开时给面板加 1px 主题色描边 + 上投影；收起时一起撤掉，不留亮线 """
+        frame = self.owner.proxyAdvFrame
+        if not on:
+            frame.setStyleSheet("")
+            return
+        try:
+            color = QtOwner().GetThemeColor()
+        except Exception:
+            color = "#FF7B00"
+        frame.setStyleSheet(
+            "QWidget#proxyAdvFrame{{border:1px solid {c};border-radius:6px;"
+            "background-color:rgba(255,255,255,6);}}".format(c=color))
 
     @staticmethod
     def CompactButton(widget, height, padding, fontDelta, maxWidth=None):
@@ -263,6 +402,7 @@ class LoginProxyNewWidget(object):
 
         self.SyncTableSelection()
         self.UpdateCount()
+        self.UpdateTableHeight()
         self.UpdateEmpty()
 
     def SortItems(self, items):
@@ -480,11 +620,36 @@ class LoginProxyNewWidget(object):
             if isinstance(card, ProxyNodeCard):
                 card.SetDense(self.dense)
                 self.owner.tableWidget.setRowHeight(row, card.RowHeight())
+        self.UpdateTableHeight()
 
     def OnAdvClicked(self):
+        """ 展开/收起：高度用 OutBack 曲线过渡（先过冲再回落），并淡入描边 """
         panel = self.owner.proxyAdvPanel
-        panel.setVisible(not panel.isVisible())
-        self.owner.proxyAdvButton.setText("收起" if panel.isVisible() else "高级")
+        if self.advAnim.state() == QAbstractAnimation.Running:
+            self.advAnim.stop()
+
+        if not self.advOpen:
+            # 先让布局算出"展开后该多高"，再从 0 长上去
+            panel.setMinimumHeight(0)
+            panel.setMaximumHeight(16777215)
+            panel.setVisible(True)
+            self.SetAdvBorder(True)
+            panel.ensurePolished()
+            target = max(1, panel.sizeHint().height())
+            panel.setMinimumHeight(0)
+            panel.setMaximumHeight(0)
+            self.advAnim.setStartValue(0)
+            self.advAnim.setEndValue(target)
+            self.advAnim.start()
+            self.advOpen = True
+            self.owner.proxyAdvButton.setText("收起")
+            return
+
+        self.advAnim.setStartValue(max(0, panel.height()))
+        self.advAnim.setEndValue(0)
+        self.advAnim.start()
+        self.advOpen = False
+        self.owner.proxyAdvButton.setText("高级")
 
     def OnProxyModeChanged(self, *args):
         self.UpdateAddrRow()
@@ -613,7 +778,9 @@ class LoginProxyNewWidget(object):
         self.owner.apiTimeout.setCurrentIndex(Setting.ApiTimeOut.value)
         self.owner.imgTimeout.setCurrentIndex(Setting.ImgTimeOut.value)
         self.owner.echBox.setChecked(bool(Setting.EnableEch.value))
-        self.owner.dohLine.setText(Setting.DohAddress.value)
+        self.owner.dohLine.setText(Setting.DohAddress.value or "")
+        region = (Setting.ProxyIpCountry.value or "").strip()
+        self.owner.proxyIpEdit.setText(RegionToName(region) or region or AllRegion)
         self.owner.http3Box.setChecked(bool(Setting.IsOpenHTTP3.value))
         self.owner.ipListEdit.setText(Setting.PreferCDNList.value)
         self.owner.proxyIpEdit.setText(Setting.ProxyIpCountry.value)
@@ -670,13 +837,116 @@ class LoginProxyNewWidget(object):
     def OpenUrl(self):
         QtOwner().owner.helpView.OpenProxyUrl()
 
+    # ---------------- 下拉：获取地区 / DOH 地址 ----------------
+    def InitDropdowns(self):
+        """ 让「获取地区」「DOH」两个输入框真的能点开、能选中
+
+        原来坏在两处：
+          * `proxyIpEdit` 全仓库从没被 `SetWordData()` 过 —— 弹出来是个空盒子，
+            只能当自由输入框用；
+          * 弹层虽然填了候选，但 `popup_list._OutsideHider` 拿**事件接收者**判断
+            "点的是不是外面"，手机端接收者是宿主窗口 → 按在弹层上的第一下就被收起，
+            `clicked` 永远不发（点得开、点不中）。
+        这里补：地区候选来源、选中即生效、DOH 底部「添加 DOH 地址」一栏。
+        """
+        try:
+            doh = self.owner.dohLine
+            region = self.owner.proxyIpEdit
+            # 这两项只能从下拉候选中选择，不允许手动编辑；只读不会禁用控件，
+            # 点按仍能展开候选，setText/editingFinished 等既有链路也不受影响。
+            # 「添加 DOH 地址」的 addEdit 是独立的可编辑 QLineEdit，不受这里影响。
+            doh.setReadOnly(True)
+            region.setReadOnly(True)
+
+            doh.SetPopupCaption("DOH 地址")
+            doh.EnableAddRow("添加 DOH 地址", "https://", self.ValidateDohAddress)
+            doh.wordAdded.connect(self.OnDohAdded)
+            doh.wordSelected.connect(self.OnDohSelected)
+
+            region.SetPopupCaption("选择地区（按已获取节点）")
+            self.regionWords = []
+            self.RefreshRegionWords()
+            region.wordSelected.connect(self.OnRegionPicked)
+        except Exception as es:
+            Log.Error(es)
+
+    def RegionNames(self):
+        """ 已获取节点里出现过的国家（`item.country` 形如「美国·Los Angeles」） """
+        names, seen = [], set()
+        for item in self.allItems.values():
+            country = (getattr(item, "country", "") or "").split("·")[0].strip()
+            if country and country not in seen:
+                seen.add(country)
+                names.append(country)
+        names.sort()
+        return names
+
+    def RefreshRegionWords(self):
+        """ 把地区候选同步进下拉（没有变化就不动，避免打断正在展开的列表） """
+        try:
+            names = self.RegionNames()
+            words = [AllRegion] + names
+            if words == getattr(self, "regionWords", None):
+                return
+            self.regionWords = words
+            self.owner.proxyIpEdit.SetWordData(words)
+            Log.Warn("region: 候选 {} 个 -> {}".format(len(names), ",".join(names[:6])))
+        except Exception as es:
+            Log.Error(es)
+
+    def RegionParam(self):
+        """ 输入框里的地区 -> 子域参数（中文名换成二字代码；认不出来就按原文本发） """
+        text = (self.owner.proxyIpEdit.text() or "").strip()
+        if not text or text == AllRegion:
+            return ""
+        return RegionToCode(text) or text
+
+    def OnRegionPicked(self, name):
+        """ 选了某个地区：写设置 + 立刻按该地区重新取节点 """
+        try:
+            text = (name or "").strip()
+            if text == AllRegion:
+                text = ""
+            Setting.ProxyIpCountry.SetValue(text)
+            Log.Warn("region: 选中 {!r} -> 子域 {!r}".format(text, self.RegionParam()))
+            self.owner.proxyIpLabel.setText("")
+            if self.owner.testIpButton.isEnabled():
+                self.StartTestIp()
+        except Exception as es:
+            Log.Error(es)
+
+    def ValidateDohAddress(self, url):
+        """ 自定义 DOH：必须是非空的 https:// 地址 """
+        url = (url or "").strip()
+        if not url:
+            return False
+        return re.match(r"^https://\S+$", url) is not None
+
+    def OnDohAdded(self, url):
+        """ 新加的 DOH 记进候选表（Setting.DohAddress 由 editingFinished 那条链保存） """
+        try:
+            urls = GlobalConfig.DohUrlList.value
+            if url in urls:
+                urls.remove(url)
+            urls.insert(0, url)
+        except Exception as es:
+            Log.Error(es)
+
+    def OnDohSelected(self, url):
+        """ 从列表里挑了一条：立刻应用（保存设置 + 重新校验） """
+        try:
+            Setting.DohAddress.SetValue(url)
+            self.owner.dohLine.editingFinished.emit()
+        except Exception as es:
+            Log.Error(es)
+
     # ---------------- IP 分流测速（网络逻辑沿用原实现） ----------------
     def StartTestIp(self):
         self.owner.testIpButton.setEnabled(False)
         self.StartGetProxyIp()
 
     def StartGetProxyIp(self):
-        request = req.GetProxyIpInfoReq(self.owner.proxyIpEdit.text())
+        request = req.GetProxyIpInfoReq(self.RegionParam())
         self.owner.AddHttpTask(request, self.GetProxyIpBack)
 
     def GetProxyIpBack(self, raw):
@@ -766,6 +1036,8 @@ class LoginProxyNewWidget(object):
                     item.country = f"{country}·{province}"
                     item.asn = isp
                     self.UpdateRow(item)
+                    # 地区候选是"从已获取节点里长出来的"，学到新地区就补进下拉
+                    self.RefreshRegionWords()
             except Exception as es:
                 Log.Error(es)
 

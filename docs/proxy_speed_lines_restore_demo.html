@@ -1,0 +1,773 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>分流页第二轮调整 · Demo</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: radial-gradient(1100px 620px at 18% -12%, #24262c 0%, #17181c 58%, #121316 100%);
+    color: #e7eaee;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+    -webkit-font-smoothing: antialiased;
+    min-height: 100vh;
+  }
+  body::before {
+    content: ""; position: fixed; inset: 0; pointer-events: none;
+    background-image: linear-gradient(rgba(255,255,255,.022) 1px, transparent 1px),
+                      linear-gradient(90deg, rgba(255,255,255,.022) 1px, transparent 1px);
+    background-size: 32px 32px;
+    -webkit-mask-image: radial-gradient(800px 500px at 50% 0%, #000 20%, transparent 80%);
+    mask-image: radial-gradient(800px 500px at 50% 0%, #000 20%, transparent 80%);
+  }
+
+  .wrap { position: relative; display: flex; gap: 24px; padding: 26px 26px 48px; align-items: flex-start; max-width: 1320px; margin: 0 auto; }
+
+  /* ---------------- 左侧 ---------------- */
+  .side { width: 402px; flex: none; }
+  .side h1 { font-size: 20px; line-height: 1.35; margin: 0 0 6px; }
+  .side h1 em { font-style: normal; color: #ef8b45; }
+  .side .sub { margin: 0 0 14px; font-size: 12.5px; color: #969da7; line-height: 1.65; }
+  .badge-tip {
+    display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: #9ad0b2;
+    background: rgba(92,189,143,.1); border: 1px solid rgba(92,189,143,.28);
+    border-radius: 999px; padding: 3px 9px; margin-bottom: 16px;
+  }
+  .badge-tip::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: #5cbd8f; }
+
+  .block { background: rgba(255,255,255,.028); border: 1px solid rgba(255,255,255,.06); border-radius: 10px; padding: 12px 13px; margin-bottom: 12px; }
+  .block > h2 { font-size: 11px; font-weight: 600; letter-spacing: .12em; color: #79818b; margin: 0 0 10px; }
+
+  .seg { display: flex; gap: 6px; }
+  .seg button {
+    flex: 1; appearance: none; cursor: pointer; background: #1d1f24; border: 1px solid #34383f;
+    color: #b3bac3; font-size: 12px; padding: 8px 4px; border-radius: 7px; font-family: inherit; line-height: 1.25;
+  }
+  .seg button:hover { border-color: #4a5058; color: #dfe4ea; }
+  .seg button.on { background: rgba(224,118,42,.14); border-color: #e0762a; color: #f2a061; font-weight: 600; }
+  .seg button span { display: block; font-size: 9.5px; color: #7d848d; font-weight: 400; margin-top: 2px; }
+  .seg button.on span { color: #c98a5a; }
+
+  .curvebox { display: flex; gap: 12px; align-items: center; margin-top: 12px; }
+  .curvebox svg { flex: none; background: rgba(0,0,0,.28); border: 1px solid rgba(255,255,255,.07); border-radius: 8px; }
+  .curvebox .meta { font-size: 11px; color: #8b939c; line-height: 1.7; min-width: 0; }
+  .curvebox .meta b { color: #dfe4ea; font-weight: 600; display: block; font-size: 12px; }
+  .curvebox code { font-family: ui-monospace, Consolas, monospace; font-size: 10px; color: #d7b892; word-break: break-all; }
+
+  .stats { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 10px; font-size: 11.5px; }
+  .stats div { display: flex; justify-content: space-between; gap: 8px; padding: 3px 0; border-bottom: 1px solid rgba(255,255,255,.05); }
+  .stats span { color: #8b939c; }
+  .stats b { color: #e3e8ee; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .stats b.warn { color: #e8b96a; }
+
+  .notes { margin: 0; padding-left: 16px; font-size: 12.5px; line-height: 1.72; color: #b4bbc4; }
+  .notes li { margin-bottom: 6px; }
+  .notes b { color: #e3e8ee; font-weight: 600; }
+  .notes code { font-family: ui-monospace, Consolas, monospace; font-size: 10.5px; background: rgba(255,255,255,.06); padding: 1px 4px; border-radius: 3px; color: #d7b892; }
+
+  .jump { display: flex; gap: 6px; margin-top: 10px; }
+  .jump button {
+    flex: 1; appearance: none; cursor: pointer; background: transparent; border: 1px solid #34383f;
+    color: #9aa2ac; font-size: 11px; padding: 6px 4px; border-radius: 6px; font-family: inherit;
+  }
+  .jump button:hover { border-color: #4a5058; color: #dfe4ea; }
+
+  /* ---------------- 手机 ---------------- */
+  .stage { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 12px; min-width: 0; }
+  .phone {
+    width: 470px; height: 918px; padding: 9px; border-radius: 30px;
+    background: linear-gradient(180deg, #101114, #0a0b0d);
+    box-shadow: 0 30px 70px -20px rgba(0,0,0,.85), 0 0 0 1px rgba(255,255,255,.05);
+  }
+  .screen {
+    width: 452px; height: 900px; border-radius: 23px; overflow: hidden;
+    background: #2f3237; display: flex; flex-direction: column; position: relative;
+  }
+  .hintline { font-size: 11.5px; color: #79818b; text-align: center; max-width: 470px; line-height: 1.6; }
+
+  /* 应用内：导航 / 标签 */
+  .nav { height: 46px; flex: none; display: flex; align-items: center; gap: 8px; padding: 0 12px; background: #2b2e33; border-bottom: 1px solid #41454b; }
+  .nav .back { font-size: 12.5px; color: #c8cfd7; }
+  .nav .menu { padding: 3px 11px; border: 1px solid #e0762a; color: #f09a58; font-size: 12px; border-radius: 2px; }
+  .nav .arrow { color: #868d96; font-size: 12px; }
+  .nav .cur { padding: 4px 11px; background: #43464c; color: #eef1f4; font-size: 12px; }
+  .nav .sp { flex: 1; }
+  .tabs { height: 34px; flex: none; display: flex; align-items: flex-end; gap: 18px; padding: 0 12px; background: #2b2e33; border-bottom: 1px solid #41454b; }
+  .tabs span { font-size: 12px; color: #9aa2ac; padding-bottom: 6px; }
+  .tabs span.on { color: #f0a05c; font-weight: 600; box-shadow: inset 0 -2px 0 #e0762a; }
+
+  /* 整页滚动区（这一版的核心：列表不再自己滚） */
+  .scroll { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; scrollbar-width: thin; }
+  .scroll::-webkit-scrollbar { width: 4px; }
+  .scroll::-webkit-scrollbar-thumb { background: rgba(255,255,255,.22); border-radius: 2px; }
+  .scroll::-webkit-scrollbar-track { background: rgba(255,255,255,.04); }
+
+  .phead { display: flex; align-items: center; justify-content: space-between; padding: 8px 12px 4px; }
+  .phead .t { font-size: 12.5px; color: #c8cfd7; }
+  .phead .doc { font-size: 11px; color: #9aa2ac; border-bottom: 1px dashed #5d646d; padding-bottom: 1px; }
+
+  .modes { display: flex; gap: 6px; padding: 4px 12px 0; flex-wrap: nowrap; }
+  .modes label { display: inline-flex; align-items: center; gap: 4px; font-size: 11.5px; color: #dfe4ea; white-space: nowrap; }
+  .rd { width: 14px; height: 14px; border-radius: 50%; border: 1.5px solid #6d747d; flex: none; position: relative; }
+  .rd.on { border-color: #f0a05c; }
+  .rd.on::after { content: ""; position: absolute; inset: 2px; border-radius: 50%; background: #f0a05c; }
+  .hintline-sm { padding: 6px 12px 0; font-size: 10.5px; color: #7d848d; }
+
+  /* ==== 线路测速：恢复最初设计（4 列 × 6 行） ==== */
+  .speed { padding: 4px 12px 8px; }
+  .speed-head { display: flex; align-items: center; justify-content: space-between; padding: 4px 0 6px; }
+  .speed-head .t { font-size: 12px; color: #dfe4ea; }
+  .minibtn {
+    appearance: none; cursor: pointer; font-family: inherit; font-size: 11px; line-height: 1;
+    padding: 6px 12px; border: 1px solid #e0762a; background: rgba(224,118,42,.1); color: #f09a58; border-radius: 3px;
+  }
+  .minibtn:hover { background: rgba(224,118,42,.2); }
+
+  .lgrid { display: grid; grid-template-columns: 1fr 58px 1fr 86px; column-gap: 6px; row-gap: 0; align-items: center; }
+  .lgrid .gh { font-size: 9.5px; color: #8b939c; letter-spacing: .04em; padding: 0 0 4px; }
+  .lgrid .gh.c { text-align: center; }
+  .lrow-name { display: flex; align-items: center; gap: 5px; height: 30px; font-size: 11.5px; color: #dfe4ea; white-space: nowrap; }
+  .lrow-val { height: 30px; display: flex; align-items: center; justify-content: center; font-size: 11px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .lrow-val.ok { color: #6cc99a; }
+  .lrow-val.mid { color: #e8b96a; }
+  .lrow-val.slow { color: #ec9a7d; }
+  .lrow-val.bad { color: #ec7a6d; font-size: 10.5px; }
+  .lrow-val.dim { color: #6d747d; }
+  .lgrid .rule { grid-column: 1 / -1; height: 1px; background: #3a3e44; }
+
+  /* ==== 现状：挤成一行的 6 个 chip（复刻真机） ==== */
+  .chips2 { padding: 2px 0 6px; }
+  .chips2 .line { display: flex; gap: 4px; margin-bottom: 4px; }
+  .chips2 .lk { font-size: 9px; color: #7d848d; width: 21px; flex: none; align-self: center; }
+  .chipset { display: flex; gap: 4px; flex: 1; min-width: 0; }
+  .chip {
+    flex: 1 1 0; min-width: 0; height: 26px; display: flex; align-items: center; gap: 3px;
+    padding: 0 3px; gap: 4px; border: 1px solid #4a4e55; border-radius: 3px; font-size: 11px; color: #b3bac3;
+    background: #2c2d32; overflow: hidden;
+  }
+  .chip.on { border-color: #e0762a; background: rgba(224,118,42,.14); color: #f2a061; }
+  /* 真机上主题把单选指示器定成 24px，留给文字的只剩 ~30px，这才是"被裁"的根因 */
+  .chip .rd.sm { width: 20px; height: 20px; border-width: 1.5px; }
+  /* 真机现象：文字不做省略号，直接在格子边界被裁掉 */
+  .chip .cl { font-size: 10.5px; white-space: nowrap; overflow: hidden; }
+  .chip.mk { color: #7d848d; font-size: 10px; justify-content: center; }
+
+  /* ==== 节点列表 ==== */
+  .lhead { display: flex; align-items: center; gap: 7px; padding: 6px 12px 0; }
+  .lhead .t { font-size: 12.5px; font-weight: 600; color: #eef1f4; }
+  .lhead .c { font-size: 10.5px; color: #8b939c; font-variant-numeric: tabular-nums; }
+  .lhead .sp { flex: 1; }
+  .sbtn {
+    appearance: none; cursor: pointer; font-family: inherit; font-size: 10px; padding: 3px 6px;
+    border: 1px solid #4a4e55; background: transparent; color: #a9b0b9; border-radius: 3px; white-space: nowrap;
+  }
+  .sbtn:hover { border-color: #6d747d; color: #dfe4ea; }
+  .filters { display: flex; align-items: center; gap: 5px; padding: 6px 12px; }
+  .fchip {
+    appearance: none; cursor: pointer; font-family: inherit; height: 21px; padding: 0 8px; border-radius: 10px;
+    border: 1px solid #4a4e55; background: transparent; color: #a9b0b9; font-size: 10.5px; white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+  }
+  .fchip.on { border-color: #e0762a; background: rgba(224,118,42,.14); color: #f2a061; }
+  .colhead {
+    display: grid; grid-template-columns: 22px 1fr 86px; column-gap: 10px; align-items: center;
+    padding: 0 12px; height: 22px; background: #3a3e44; border-top: 1px solid #44484e; border-bottom: 1px solid #44484e;
+    font-size: 9.5px; color: #9aa2ac;
+  }
+  .colhead .cs { text-align: right; }
+
+  .list { background: #2f3237; }
+  .list.inner { max-height: 300px; overflow-y: auto; scrollbar-width: thin; }
+  .list.inner::-webkit-scrollbar { width: 4px; }
+  .list.inner::-webkit-scrollbar-thumb { background: rgba(255,255,255,.3); border-radius: 2px; }
+
+  .row { display: grid; grid-template-columns: 22px 1fr; column-gap: 10px; align-items: center; height: 62px; padding: 0 12px; border-bottom: 1px solid #3e4248; cursor: pointer; }
+  .row:hover { background: rgba(255,255,255,.028); }
+  .row.sel { background: #8d5a2b; }
+  .r-top { display: grid; grid-template-columns: minmax(0,1fr) 86px; column-gap: 8px; align-items: baseline; }
+  .ip { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12.5px; color: #e7eaee; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .spd { font-size: 11.5px; text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .spd .ok { color: #6cc99a; } .spd .mid { color: #e8b96a; } .spd .slow { color: #ec9a7d; }
+  .spd .bad { color: #ec7a6d; font-size: 10.5px; }
+  .spd u { text-decoration: none; color: #6d747d; } .spd em { font-style: normal; color: #a9b0b9; }
+  .r-sub { display: flex; align-items: center; gap: 6px; margin-top: 3px; min-width: 0; }
+  .tag { flex: none; font-size: 9px; line-height: 14px; padding: 0 4px; border-radius: 2px; border: 1px solid rgba(224,118,42,.4); color: #e0955c; background: rgba(224,118,42,.1); white-space: nowrap; }
+  .tag.t-cf { border-color: rgba(122,167,214,.38); color: #9dc0e0; background: rgba(122,167,214,.09); }
+  .geo { font-size: 11px; color: #98a1aa; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .row.sel .ip { color: #fff; } .row.sel .geo { color: #f2d3b6; } .row.sel .spd { color: #fff6ee; }
+  .row.sel .tag { border-color: rgba(255,255,255,.32); background: rgba(0,0,0,.16); color: #fff; }
+  .row.sel .rd { border-color: #fff; } .row.sel .rd::after { background: #fff; }
+  .row-foot { height: 14px; }
+
+  .annot { padding: 6px 12px 10px; font-size: 10.5px; line-height: 1.6; color: #8d949d; }
+  .annot b { color: #cf6e64; font-weight: 500; }
+
+  /* ==== 底部：高级面板 + 底栏（固定，不随页面滚动） ==== */
+  .bottom { flex: none; background: #25262a; border-top: 1px solid #41454b; }
+
+  .adv {
+    height: 0; overflow: hidden;
+    border: 1px solid transparent; border-radius: 8px; margin: 0 8px;
+    background: #2b2e33;
+    will-change: height;
+  }
+  .adv.open {
+    border-color: rgba(224,118,42,.55);
+    box-shadow: 0 0 0 1px rgba(224,118,42,.10), 0 -10px 26px rgba(0,0,0,.45), inset 0 1px 0 rgba(255,255,255,.05);
+  }
+  .adv-inner { padding: 9px 10px 10px; }
+  .adv-cap { display: flex; align-items: center; gap: 6px; font-size: 10px; letter-spacing: .08em; color: #79818b; padding-bottom: 6px; }
+  .adv-cap::before { content: ""; width: 3px; height: 11px; border-radius: 2px; background: #e0762a; }
+  .adv-row { display: flex; align-items: center; gap: 6px; height: 30px; font-size: 11px; color: #a9b0b9; border-top: 1px solid #3a3e44; }
+  .adv-row:first-of-type { border-top: none; }
+  .adv-row .k { width: 84px; flex: none; }
+  .adv-row .mini {
+    height: 24px; min-width: 0; border: 1px solid #4a4e55; background: #2c2d32; border-radius: 3px;
+    display: flex; align-items: center; padding: 0 7px; font-size: 10.5px; color: #dfe4ea;
+    font-family: ui-monospace, Consolas, monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .adv-row .mini.flex { flex: 1; }
+  .adv-row .mini.w56 { width: 56px; flex: none; font-family: inherit; justify-content: space-between; }
+  .adv-row .tick { color: #6cc99a; font-size: 11px; }
+
+  .foot { height: 52px; display: flex; align-items: center; gap: 8px; padding: 0 12px; }
+  .fstat { flex: 1; min-width: 0; font-size: 10.5px; color: #98a1aa; line-height: 1.45; }
+  .fstat b { color: #e7eaee; font-weight: 600; }
+  .fstat .g { color: #6cc99a; }
+  .btn { appearance: none; cursor: pointer; font-family: inherit; font-size: 11.5px; height: 32px; padding: 0 12px; border-radius: 3px; flex: none; }
+  .btn.ghost { border: 1px solid #4a4e55; background: transparent; color: #b3bac3; }
+  .btn.ghost:hover { border-color: #6d747d; color: #e7eaee; }
+  .btn.primary { border: 1px solid #e0762a; background: rgba(224,118,42,.16); color: #f2a061; font-weight: 600; }
+  .btn.primary:hover { background: rgba(224,118,42,.26); }
+
+  /* 滚动提示：贴在手机右侧 */
+  .scrollhint { position: absolute; right: 6px; top: 86px; bottom: 120px; width: 3px; border-radius: 2px; background: rgba(255,255,255,.05); pointer-events: none; }
+  .scrollhint i { position: absolute; left: 0; width: 3px; border-radius: 2px; background: rgba(224,118,42,.65); display: block; }
+  .scrollhint b { position: absolute; left: -46px; top: -2px; font-size: 9px; color: #7d848d; font-weight: 400; }
+
+  @media (max-width: 1060px) {
+    .wrap { flex-direction: column; align-items: center; }
+    .side { width: 100%; max-width: 520px; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <aside class="side">
+    <h1>分流页 · 第二轮调整 <em>Demo</em></h1>
+    <p class="sub">按真机截图（452×900）复刻。<b>只做演示，未改仓库代码</b>。<br>三处改动：线路选择恢复原设计、列表跟随整页滚动、高级面板加非线性动画与边框。</p>
+    <div class="badge-tip">左侧可切「现状 / 恢复版」，点底部「高级」看动画</div>
+
+    <section class="block">
+      <h2>视图</h2>
+      <div class="seg" id="segView">
+        <button data-view="old">现状<span>6 个 chip 挤一行</span></button>
+        <button data-view="new" class="on">恢复版<span>4 列 × 6 行</span></button>
+      </div>
+    </section>
+
+    <section class="block">
+      <h2>高级面板动画</h2>
+      <div class="seg" id="segEase">
+        <button data-ease="back" class="on">回弹<span>OutBack</span></button>
+        <button data-ease="expo">缓出<span>OutExpo</span></button>
+        <button data-ease="spring">弹性<span>Spring</span></button>
+        <button data-ease="none">无<span>Linear</span></button>
+      </div>
+      <div class="curvebox">
+        <svg id="curve" width="104" height="104" viewBox="0 0 104 104">
+          <g stroke="rgba(255,255,255,.07)" stroke-width="1">
+            <line x1="4" y1="52" x2="100" y2="52"></line>
+            <line x1="52" y1="4" x2="52" y2="100"></line>
+          </g>
+          <path id="curvePath" fill="none" stroke="#e0762a" stroke-width="2" stroke-linecap="round"></path>
+          <circle id="curveDot" r="4" cx="4" cy="100" fill="#fff"></circle>
+        </svg>
+        <div class="meta">
+          <b id="easeName">OutBack · 300ms</b>
+          高度从 0 长到内容高，缓动函数与左边曲线<b style="display:inline;font-weight:400;color:#8b939c">同一条</b>。<br>
+          <code id="easeCode">cubic-bezier(.34,1.56,.64,1)</code>
+        </div>
+      </div>
+    </section>
+
+    <section class="block">
+      <h2>实测尺寸</h2>
+      <div class="stats">
+        <div><span>线路区高度</span><b id="stSpeed">—</b></div>
+        <div><span>列表高度</span><b id="stList">—</b></div>
+        <div><span>整页高度</span><b id="stPage" class="warn">—</b></div>
+        <div><span>约合屏数</span><b id="stScreens" class="warn">—</b></div>
+        <div><span>列表滚动</span><b id="stScroll">—</b></div>
+        <div><span>同屏可见</span><b id="stVisible">—</b></div>
+      </div>
+      <div class="jump">
+        <button id="jumpTop">回到顶部</button>
+        <button id="jumpList">滚到列表末尾</button>
+      </div>
+    </section>
+
+    <section class="block">
+      <h2>改了什么</h2>
+      <ol class="notes">
+        <li><b>线路选择恢复原设计</b>：表头「Api分流 / 延迟 / 图片分流 / 速度」四列，6 行（分流1~4、US反代分流、IP分流）。每个分流独占一行，名称不再被截，「连接超时」和「4.71MB/s」都能完整显示。</li>
+        <li><b>列表跟随整页滚动</b>：去掉列表自身的滚动条，表格高度 = 行数 × 行高（50 × 62 = 3100px），整页统一滚动。</li>
+        <li><b>高级面板</b>：高度用非线性缓动做展开/收起，同时淡入 1px 橙色描边 + 内高光 + 上投影。</li>
+        <li><b>代理设置 / 节点列表 / 高级面板内容</b>：布局与样式保持上一版不变。</li>
+      </ol>
+    </section>
+
+    <section class="block">
+      <h2>要注意的代价</h2>
+      <ol class="notes">
+        <li>整页从 1 屏变成约 <b>4 屏</b>：50 个节点全在页面里，滚到底才能按到「测试 IP 分流」（或在底部固定栏）。</li>
+        <li><b>Qt 落地必须先解决手势归属</b>：表格不再滚动后，如果 <code>QScroller</code> 仍装在表格视口上，手指按在列表上拖会「什么都不滚」。要么让 <code>MakeScrollable</code> 跳过无滚动量的视图，要么把列表换成普通 QWidget 卡片流。</li>
+        <li>50 张卡片常驻（不再有 viewport 复用），滚动时整页重绘范围更大，真机需要实测帧率。</li>
+        <li>收起时面板高度为 0，边框要跟着一起淡出，否则会留一条 2px 亮线。</li>
+      </ol>
+    </section>
+  </aside>
+
+  <main class="stage">
+    <div class="phone">
+      <div class="screen" id="screen">
+        <header class="nav">
+          <span class="back">返回</span>
+          <span class="menu">菜单</span>
+          <span class="arrow">›</span>
+          <span class="cur">首页</span>
+          <span class="arrow">›</span>
+          <span class="cur">登录</span>
+          <span class="sp"></span>
+        </header>
+        <div class="tabs">
+          <span>登录</span><span>注册</span><span>验证</span><span class="on">分流</span>
+        </div>
+
+        <div class="scroll" id="pageScroll">
+          <div class="phead"><span class="t">分流设置</span><span class="doc">说明</span></div>
+
+          <div class="modes">
+            <label><span class="rd on"></span>无代理</label>
+            <label><span class="rd"></span>HTTP</label>
+            <label><span class="rd"></span>Socks5</label>
+            <label><span class="rd"></span>系统</label>
+          </div>
+          <div class="hintline-sm">未启用代理</div>
+
+          <section class="speed" id="speedSec"></section>
+
+          <div class="lhead">
+            <span class="t">节点列表</span>
+            <span class="c" id="listCount">共 50 项 · 可用 48</span>
+            <span class="sp"></span>
+            <button class="sbtn">智能排序 ▾</button>
+            <button class="sbtn" style="width:26px;padding:3px 0">≡</button>
+          </div>
+          <div class="filters">
+            <button class="fchip on">全部 <span id="nAll">50</span></button>
+            <button class="fchip">ProxyIP 26</button>
+            <button class="fchip">优选 24</button>
+          </div>
+          <div class="colhead">
+            <span></span><span>节点 / 地区 · ISP</span><span class="cs">延迟 / 下载</span>
+          </div>
+          <div class="list" id="list"></div>
+          <div class="annot" id="annot"></div>
+        </div>
+
+        <div class="scrollhint" id="scrollHint"><i id="scrollBar"></i></div>
+
+        <div class="bottom">
+          <div class="adv" id="adv">
+            <div class="adv-inner" id="advInner">
+              <div class="adv-cap">高级设置</div>
+              <div class="adv-row"><span class="k">超时</span><div class="mini w56">API <b>10s</b></div><div class="mini w56">图片 <b>15s</b></div></div>
+              <div class="adv-row"><span class="k">DOH 地址</span><div class="mini flex">https://dot.pub/dns-query</div><span class="tick">✓</span></div>
+              <div class="adv-row"><span class="k">ECH / HTTP3</span><div class="mini flex">已启用 ECH · 未启用 HTTP3</div></div>
+              <div class="adv-row"><span class="k">获取地区</span><div class="mini flex">JP,US,HK,SG,KR,GB</div><div class="mini w56">获取</div></div>
+              <div class="adv-row"><span class="k">自定义 IP</span><div class="mini flex">104.18.40.104,172.64.229.155</div></div>
+              <div class="adv-row"><span class="k">说明</span><div class="mini flex">分流设置请看说明获取</div><div class="mini w56">打开</div></div>
+            </div>
+          </div>
+          <div class="foot">
+            <div class="fstat">已选 <b>ProxyIP 35</b> · 160.251.167.81<br><span class="g">363 ms</span> · 日本·Tokyo</div>
+            <button class="btn ghost" id="advBtn">高级</button>
+            <button class="btn primary">测试 IP 分流</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <p class="hintline">点行选中 · 底部「高级」展开/收起 · 左侧切视图与缓动曲线 · 右侧细条是整页滚动位置</p>
+  </main>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  /* ---------------- 数据（前 6 条取自真机截图） ---------------- */
+  var NODES = [
+    { ip: "160.251.167.81", geo: "日本·Tokyo", isp: "GMO Internet,Inc", d: 363, dd: 403, tag: "ProxyIP 35" },
+    { ip: "161.34.33.205", geo: "日本·Tokyo", isp: "NTT PC Communications, Inc.", d: 385, dd: 711, tag: "ProxyIP 36" },
+    { ip: "43.170.8.95", geo: "日本·Kanagawa", isp: "ACEVILLE PTE.LTD.", d: 551, dd: 540, tag: "ProxyIP 6" },
+    { ip: "104.26.10.124", geo: "加拿大·Ontario", isp: "Cloudflare, Inc.", d: 742, dd: 645, tag: "优选 8", cf: 1 },
+    { ip: "8.219.155.125", geo: "新加坡", isp: "Alibaba (US) Technology Co., Ltd.", d: 0, fail: "连接超时", tag: "ProxyIP 1" },
+    { ip: "8.219.195.31", geo: "新加坡", isp: "Alibaba (US) Technology Co., Ltd.", d: 0, fail: "连接超时", tag: "ProxyIP 2" },
+
+    { ip: "158.180.231.216", geo: "日本·Tokyo", isp: "Oracle Corporation", d: 152, dd: 210, tag: "ProxyIP 3" },
+    { ip: "163.47.42.64", geo: "澳大利亚·Sydney", isp: "Micron21 Pty Ltd", d: 318, dd: 402, tag: "ProxyIP 4" },
+    { ip: "150.136.219.11", geo: "美国·Ashburn", isp: "Oracle Corporation", d: 186, dd: 240, tag: "ProxyIP 5" },
+    { ip: "159.89.91.17", geo: "美国·San Francisco", isp: "DigitalOcean, LLC", d: 132, dd: 188, tag: "ProxyIP 7" },
+    { ip: "165.232.51.34", geo: "德国·Frankfurt", isp: "DigitalOcean, LLC", d: 276, dd: 344, tag: "ProxyIP 8" },
+    { ip: "198.199.84.192", geo: "美国·New York", isp: "DigitalOcean, LLC", d: 168, dd: 205, tag: "ProxyIP 9" },
+    { ip: "43.153.105.7", geo: "新加坡", isp: "Tencent Cloud LLC", d: 62, dd: 118, tag: "ProxyIP 10" },
+    { ip: "43.170.25.96", geo: "中国香港", isp: "Tencent Cloud LLC", d: 44, dd: 88, tag: "ProxyIP 11" },
+    { ip: "103.7.138.56", geo: "印度尼西亚·Jakarta", isp: "PT Beon Intermedia", d: 420, dd: 0, tag: "ProxyIP 12" },
+    { ip: "107.151.188.57", geo: "美国·Los Angeles", isp: "Zenlayer Inc", d: 388, dd: 0, tag: "ProxyIP 13" },
+    { ip: "107.172.32.207", geo: "美国·Los Angeles", isp: "ColoCrossing", d: 340, dd: 0, fail2: "下载失败", tag: "ProxyIP 14" },
+    { ip: "129.213.150.222", geo: "日本·Osaka", isp: "Oracle Corporation", d: 118, dd: 164, tag: "ProxyIP 15" },
+    { ip: "147.75.230.33", geo: "荷兰·Amsterdam", isp: "Packet Host, Inc.", d: 310, dd: 0, tag: "ProxyIP 16" },
+    { ip: "192.9.250.241", geo: "美国·San Jose", isp: "Alibaba (US) Technology Co., Ltd.", d: 204, dd: 268, tag: "ProxyIP 17" },
+    { ip: "47.251.95.178", geo: "美国·Silicon Valley", isp: "Alibaba Cloud LLC", d: 190, dd: 254, tag: "ProxyIP 18" },
+    { ip: "152.70.232.72", geo: "日本·Tokyo", isp: "Oracle Corporation", d: 96, dd: 142, tag: "ProxyIP 19" },
+    { ip: "95.216.46.85", geo: "芬兰·Helsinki", isp: "Hetzner Online GmbH", d: 356, dd: 0, tag: "ProxyIP 20" },
+    { ip: "159.203.34.9", geo: "加拿大·Toronto", isp: "DigitalOcean, LLC", d: 212, dd: 288, tag: "ProxyIP 21" },
+    { ip: "46.224.21.216", geo: "德国·Frankfurt", isp: "Hetzner Online GmbH", d: 298, dd: 372, tag: "ProxyIP 22" },
+    { ip: "91.99.20.251", geo: "德国·Nuremberg", isp: "netcup GmbH", d: 322, dd: 398, tag: "ProxyIP 23" },
+    { ip: "62.238.51.190", geo: "英国·London", isp: "Iomart Cloud Services Ltd", d: 284, dd: 350, tag: "ProxyIP 26" }
+  ];
+
+  // 24 个优选 IP（含 9 个 IPv6，用来验证长地址）
+  (function fillCf() {
+    var v4 = ["104.18.40.104", "172.64.229.155", "198.41.208.26", "172.66.2.153", "8.35.211.230",
+              "172.66.0.115", "188.164.248.227", "172.67.73.123", "104.26.11.206", "104.26.1.248",
+              "104.17.189.152", "104.17.173.109", "91.193.58.106", "104.17.61.57"];
+    var v6 = ["2606:4700:0:f920:12e9:bef7:bd1b:bf3", "2606:4700:0:77:ba66:ef50:489c:299d",
+              "2606:4700:0:a0:6574:f93:6c28:17c5", "2606:4700::2d:a321:64d3",
+              "2606:4700:0:a0:a55f:f7f9:5a17:8b8e", "2606:4700:0:e0:9996:e26c:4b53:e69a",
+              "2606:4700:0:a0:65dc:517c:ad49:a2fd", "2606:4700:0:f920:12c2:bb61:198a:ca56",
+              "2606:4700:0:e0:c653:a255:83dc:d0c"];
+    v4.forEach(function (ip, i) {
+      NODES.push({ ip: ip, geo: i % 3 ? "中国香港" : "美国·Anycast", isp: "Cloudflare, Inc.",
+        d: 44 + i * 11, dd: 92 + i * 17, tag: "优选 " + (9 + i), cf: 1 });
+    });
+    v6.forEach(function (ip, i) {
+      NODES.push({ ip: ip, geo: i % 2 ? "新加坡·Anycast" : "日本·Tokyo", isp: "Cloudflare, Inc.",
+        d: 148 + i * 9, dd: 212 + i * 13, tag: "优选 " + (24 + i), cf: 1 });
+    });
+  })();
+
+  /* ---------------- 线路数据（恢复版的 6 行） ---------------- */
+  var LINES = [
+    { n: "分流1", api: 96, dl: "4.71MB/s", apiKind: "ok", dlKind: "ok" },
+    { n: "分流2", api: 118, dl: "3.92MB/s", apiKind: "ok", dlKind: "ok" },
+    { n: "分流3", api: 142, dl: "3.10MB/s", apiKind: "mid", dlKind: "mid" },
+    { n: "分流4", api: 205, dl: "2.44MB/s", apiKind: "mid", dlKind: "mid" },
+    { n: "US反代分流", api: 310, dl: "连接超时", apiKind: "slow", dlKind: "bad" },
+    { n: "IP分流", api: 0, dl: "", apiKind: "dim", dlKind: "dim" }
+  ];
+
+  var state = { view: "new", ease: "back", open: false, sel: 0 };
+  var eases = {};
+
+  /* ---------------- 缓动 ---------------- */
+  function bezierFn(x1, y1, x2, y2) {
+    function bez(p1, p2, t) { var u = 1 - t; return 3 * u * u * t * p1 + 3 * u * t * t * p2 + t * t * t; }
+    return function (x) {
+      if (x <= 0) return 0;
+      if (x >= 1) return 1;
+      var lo = 0, hi = 1, t = x;
+      for (var i = 0; i < 24; i++) {
+        var cx = bez(x1, x2, t);
+        if (Math.abs(cx - x) < 1e-4) break;
+        if (cx < x) lo = t; else hi = t;
+        t = (lo + hi) / 2;
+      }
+      return bez(y1, y2, t);
+    };
+  }
+  // 弹簧：linear() 采样（阻尼正弦）
+  var springStops = (function () {
+    var out = [], n = 26;
+    for (var i = 0; i <= n; i++) {
+      var t = i / n;
+      var v = 1 - Math.exp(-5.2 * t) * Math.cos(7.4 * t);
+      out.push([t, v]);
+    }
+    return out;
+  })();
+  function springFn(t) {
+    if (t <= 0) return 0;
+    if (t >= 1) return 1;
+    for (var i = 1; i < springStops.length; i++) {
+      if (t <= springStops[i][0]) {
+        var a = springStops[i - 1], b = springStops[i];
+        var k = (t - a[0]) / (b[0] - a[0]);
+        return a[1] + (b[1] - a[1]) * k;
+      }
+    }
+    return 1;
+  }
+  eases.back = { fn: bezierFn(.34, 1.56, .64, 1), dur: 300, name: "OutBack · 300ms", code: "cubic-bezier(.34, 1.56, .64, 1)", cps: [.34, 1.56, .64, 1] };
+  eases.expo = { fn: bezierFn(.16, 1, .3, 1), dur: 320, name: "OutExpo · 320ms", code: "cubic-bezier(.16, 1, .3, 1)", cps: [.16, 1, .3, 1] };
+  eases.spring = { fn: springFn, dur: 520, name: "Spring · 520ms", code: "linear(阻尼正弦采样)", cps: null };
+  eases.none = { fn: function (t) { return t; }, dur: 180, name: "Linear · 180ms", code: "linear", cps: [0, 0, 1, 1] };
+
+  /* ---------------- 曲线示意 ---------------- */
+  var curvePath = document.getElementById("curvePath");
+  var curveDot = document.getElementById("curveDot");
+  var PAD = 4, BOX = 96;
+
+  function drawCurve() {
+    var e = eases[state.ease];
+    if (e.cps) {
+      var c = e.cps;
+      var p1 = [PAD + c[0] * BOX, PAD + (1 - c[1]) * BOX];
+      var p2 = [PAD + c[2] * BOX, PAD + (1 - c[3]) * BOX];
+      curvePath.setAttribute("d", "M" + PAD + "," + (PAD + BOX) +
+        " C" + p1[0].toFixed(1) + "," + p1[1].toFixed(1) +
+        " " + p2[0].toFixed(1) + "," + p2[1].toFixed(1) +
+        " " + (PAD + BOX) + "," + PAD);
+    } else {
+      var pts = springStops.map(function (s) {
+        return (PAD + s[0] * BOX).toFixed(1) + "," + (PAD + (1 - s[1]) * BOX).toFixed(1);
+      });
+      curvePath.setAttribute("d", "M" + pts.join(" L"));
+    }
+    document.getElementById("easeName").textContent = e.name;
+    document.getElementById("easeCode").textContent = e.code;
+    setDot(0);
+  }
+  function setDot(t) {
+    var e = eases[state.ease];
+    var v = e.fn(t);
+    curveDot.setAttribute("cx", (PAD + t * BOX).toFixed(1));
+    curveDot.setAttribute("cy", (PAD + (1 - v) * BOX).toFixed(1));
+    curveDot.setAttribute("opacity", t > 0 && t < 1 ? 1 : 0.35);
+  }
+
+  /* ---------------- 渲染：线路区 ---------------- */
+  function kindClass(k) { return k; }
+
+  function renderSpeed() {
+    var box = document.getElementById("speedSec");
+    if (state.view === "old") {
+      // 现状：6 个 chip × 2 行（真机截图就是这样被挤掉的）
+      var h = '<div class="speed-head"><span class="t">线路测速</span>'
+            + '<span style="font-size:9.5px;color:#6d747d">延迟 / 下载 · ms</span></div>'
+            + '<div style="padding-bottom:6px"><button class="minibtn">测速</button></div>'
+            + '<div class="chips2">';
+      ["API", "IMG"].forEach(function (lk, li) {
+        h += '<div class="line"><span class="lk">' + lk + '</span><div class="chipset">';
+        LINES.forEach(function (l, i) {
+          var v = li === 0 ? (l.api ? l.api + "ms" : "—") : (l.dl || "—");
+          var on = i === 1 ? " on" : "";
+          if (i === 5) {
+            h += '<div class="chip mk">IP</div>';
+            return;
+          }
+          h += '<div class="chip' + on + '"><span class="rd sm' + (on ? " on" : "") + '"></span>'
+             + '<span class="cl">' + v + '</span></div>';
+        });
+        h += '</div></div>';
+      });
+      h += '</div>';
+      box.innerHTML = h;
+      return;
+    }
+
+    var g = '<div class="speed-head"><span class="t">线路测速</span><button class="minibtn">测速</button></div>'
+          + '<div class="lgrid">'
+          + '<div class="gh">Api分流</div><div class="gh c">延迟</div>'
+          + '<div class="gh">图片分流</div><div class="gh c">速度</div>';
+    LINES.forEach(function (l, row) {
+      var apiText = l.api ? l.api + "ms" : "—";
+      g += '<div class="lrow-name"><span class="rd' + (row === 1 ? " on" : "") + '"></span>' + l.n + '</div>'
+         + '<div class="lrow-val ' + l.apiKind + '">' + apiText + '</div>'
+         + '<div class="lrow-name"><span class="rd' + (row === 1 ? " on" : "") + '"></span>' + l.n + '</div>'
+         + '<div class="lrow-val ' + l.dlKind + '">' + (l.dl || "—") + '</div>';
+      if (row !== LINES.length - 1) g += '<div class="rule"></div>';
+    });
+    g += '</div>';
+    box.innerHTML = g;
+  }
+
+  /* ---------------- 渲染：列表 ---------------- */
+  function speedHTML(n) {
+    if (!n.d) return '<span class="bad">' + (n.fail || n.fail2 || "失败") + '</span>';
+    var cls = n.d < 100 ? "ok" : n.d < 250 ? "mid" : "slow";
+    var s = '<span class="' + cls + '">' + n.d + '</span><u>/</u>';
+    if (n.dd) s += '<em>' + n.dd + '</em>';
+    else if (n.fail2) s += '<span class="bad">' + n.fail2 + '</span>';
+    else s += '<em style="color:#6d747d">—</em>';
+    return s;
+  }
+
+  function renderList() {
+    var box = document.getElementById("list");
+    var html = NODES.map(function (n, i) {
+      return '<div class="row' + (state.sel === i ? " sel" : "") + '" data-i="' + i + '">'
+        + '<span class="rd' + (state.sel === i ? " on" : "") + '"></span>'
+        + '<div><div class="r-top"><span class="ip" title="' + n.ip + '">' + n.ip + '</span>'
+        + '<span class="spd">' + speedHTML(n) + '</span></div>'
+        + '<div class="r-sub"><span class="tag' + (n.cf ? " t-cf" : "") + '">' + n.tag + '</span>'
+        + '<span class="geo" title="' + n.geo + " · " + n.isp + '">' + n.geo + ' · ' + n.isp + '</span></div></div>'
+        + '</div>';
+    }).join("");
+    box.className = "list" + (state.view === "old" ? " inner" : "");
+    box.innerHTML = html + '<div class="row-foot"></div>';
+    document.getElementById("nAll").textContent = NODES.length;
+    var nProxy = NODES.filter(function (n) { return !n.cf; }).length;
+    document.querySelectorAll(".fchip")[1].textContent = "ProxyIP " + nProxy;
+    document.querySelectorAll(".fchip")[2].textContent = "优选 " + (NODES.length - nProxy);
+    document.getElementById("nAll").parentNode.childNodes[0].nodeValue = "全部 ";
+    document.getElementById("listCount").textContent =
+      "共 " + NODES.length + " 项 · 可用 " + NODES.filter(function (n) { return n.d; }).length;
+    document.getElementById("annot").innerHTML = state.view === "old"
+      ? '<b>现状</b>：列表自己滚（右侧细条是列表滚动条），页面其余部分不动；线路区 6 个 chip 挤在 452px 里，名称和数字都被截。'
+      : '<b>恢复版</b>：列表不再自己滚（内滚动条已去掉），整页一条滚动条到底，50 项全在页面里。';
+  }
+
+  /* ---------------- 统计 ---------------- */
+  function updateStats() {
+    var scroll = document.getElementById("pageScroll");
+    var speedH = document.getElementById("speedSec").getBoundingClientRect().height;
+    var listH = document.getElementById("list").getBoundingClientRect().height;
+    var pageH = scroll.scrollHeight;
+    document.getElementById("stSpeed").textContent = Math.round(speedH) + "px";
+    document.getElementById("stList").textContent = Math.round(listH) + "px";
+    document.getElementById("stPage").textContent = Math.round(pageH) + "px";
+    // 屏数固定按"面板收起时"的可视区算（900 - 导航46 - 标签34 - 底栏52），避免展开面板时数字跳
+    document.getElementById("stScreens").textContent = (pageH / 768).toFixed(1) + " 屏";
+    document.getElementById("stScroll").textContent = state.view === "old" ? "列表内滚" : "整页滚";
+    document.getElementById("stVisible").textContent = Math.round(scroll.clientHeight / 62) + " 项";
+    syncScrollHint();
+  }
+
+  function syncScrollHint() {
+    var scroll = document.getElementById("pageScroll");
+    var hint = document.getElementById("scrollHint");
+    var bar = document.getElementById("scrollBar");
+    var trackH = hint.clientHeight;
+    var ratio = scroll.clientHeight / scroll.scrollHeight;
+    bar.style.height = Math.max(24, trackH * ratio) + "px";
+    var max = scroll.scrollHeight - scroll.clientHeight;
+    var p = max > 0 ? scroll.scrollTop / max : 0;
+    bar.style.top = (p * (trackH - bar.offsetHeight)) + "px";
+  }
+
+  /* ---------------- 高级面板：同一根曲线的动画 ---------------- */
+  var adv = document.getElementById("adv");
+  var advInner = document.getElementById("advInner");
+  var advBtn = document.getElementById("advBtn");
+  var animId = null;
+
+  function animatePanel(open) {
+    var e = eases[state.ease];
+    var from = adv.getBoundingClientRect().height;
+    adv.style.height = "auto";
+    var to = open ? advInner.getBoundingClientRect().height + 2 : 0;
+    adv.style.height = from + "px";
+
+    if (open) adv.classList.add("open");
+    if (animId) cancelAnimationFrame(animId);
+
+    var start = performance.now();
+    function tick(now) {
+      var t = Math.min(1, (now - start) / e.dur);
+      var p = e.fn(t);
+      adv.style.height = (from + (to - from) * p) + "px";
+      setDot(t);
+      if (t < 1) {
+        animId = requestAnimationFrame(tick);
+      } else {
+        adv.style.height = open ? "auto" : "0px";
+        if (!open) adv.classList.remove("open");
+        advBtn.textContent = open ? "收起" : "高级";
+        updateStats();
+      }
+    }
+    animId = requestAnimationFrame(tick);
+  }
+
+  advBtn.addEventListener("click", function () {
+    state.open = !state.open;
+    animatePanel(state.open);
+  });
+
+  /* ---------------- 交互 ---------------- */
+  document.getElementById("list").addEventListener("click", function (e) {
+    var row = e.target.closest("[data-i]");
+    if (!row) return;
+    state.sel = parseInt(row.getAttribute("data-i"), 10);
+    renderList();
+    updateStats();
+  });
+
+  document.getElementById("segView").addEventListener("click", function (e) {
+    var b = e.target.closest("button[data-view]");
+    if (!b) return;
+    state.view = b.getAttribute("data-view");
+    Array.prototype.forEach.call(this.querySelectorAll("button"), function (x) { x.classList.remove("on"); });
+    b.classList.add("on");
+    renderSpeed(); renderList(); updateStats();
+  });
+
+  document.getElementById("segEase").addEventListener("click", function (e) {
+    var b = e.target.closest("button[data-ease]");
+    if (!b) return;
+    state.ease = b.getAttribute("data-ease");
+    Array.prototype.forEach.call(this.querySelectorAll("button"), function (x) { x.classList.remove("on"); });
+    b.classList.add("on");
+    drawCurve();
+  });
+
+  document.getElementById("jumpTop").addEventListener("click", function () {
+    document.getElementById("pageScroll").scrollTo({ top: 0, behavior: "smooth" });
+  });
+  document.getElementById("jumpList").addEventListener("click", function () {
+    var s = document.getElementById("pageScroll");
+    s.scrollTo({ top: s.scrollHeight, behavior: "smooth" });
+  });
+  document.getElementById("pageScroll").addEventListener("scroll", syncScrollHint);
+
+  /* ---------------- 启动 ---------------- */
+  // ?view=old|new & ease=back|expo|spring|none & open=1 —— 方便直接截某一状态
+  var q = {};
+  (location.search || "").replace(/^\?/, "").split("&").forEach(function (kv) {
+    var a = kv.split("=");
+    if (a[0]) q[a[0]] = a[1];
+  });
+  if (q.view === "old" || q.view === "new") {
+    state.view = q.view;
+    Array.prototype.forEach.call(document.querySelectorAll("#segView button"), function (b) {
+      b.classList.toggle("on", b.getAttribute("data-view") === q.view);
+    });
+  }
+  if (q.ease && eases[q.ease]) {
+    state.ease = q.ease;
+    Array.prototype.forEach.call(document.querySelectorAll("#segEase button"), function (b) {
+      b.classList.toggle("on", b.getAttribute("data-ease") === q.ease);
+    });
+  }
+
+  drawCurve();
+  renderSpeed();
+  renderList();
+  updateStats();
+  if (q.open === "1") {
+    adv.classList.add("open");
+    adv.style.height = (advInner.getBoundingClientRect().height + 2) + "px";
+    state.open = true;
+    advBtn.textContent = "收起";
+    updateStats();
+  }
+  window.addEventListener("resize", updateStats);
+})();
+</script>
+</body>
+</html>
