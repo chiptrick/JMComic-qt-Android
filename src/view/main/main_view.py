@@ -487,6 +487,19 @@ class MainView(Main, QtTaskBase):
         return self.SwitchWidgetByIndex(self.subStackWidget.indexOf(widget), **kwargs)
 
     def SwitchWidgetByIndex(self, index, **kwargs):
+        # 手机端：换页前先把软键盘/输入框焦点收掉。输入框在"没人输入"的时候还占着
+        # 焦点会让 Qt 把返回键当成"收软键盘"用掉(见 mobile_ui.DismissTextInput)，
+        # 表现就是"第一次按返回没反应，第二次才返回"。
+        mobile_ui.DismissTextInput("switch-widget")
+        # 页面切过去之后 Qt 才会把焦点给页面上第一个可获焦控件(经常就是输入框)，
+        # 也才在这时向系统申请软键盘 —— 延后再收两遍，别让输入框白占着焦点
+        for delay in (0, 150):
+            QTimer.singleShot(delay, lambda: mobile_ui.DismissTextInput("switch-widget-late"))
+        # 手机端：从抽屉里选页面后要顺手收起抽屉。否则抽屉还开着，"选中页面 -> 按返回"
+        # 的第一次只是把抽屉收起来(页面不动)，用户得按第二次才回退 —— 实测被当成
+        # "多级页面返回要按两次"。主动切换导航也要取消"连按两次退出"的待退出状态。
+        mobile_ui.CloseDrawer(self)
+        mobile_ui.CancelBackQuit()
         if index == self.subStackWidget.currentIndex():
             self.subStackWidget.widget(index).SwitchCurrent(**kwargs)
             return
@@ -577,18 +590,22 @@ class MainView(Main, QtTaskBase):
     def keyPressEvent(self, event) -> None:
         # Android 返回键/手势：收菜单/对话框/抽屉 -> 退看图回详情页 -> 回退页面
         # -> 第一级回首页 -> 首页连按两次退出并清理(与顶栏左上角返回按钮同一条逻辑)
-        # (真机上按下和抬起都会来，去抖在 mobile_ui.HandleBackKey 里做)
+        # 真机上同一按键会来"按下 + 抬起"两个事件，配对去重由 HandleBackKey 负责
+        # (source="press"/"release")，一次按键只走一档。
         if event.key() in (Qt.Key_Escape, Qt.Key.Key_Back):
-            if mobile_ui.HandleBackKey(self):
+            if event.isAutoRepeat():
+                # 长按产生的自动重复：一次按键只算一次返回(否则长按会连退好几级)
+                event.accept()
+                return
+            if mobile_ui.HandleBackKey(self, "press"):
                 event.accept()
                 return
         return super(self.__class__, self).keyPressEvent(event)
 
     def keyReleaseEvent(self, event) -> None:
-        # 返回键的按下已经在 keyPressEvent 里处理并 accept 了，抬起这里只做兜底
-        # (桌面端 HandleBackKey 直接返回 False，事件照旧往下走)
+        # 抬起只做兜底：按下已经处理过就不再动作；按下被系统/Qt 吞掉时才靠它
         if event.key() in (Qt.Key_Escape, Qt.Key.Key_Back):
-            if mobile_ui.HandleBackKey(self):
+            if mobile_ui.HandleBackKey(self, "release"):
                 event.accept()
                 return
         return super(self.__class__, self).keyReleaseEvent(event)

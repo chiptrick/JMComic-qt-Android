@@ -280,11 +280,17 @@ class QtOwner(Singleton):
         self.owner.searchView.lineEdit.Search()
 
     def OpenReadView(self, bookId, index, pageIndex, isOffline=False):
+        from tools import mobile_ui
+        # 进看图前收掉软键盘/输入框焦点：看图页没有任何输入框，而这个状态留着会
+        # 让 Qt 把返回键当成"收软键盘"吞掉(见 mobile_ui.DismissTextInput)
+        mobile_ui.DismissTextInput("open-reader")
         self.owner.BackOldSize()
         self.owner.totalStackWidget.setCurrentIndex(1)
         self.owner.readView.OpenPage(bookId, index, pageIndex=pageIndex, isOffline=isOffline)
 
     def OpenLocalReadView(self, v, epsId=0):
+        from tools import mobile_ui
+        mobile_ui.DismissTextInput("open-reader")
         self.owner.BackOldSize()
         self.owner.totalStackWidget.setCurrentIndex(1)
         self.owner.readView.OpenLocalPage(v, epsId)

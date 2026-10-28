@@ -61,6 +61,19 @@ def SetupReadTool(readView):
         frame.ScaleFrame = ScaleFrameMobile
         frame._jmToolMobile = True
         ApplyReadToolGeometry(frame)
+        # 菜单开合时顺手收掉"输入法还弹着"的残留状态：Qt 认为软键盘弹着时会把
+        # 返回键拿去收键盘并吞掉，用户看到的就是"菜单里按返回要按两次"
+        origToggle = readView.ShowAndCloseTool
+
+        def ShowAndCloseToolMobile():
+            wasHidden = readView.qtTool.isHidden()
+            origToggle()
+            if wasHidden:
+                # 菜单刚弹出：等焦点链落定(这一轮事件处理完)再收
+                QTimer.singleShot(0, lambda: mobile_ui.DismissTextInput("reader-tool"))
+            return
+
+        readView.ShowAndCloseTool = ShowAndCloseToolMobile
         # 工具菜单里的滚动区(QScrollArea)要能手指拖动 —— EnableTouchScroll 已经
         # 覆盖了它，这里只补看图区自己的触控(拖动滚动 + 双指缩放 + 点按三分区)
         InstallReaderTouch(readView)

@@ -213,6 +213,10 @@ ShowDeferralStats = {"deferred": 0, "shown": 0, "hidden": 0, "closed": 0}
 
 BackStats = {"count": 0, "action": "", "last": "", "minimize": 0, "quit": 0}
 _backLastTick = 0.0
+# 上一次"真正做了动作"的返回键事件时间戳：抬起事件用它判断"这次按键已经处理过"
+_backPressTick = 0.0
+# 上一次做动作的事件来源("press"/"release")：只有"按下做过"时，抬起才算尾巴
+_backLastSource = ""
 # 首页"连按两次返回键退出"的时间戳：第一次按(只提示)时记下，第二次在
 # BackQuitWindowMs 内到来才真退出；中间任何一次其它返回动作都会清零
 _backQuitTick = 0.0

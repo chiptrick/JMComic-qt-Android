@@ -304,7 +304,9 @@ def _VisibleMaskDialog(mainView):
     try:
         from component.dialog.base_mask_dialog import BaseMaskDialog
         for widget in mainView.findChildren(BaseMaskDialog):
-            if widget.isVisible():
+            # 尺寸为 0 的不算"盖在用户眼前"：这种多半是建好还没布局/已经 hide 过的，
+            # 吃掉一次返回键却什么都不关，用户看到的就是"要按两次"
+            if widget.isVisible() and widget.width() > 1 and widget.height() > 1:
                 return widget
     except Exception as es:
         Log.Error(es)
@@ -417,6 +419,72 @@ def ClearTempCache():
     return 0
 
 
+def IsTextInput(widget):
+    """ 是否是"文字输入类"控件(只有这类控件持有焦点才需要软键盘) """
+    try:
+        from PySide6.QtWidgets import QAbstractSpinBox, QLineEdit, QPlainTextEdit, QTextEdit
+        return isinstance(widget, (QLineEdit, QTextEdit, QPlainTextEdit, QAbstractSpinBox))
+    except Exception:
+        return False
+
+
+def InputMethodVisible():
+    """ Qt 自己认为软键盘是不是弹出来的
+
+    注意这是 Qt 侧的判断，不是系统的：Android 上有硬件键盘/模拟器时软键盘
+    可能根本没弹出来，但 Qt 认为它弹着(见 DismissTextInput 的说明)。
+    """
+    try:
+        from PySide6.QtGui import QGuiApplication
+        im = QGuiApplication.inputMethod()
+        return bool(im is not None and im.isVisible())
+    except Exception:
+        return False
+
+
+def DismissTextInput(reason=""):
+    """ 收起软键盘 + 清掉文字输入框的焦点(手机端)
+
+    为什么返回键要管这件事：Qt for Android 会把返回键**优先当成"收软键盘"**用 ——
+    只要 Qt 认为软键盘是弹着的，返回键就被它拿去收键盘并**吞掉**，Python 侧一条
+    Key_Back 都收不到(真机/模拟器实测：按返回时 logcat 只有
+    `InsetsController: hide(ime())`，应用日志里没有 key diag)。用户看到的正是
+    "第一次按返回没反应，第二次才返回"。
+
+    而 Qt 的"软键盘弹着"状态只要被置上就很难自己清掉：Qt 6.12 的
+    QtInputDelegate.setKeyboardVisibility() 在 API>=30 上直接 return(空实现)，
+    所以离开输入页时不清焦点，这个状态会一直留着，返回键就一直被吞。
+
+    所以切页/进出看图/看图菜单开合时主动"放手"：清掉输入框焦点(交给 Qt 的输入
+    上下文 setFocusObject(null))，再把输入法收起来。之后返回键就是普通按键，
+    一次点击走一档。
+    """
+    if not IsEnabled():
+        return False
+    cleared = False
+    try:
+        app = QApplication.instance()
+        focused = app.focusWidget() if app is not None else None
+        if IsTextInput(focused):
+            focused.clearFocus()
+            cleared = True
+        wasVisible = InputMethodVisible()
+        if wasVisible:
+            cleared = True
+        from PySide6.QtGui import QGuiApplication
+        im = QGuiApplication.inputMethod()
+        if im is not None:
+            # 无条件 hide()：Qt 的"软键盘弹着"标记偶尔会和真实状态不一致
+            # (模拟器/带硬件键盘的机型上键盘根本没弹出来)，只有真的走一次 hide
+            # 才能把 Qt 输入上下文的状态清干净；对已经收起的键盘是无害的空操作。
+            im.hide()
+    except Exception as es:
+        Log.Error(es)
+    if cleared:
+        Log.Warn("mobile ui: 收起输入法/清输入框焦点({})".format(reason or "-"))
+    return cleared
+
+
 def CancelBackQuit():
     """ 主动切换页面(点抽屉/首页)后取消"连按两次返回键退出"的待退出状态
 
@@ -428,8 +496,18 @@ def CancelBackQuit():
     return
 
 
-def HandleBackKey(mainView):
+def HandleBackKey(mainView, source="press"):
     """ 返回键统一处理；返回 True 表示已接管(事件必须 accept，不能再往下传)
+
+    source：这次调用是哪个事件来的
+        "press"    按下(keyPressEvent) / 窗口快捷键 / 顶栏返回按钮(点击)
+        "release"  抬起(keyReleaseEvent)
+
+    **一次物理按键只能走一档**：Android 侧一次按键会送来"按下 + 抬起"两个事件
+    (打开预测式返回后由 Qt 的 OnBackInvokedCallback 合成，实测抬起可能晚
+    400ms 以上)，只看时间去抖会漏：按下做了一档、抬起又做一档，用户看到的就是
+    "按一次退两级"或者"首页按一次直接退出"。所以这里按事件类型配对：按下做了动作，
+    同一次按键的抬起就不再动作。
 
     优先级(与顶栏左上角"返回"按钮走的是同一条逻辑)：
         0. 弹出窗口(下拉框列表/右键菜单) -> 关闭
@@ -447,15 +525,33 @@ def HandleBackKey(mainView):
         # 桌面端不接管返回键/Esc，保持原有行为
         return False
     now = time.time() * 1000.0
+    if source == "release":
+        # 抬起：只可能是"上一次按下的尾巴"。但如果上次动作就是抬起做的(按下被系统
+        # 吞掉了的机型)，那这次的抬起属于新的一次按键，照常处理。
+        if mobile_ui._backLastSource == "press" \
+                and now - mobile_ui._backPressTick < BackPairMs:
+            return True
     if now - mobile_ui._backLastTick < BackDebounceMs:
-        # Android 会给按下和抬起两个事件，同一按不能处理两次
+        # 同一按不能处理两次(自动重复等)
         return True
     mobile_ui._backLastTick = now
+    # 记录"这次按键已经做过动作"：同一次按键的其它事件(主要是抬起)据此去重
+    mobile_ui._backPressTick = now
+    mobile_ui._backLastSource = source
     mobile_ui.BackStats["count"] += 1
     # "连按两次退出"只在连续两次走到首页分支时生效：中间任何一次其它返回
     # 动作都取消待退出状态(先取旧值再清零)
     quitTick = mobile_ui._backQuitTick
     mobile_ui._backQuitTick = 0.0
+    # 万一还有输入框占着焦点/软键盘还弹着：一并收掉
+    # (否则 Qt 会把这次返回键当成"收软键盘"用掉，页面不动)
+    if mobile_ui._keyDiagEnabled:
+        # 开着按键诊断时把"Qt 认为软键盘弹着没有""焦点在哪"一起记下来：
+        # 真机上返回键被 Qt 拿去收键盘时，这两项是唯一能对账的线索
+        Log.Warn("back diag: ime={} focus={} reader={}".format(
+            InputMethodVisible(), _DescribeWidget(QApplication.focusWidget()),
+            _ReaderActive(mainView)))
+    DismissTextInput("back")
     try:
         # 0. 弹出窗口(下拉框列表/右键菜单)
         popup = QApplication.activePopupWidget()
@@ -466,9 +562,9 @@ def HandleBackKey(mainView):
                 Log.Error(es)
             return _BackDone("close-popup:{}".format(_DescribeWidget(popup)))
 
-        # 1. 看图界面的工具菜单
+        # 1. 看图界面的工具菜单(只有看图页真的在前台时才算"菜单开着")
         readView = getattr(mainView, "readView", None)
-        if _readToolVisible(readView):
+        if _ReaderActive(mainView) and _readToolVisible(readView):
             _hideReadTool(readView)
             return _BackDone("close-read-tool")
 
@@ -496,8 +592,7 @@ def HandleBackKey(mainView):
             return _BackDone("close-drawer")
 
         # 5. 看图 -> 退出看图回到漫画详情页
-        if getattr(mainView, "totalStackWidget", None) is not None \
-                and mainView.totalStackWidget.currentIndex() == 1 and readView is not None:
+        if _ReaderActive(mainView) and readView is not None:
             _ExitReader(mainView, readView)
             return _BackDone("close-reader")
 
@@ -545,6 +640,8 @@ def _ExitReader(mainView, readView):
     # Close() 会把 bookId/isLocal 清掉，先记下来
     bookId = getattr(readView, "bookId", "") or ""
     isLocal = bool(getattr(readView, "isLocal", False))
+    # 看图页里没有任何输入框，别把输入法状态留在"弹着"(见 DismissTextInput)
+    DismissTextInput("exit-reader")
     try:
         readView.Close()
     except Exception as es:
@@ -610,10 +707,28 @@ def _BackDone(action):
     return True
 
 
+def _ReaderActive(mainView):
+    """ 看图页是不是当前前台那一层(totalStackWidget 索引 1) """
+    try:
+        stack = getattr(mainView, "totalStackWidget", None)
+        return stack is not None and stack.currentIndex() == 1
+    except Exception:
+        return False
+
+
 def _readToolVisible(readView):
+    """ 看图工具菜单是不是真的显示在用户眼前
+
+    不能只看 isHidden()：菜单是看图页里的**子控件**，用户退出看图后，它自己那
+    个"已隐藏"标记可能还停在"显示"(真正被隐藏的是父控件)，isHidden() 依然是
+    False。只看它会让"退出看图之后在任何页面按返回"都被第 1 档吃掉一次 ——
+    去隐藏一个用户根本看不见的菜单，页面不动，表现就是"返回键要按两次"。
+    """
     try:
         tool = getattr(getattr(readView, "frame", None), "qtTool", None)
-        return tool is not None and not tool.isHidden()
+        if tool is None:
+            return False
+        return tool.isVisible() and not tool.isHidden()
     except Exception:
         return False
 

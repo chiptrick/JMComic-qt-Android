@@ -65,6 +65,9 @@ ComponentsXml = """        <service android:name="org.jmcomic.SafService"
 
 Marker = "org.jmcomic.SafService"
 
+# 返回键走"预测式返回"(Android 13+ 的 OnBackInvokedDispatcher)，见 EnableBackInvokedCallback
+BackInvokedAttr = 'android:enableOnBackInvokedCallback="true"'
+
 # 已经注入过的那一段(幂等升级用：属性改了就整段换掉，不然模板里会留着旧写法 ——
 # 真机踩过：模板里还是 noHistory="true" 的旧块，Marker 命中就跳过，改动等于没打)
 BlockRe = re.compile(
@@ -130,16 +133,41 @@ def InsertComponents(text, anchor=None):
     return "\n".join(lines) + ("\n" if text.endswith("\n") else ""), True
 
 
+def EnableBackInvokedCallback(text):
+    """ 给 <application> 加 android:enableOnBackInvokedCallback="true"
+
+    为什么：Android 13+ 支持"预测式返回(OnBackInvokedDispatcher)"。不开这个属性，
+    系统只能把返回键当**普通按键(KEYCODE_BACK)**塞给 Activity，这条老路上 Qt 会先
+    自己看一眼"软键盘是不是弹着"，是就拿去收键盘并把按键吞掉 —— Python 侧一条
+    Key_Back 都收不到(模拟器实测：按返回时 logcat 只有 `InsetsController: hide(ime())`，
+    应用日志里没有 key diag)。用户看到的就是"返回键要按两次"。
+
+    打开之后 Qt 6.12 的 QtActivityBase 会注册 OnBackInvokedCallback(见
+    QtInputDelegate.registerBackGestureCallback)，返回键由 Qt 合成 KeyEvent 再交给
+    窗口，按下/抬起都完整到应用侧，keyPressEvent / 窗口快捷键 / 顶栏返回按钮
+    三条入口才会真正"一次点击走一档"。
+    """
+    if "enableOnBackInvokedCallback" in text:
+        return text, False
+    matched = re.search(r"<application\b[^>]*>", text)
+    if matched is None:
+        return text, False
+    tag = matched.group(0)
+    newTag = tag[:-1].rstrip() + "\n        " + BackInvokedAttr + ">"
+    return text[:matched.start()] + newTag + text[matched.end():], True
+
+
 def PatchManifest(path):
     """ 渲染出来的 manifest：加组件 + 去权限(+ 顺手补窗口背景主题) """
     text = _Read(path)
     text, inserted = InsertComponents(text)
     text, removed = DropStoragePermissions(text)
+    text, backAttr = EnableBackInvokedCallback(text)
     _Write(path, text)
     # 同目录下的 res/values/strings.xml 里是 Activity 的主题定义
     PatchThemeFile(os.path.join(os.path.dirname(path), "res", "values", "strings.xml"))
     WriteWindowBackgroundDrawable(os.path.join(os.path.dirname(path), "res", "drawable"))
-    return inserted, removed
+    return inserted, removed, backAttr
 
 
 def PatchTemplate(path):
@@ -150,14 +178,15 @@ def PatchTemplate(path):
     """
     text = _Read(path)
     text, inserted = InsertComponents(text, "{{ args.extra_manifest_application_xml }}")
-    if inserted:
+    text, backAttr = EnableBackInvokedCallback(text)
+    if inserted or backAttr:
         _Write(path, text)
     tplDir = os.path.dirname(path)
     PatchThemeFile(os.path.join(tplDir, "strings.tmpl.xml"))
     # <bootstrap>/build/templates -> <bootstrap>/build/src/main/res/drawable
     buildDir = os.path.dirname(tplDir)
     WriteWindowBackgroundDrawable(os.path.join(buildDir, "src", "main", "res", "drawable"))
-    return inserted
+    return inserted or backAttr
 
 
 # ---------------------------------------------------------------------------
@@ -294,9 +323,10 @@ def Main(argv):
             print("  - 跳过(不存在): {}".format(path))
             continue
         try:
-            inserted, removed = PatchManifest(path)
-            print("  ~ {}: 组件{} / 去掉 {} 条存储权限".format(
-                path, "已加" if inserted else "已有", removed))
+            inserted, removed, backAttr = PatchManifest(path)
+            print("  ~ {}: 组件{} / 去掉 {} 条存储权限 / 预测式返回{}".format(
+                path, "已加" if inserted else "已有", removed,
+                "已开" if backAttr else "已有"))
         except Exception as es:
             print("  ! 补丁失败 {}: {}".format(path, es))
             failed.append(path)
