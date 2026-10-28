@@ -971,6 +971,84 @@ ExternalStorageProvider 对目录的 `deleteDocument` 经常直接回
   ```
 
 
+### 3.15 第十一轮真机反馈（2026-10-28）：输入法/分屏时弹层错位 + 页面闪烁
+
+**起因**（用户反馈）：点可输入的文本框弹出输入法后，页面会"闪一下并改变布局"；搜索页的
+「搜索记录」这类悬浮候选菜单会错位、甚至超出显示范围；分屏/小窗模式同样闪。
+
+**根因**（两处，叠加出现）：
+
+1. **候选弹层只在"弹出那一刻"算一次几何**。手机端候选弹层是主窗口里的子控件 overlay
+   （`popup_list.Install`；不能用顶层窗口，见 3.4 的 eglSurface 死锁），旧 `Show()` 里
+   `edit.mapTo(host, …)` 只执行一次 —— 输入法把窗口缩小、页面滚动、高级面板重排之后
+   都不会再算，弹层就停在旧位置；宽度/高度再被硬夹，极端小窗下会被 clamp 压回输入框上
+   或顶出可见范围。基线实测：搜索页弹层 `popup=[300,618,1103,1389]`，比输入框下沿
+   (y=491) 低 127px（≈42dp）；登录页「获取地区」弹层 `bottom=1983` 紧贴输入法顶边 1984
+   被直接裁断。
+2. **闪烁来自 resize 期间的"冻结重绘 + 每帧全量重排"**。`MainView.resizeEvent` 为桌面
+   窗口拖拽做了 `setUpdatesEnabled(False)` 冻 60ms 再强刷；但输入法/分屏会连续发 resize，
+   在 Android 上就表现为"白一下、跳一下"。同时每个 resize 事件都同步跑
+   `OnResize → UpdateLimit / RelaxMinSizes / ResetGridCover / ApplyGridCoverSize`，
+   连纯高度变化（输入法弹出）也重算整页网格封面（logcat「520 个封面改为一行 2 个」）。
+   另外窗口擦除帧用调色板底色，未对齐主题、偏白。
+
+**改法**：
+
+* **弹层跟踪重锚**（`src/component/line_edit/popup_list.py`）：手机端几何统一由
+  `_ComputeMobileRect` 计算（贴输入框下方，放不下翻上方；上下都放不下时**先按空间较大
+  的一侧收缩高度再选边**，避免最后 clamp 把弹层压回输入框；四周 `PopupMargin=4`，整个
+  矩形永不出宿主窗口）；`_PopupTracker` 监视宿主窗口/全部祖先/输入框/列表滚动条的
+  Move/Resize/Show/Hide/WindowStateChange/scroll，用 `QTimer(0)` 合并成一次 `Reanchor`，
+  另加 120ms 兜底；`Reanchor` 先比锚点指纹（宿主尺寸/输入框位置/行数），没变直接返回；
+  输入框隐藏、宿主隐藏、输入框滚出可视区时直接收起；桌面端继续走原来的 `Qt.ToolTip`
+  浮层（不跟踪，行为与之前一致）。
+* **尺寸适配**（`src/view/main/main_view.py:163-188`）：Android 分支 resize 只做
+  `mobile_ui.OnResize` 后直接 return，**不再 PauseRepaint/关更新重绘**（桌面路径原样
+  保留）。`src/tools/mobile_ui_hooks.py` 新增 `ResizeSettleMs=120` 空闲去抖：一串 resize
+  只结算一次；结算时只有「宽/limit/页面/窗口状态」变化才做
+  `RelaxMinSizes / ApplyGridCoverSize / ReflowPortrait`，**纯高度变化（输入法）跳过**；
+  `OnShown` 改为幂等（尺寸/页面/窗口状态未变只 `update()` 一帧）；`_ApplyAndroidBackground`
+  把主窗 `QPalette::Window` 对齐主题 QSS 底色（设备实测 `#31363b`），消除擦除帧白闪。
+  `mobile_ui.py` 的 `UpdateLimit` 按宽度缓存；`mobile_ui_layout.py:132-151` 的
+  `RelaxMinSizes` 加幂等 guard，避免每次 resize 全树重扫。
+* **可观测性**（`Log.Warn`，logcat tag 是 `python`）：
+  `resize: 448x608 limit=320 landscape=False page=SearchView[搜索] events=1 bg=#31363b updates=True -> height-only, skip relayout`
+  / `-> relayout`、`ui: shown: … skip(unchanged)`、
+  `弹层上下空间不足，收缩高度贴边: 宿主=300x198 输入框=(100,71,120,40) 上=65 下=81 -> 高=96`。
+
+**真机验证**（AVD `Pixel_9_Pro_XL` / Android 16 / x86_64，dpr=3，真屏坐标；adb screencap、
+logcat、burst 帧分析）：
+
+| 场景 | 旧代码 | 新代码 |
+| --- | --- | --- |
+| 搜索记录弹层 + 输入法（搜索页） | popup=[300,618,1103,1389]，低于输入框 127px | popup=[300,498,1103,1269]，贴输入框下沿 gap=7px，bottom_found=True，未裁断 |
+| 输入法开/关（各 2 次） | 关输入法 55 帧 burst 出现 ~0.34s 深色空白带 + 一次整页重排（弹层跳 y=854） | burst 45/55 帧白闪帧=0；4 条全部 `height-only, skip relayout`，relayout=0、网格重算=0、updates=True |
+| 分屏/小窗 `wm size 900x1600` | 弹层几何失败（检测不到） | 宽 448→300dp：**恰好 1 条 `-> relayout`（events=2 合并）**；随后 2 条 height-only；输入法下弹层收缩为高 96dp、popup 底 738 < 输入法顶 801，列表内部滚动 |
+| 180° 旋转 / 合成横屏 | — | 180°：无重排、弹层仍贴住输入框 gap=7px；横屏 `wm 2992x1344`：Qt 收 300x372dp events=4 → 1 条 relayout |
+| 前后台 | 回前台全量 reflow | `ui: shown: 448x920 … skip(unchanged)`，无 resize、无重排 |
+| 登录页 TipLineEdit「获取地区」+ 输入法 | 弹层 bottom=1983 被输入法顶 1984 裁断（bottom_found=False） | 自动翻到输入框上方：popup=[276,777,875,1470]，bottom_found=True，完整可见；候选「全部地区/加拿大/德国/美国/英国/荷兰/香港」可点 |
+| 登录页 TipLineEdit「DOH」+ 输入法 | — | 弹层贴 DOH 输入框下沿约 2dp，4 条候选 +「添加 DOH 地址」行完整在输入法上方（`tip_doh2/D1_doh_ime.png`） |
+| 回归：首页→详情→返回→搜索 | — | OK，`traceback=0` |
+
+宿主机自检：`android/tools/host_test_search_popup.py`（覆盖跟随重锚、宿主 resize、宽度变化、
+300x250 极端小宿主收缩不压输入框、点外部收起、开合动画不被抖动打断）、
+`host_test_proxy_dropdowns.py`（登录页 TipLineEdit 下拉）、`host_test_app_state.py`
+（前后台）全部 PASS。
+
+**审计**：手机端所有"带悬浮候选菜单的输入框"共两类，都走同一套 `popup_list`：
+`SearchLineEdit`（`src/interface/ui_search.py:63`）与 `TipLineEdit`
+（`src/interface/ui_login_new.py:1001`/`:1043`、`src/interface/ui_login_proxy_widget.py:236`/`:506`/`:524`）；
+全仓库没有 `QCompleter`/`setCompleter`/`setEditable` 等其它自绘悬浮候选层。
+
+**行为边界**：弹层在"输入框移动 / 页面滚动 / 窗口 resize"时跟随重定位；输入框滚出可视区、
+页面切换、窗口隐藏时直接收起；窗口极矮时压缩弹层高度并让列表内部滚动（不再压回输入框）。
+
+**已知限制**：APK manifest 锁竖屏（`screenOrientation=1`），真 90/270° 旋转与本机真分屏
+无法在模拟器上完整复现，用 `wm size` 合成验证；`wm size reset` 瞬间的 2 帧深色是平台
+SurfaceView 重分配（非本代码可修）。真机未覆盖的两项：TipLineEdit 面板内滚动跟随（手指滚动属点外收起的设计边界，
+程序化滚动跟随由 host 测试 F2 覆盖）与“弹层打开时 180° 旋转”（同路径的宿主 resize/编辑框
+移动由 host 测试 E/F 覆盖）；真实 Android 多窗口分屏需在支持该模式的设备上复验。
+
 ---
 
 

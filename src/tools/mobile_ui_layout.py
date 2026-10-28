@@ -130,9 +130,24 @@ def FullText(label):
 
 
 def RelaxMinSizes(root, limit):
-    """ 递归放宽写死的过宽最小尺寸(macOS/桌面端不受影响) """
+    """ 递归放宽写死的过宽最小尺寸(macOS/桌面端不受影响)
+
+    limit 没变时直接返回：Android 的 resize 会成串到来(软键盘/分屏/旋转)，
+    每次重扫所有控件的最小宽度没有意义；只有 limit 变小了，才可能有新的控件
+    需要放宽(见 mobile_ui_hooks.OnSizeSettled 的 limitChanged 分支)。
+    """
     if root is None:
         return
+    try:
+        limit = int(limit)
+    except Exception:
+        pass
+    try:
+        if getattr(root, "_jmRelaxLimit", None) == limit:
+            return
+        root._jmRelaxLimit = limit
+    except Exception:
+        pass
     try:
         if isinstance(root, QWidget):
             if root.minimumWidth() > limit:

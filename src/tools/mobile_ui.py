@@ -24,6 +24,10 @@
    13. 下拉框弹窗按内容加宽(拆行压窄 combo 之后弹窗仍装得下最宽的选项，webp/apng 不再被切)；
        批量超分页的参数行在窄屏下改成"放大倍数/转换格式各占一行、整组居中"的表单
        (见 mobile_ui_layout.FitComboPopups / LayoutBatchSrTool)
+   14. 软键盘弹出/收起、分屏拖动、旋转引起的尺寸变化合并成**一次**空闲适配
+       (见 mobile_ui_hooks.OnSizeSettled)：只变高度(软键盘)不重排整页，宽度变了才
+       重算封面宽/放宽最小尺寸；不再在每个 resize 事件上冻结整窗重绘 —— 这是
+       Android 上"弹键盘页面闪一下 / 分屏拖动一直闪"的根因
 
 实现按关注点拆到同目录的 `mobile_ui_*.py`(base/hooks/window/drawer/layout/
 reader/grid/touch/diag)；本模块只持有会话级可变状态，并对外保持
@@ -45,6 +49,26 @@ _gridAvail = 0
 _gridPending = []
 _gridTimer = None
 
+# 尺寸变化(软键盘/分屏/旋转)的去抖与"上次适配状态"
+# Android 上窗口尺寸会成串变化：软键盘一次、分屏拖动每帧一次、旋转两三次。
+# 原来每个 resize 都同步做全量适配，用户看到的就是页面"闪一下/跳一下"。现在统一
+# 交给 mobile_ui_hooks.OnSizeSettled：resize 停下 ResizeSettleMs 后只做一次，且只有
+# "宽度相关"的变化才重排(软键盘只变高度 -> 完全不碰布局树)。
+_resizeTimer = None          # resize 去抖定时器(懒惰创建，见 hooks.ScheduleSizeSettled)
+_resizeTarget = None         # 最近一次 resize 的主窗口
+_resizeEvents = 0            # 本轮 resize 收到的事件数(只写日志，证明多次 resize 合并成一次)
+# 上一次"已经适配过"的窗口宽 / 最小宽度上限：宽没变就说明只是高度变了(软键盘)
+_adaptWidth = 0
+_adaptLimit = 0
+# 上一次 OnShown 时的 尺寸/上限/页面/窗口状态：完全没变时 OnShown 只重绘、不重排
+_shownWidth = 0
+_shownHeight = 0
+_shownLimit = 0
+_shownPage = ""
+_shownState = ""
+# UpdateLimit 的宽度缓存：宽度没变直接返回上次算出的上限(软键盘只改高度)
+_limitWidth = 0
+
 
 _filter = None
 _limit = MinWidthLimit
@@ -60,13 +84,20 @@ def CurrentLimit():
 
 
 def UpdateLimit(mainView):
-    """ 根据当前窗口宽度计算可用的最小宽度上限 """
-    global _limit
+    """ 根据当前窗口宽度计算可用的最小宽度上限
+
+    宽度没变时直接返回上次的结果：Android 的软键盘只会改高度，这类 resize
+    不应该再驱动一轮布局计算(见 mobile_ui_hooks.OnSizeSettled)。
+    """
+    global _limit, _limitWidth
     width = mainView.width()
     if width <= 0:
         width = mainView.sizeHint().width()
     if width <= 0:
         width = MinWidthLimit
+    if width == _limitWidth:
+        return _limit
+    _limitWidth = width
     _limit = max(240, min(MinWidthLimit, width - 24))
     return _limit
 

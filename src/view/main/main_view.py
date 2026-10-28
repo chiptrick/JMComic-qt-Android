@@ -166,8 +166,15 @@ class MainView(Main, QtTaskBase):
         if timer is None or not self.isVisible():
             return
 
-        # 手机竖屏/旋转/软键盘弹出：重新适配抽屉几何与最小尺寸(桌面端空操作)
+        # 手机竖屏/旋转/软键盘弹出/分屏：重新适配抽屉几何与最小尺寸(桌面端空操作)
         mobile_ui.OnResize(self)
+
+        # Android 的 resize 是连续成串的(软键盘弹出/收起、分屏拖动、旋转)：
+        # 这里一旦 setUpdatesEnabled(False) 冻结整窗、等停下来再补一帧，屏幕上就会
+        # "白一下再跳一下"(用户说的闪烁)。移动端保持连续绘制，重活由 mobile_ui 的
+        # 空闲去抖统一做一次(见 mobile_ui_hooks.OnSizeSettled)，中途不冻结、不强刷。
+        if platform_mobile.IsAndroid():
+            return
 
         if self._isStateChange:
             # 状态切换引起的尺寸变化：按正常流程重绘，不做缩放合并

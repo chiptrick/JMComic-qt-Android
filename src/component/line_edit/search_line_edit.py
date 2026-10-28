@@ -153,6 +153,21 @@ class SearchLineEdit(QLineEdit):
             return
         popup_list.Show(self)
 
+    def Popover(self, event=None):
+        """ 点按输入框的开合入口（和 TipLineEdit 同一套约定）。
+
+        只挂 focusInEvent 的话，输入框"已经聚焦"时第二次点不会再展开（触控路由
+        `_FocusInput` 在已聚焦分支里直接返回，不会再走聚焦事件）。 """
+        if not self.isShowSearch or not self.isEnabled():
+            return
+        if popup_list.IsHidden(self):
+            self.ShowListView()
+
+    def mouseReleaseEvent(self, ev):
+        if ev.button() == Qt.MouseButton.LeftButton:
+            self.Popover()
+        return QLineEdit.mouseReleaseEvent(self, ev)
+
     def CheckClick(self, pos):
         popup_list.CheckClick(self, pos)
 
