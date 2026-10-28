@@ -58,7 +58,15 @@ class BaseMaskDialog(QDialog):
         arg__1.accept()
 
     def __setShadowEffect(self):
-        """ 添加阴影 """
+        """ 添加阴影
+
+        手机端**不加**：QGraphicsDropShadowEffect 会把整个内容控件每帧渲染进
+        pixmap 再模糊一遍，滚动时等于每秒重画几十次整窗。宿主实测(376x660)：
+        表格视口单帧重绘 1.45ms → 带上阴影 5.40ms，整窗 2.06ms → 5.08ms
+        —— 3~4 倍，真机上就是肉眼可见的掉帧。手机端优先帧率，不要这层装饰。
+        """
+        if platform_mobile.IsAndroid():
+            return
         shadowEffect = QGraphicsDropShadowEffect(self.widget)
         shadowEffect.setBlurRadius(50)
         shadowEffect.setOffset(0, 5)

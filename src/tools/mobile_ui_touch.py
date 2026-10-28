@@ -364,6 +364,28 @@ def _InputTarget(widget):
     return None
 
 
+def _IsPopupEdit(edit):
+    """ 是否装了候选弹层（component.line_edit.popup_list.Install 留下的状态）
+
+    这类输入框即使是只读的（DOH / 获取地区），点按也必须走 input 通道：
+    走 native 只能靠首次焦点触发弹层，第二次点同一个框就不会再展开。
+    """
+    return isinstance(getattr(edit, "_jmPopup", None), dict)
+
+
+def _Popover(edit):
+    """ 点按带候选列表的输入框时展开列表；普通输入框没有此入口则跳过 """
+    popover = getattr(edit, "Popover", None)
+    if not callable(popover):
+        return False
+    try:
+        popover()
+        return True
+    except Exception as es:
+        Log.Error(es)
+    return False
+
+
 def _FocusInput(edit, globalPos, placeCursor=False):
     """ 兜底：让输入框拿到焦点，并把光标落到手指点的位置
 
@@ -381,6 +403,10 @@ def _FocusInput(edit, globalPos, placeCursor=False):
             return False
         if _InPopup(edit):
             return False
+        # 带候选弹层的输入框(DOH / 获取地区)：点一下就该把列表叫出来。
+        # 不能只靠 focusInEvent —— 输入框"已经聚焦"时它不会再触发，而手机端
+        # 这条路上 Qt 也不会合成鼠标，结果就是"第二次点同一个框没任何反应"。
+        _Popover(edit)
         if edit.hasFocus():
             if not placeCursor:
                 return False                # Qt 自己已经办好了：不碰光标/选区
@@ -406,7 +432,8 @@ def _FocusInput(edit, globalPos, placeCursor=False):
             edit.setTextCursor(cursor)
         try:
             method = QGuiApplication.inputMethod()
-            if method is not None and not method.isVisible():
+            # 只读的下拉输入框只展示内容：不拉起输入法，避免点了却打不出字
+            if method is not None and not method.isVisible() and not edit.isReadOnly():
                 method.show()               # Android: 让系统输入法弹出来
         except Exception:
             pass
@@ -727,8 +754,11 @@ class _TouchRouter(QObject):
             edit = _InputTarget(node)
             if edit is not None:
                 # 只读文本框(日志/说明)不当输入框：点它不该弹输入法，选中交给
-                # TextSelectGate(长按才选)/原生合成处理
-                return "native" if edit.isReadOnly() else "input"
+                # TextSelectGate(长按才选)/原生合成处理。只读但带候选弹层的
+                # (DOH/获取地区)仍走 input：弹层靠 _FocusInput -> Popover 打开。
+                if edit.isReadOnly() and not _IsPopupEdit(edit):
+                    return "native"
+                return "input"
             if isinstance(node, QTabBar):
                 return "tabbar" if node.count() > 1 else "activate"
             if isinstance(node, QAbstractButton):
@@ -1477,6 +1507,10 @@ def MakeScrollable(area):
     if area is None or isinstance(area, QGraphicsView):
         # 看图界面有自己的一套触控处理(mobile_ui_reader)，不接管
         return False
+    if getattr(area, "_jmNoTouchScroll", False):
+        # 控件自己声明"不要抢手势"：典型是"高度=内容、由外层页面统一滚动"的列表。
+        # 这类视图滚动量为 0，QScroller 抓住手势后只会把它吃掉，外层页面反而拖不动。
+        return False
     if getattr(area, "_jmTouchScroll", False):
         return False
     target = area.viewport() if area.viewport() is not None else area
@@ -1581,6 +1615,10 @@ def _AdoptScrollArea(widget):
     node = widget
     while node is not None:
         if isinstance(node, QAbstractScrollArea):
+            if getattr(node, "_jmNoTouchScroll", False):
+                # 这个滚动区不接管手势(高度=内容，交给外层页面滚)，继续往上找
+                node = node.parentWidget()
+                continue
             # 命中最近的一个就收工(它是看图控件时 MakeScrollable 自然返回 False)
             return node if MakeScrollable(node) else None
         node = node.parentWidget()
