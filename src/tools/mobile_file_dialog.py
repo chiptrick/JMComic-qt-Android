@@ -797,12 +797,13 @@ def _UniqueDir(path):
 
 
 def PickExportTree(caption=""):
-    """ 选下载目录：返回 {"uri","name"} / "" 取消 / None 不可用
+    """ 用系统 SAF 选一个目录，返回 {"uri","name"} / "" 取消 / None 不可用
 
-    为什么不返回本地路径：SAF 授权的是 URI，Python 的 open() 打不开。而这个目录是
-    要**持续写入**的(每本漫画每一页)，所以真正的写入走 `saf_bridge` 的 socket
-    数据面(见 tools/vfs.py)：选中的目录就是下载目录本身，文件直接落在里面，
-    没有"先写私有目录再导出"。
+    下载目录与缓存目录都用它：选中的目录会拿到 takePersistableUriPermission
+    持久授权，业务层按 `saf://<key>/<子目录>` 直接读写(见 tools/vfs.py)。
+    为什么不让 SAF 返回本地路径：SAF 授权的是 URI，Python 的 open() 打不开；
+    持久授权也只在 ContentResolver 上有效，所以写入走 saf_bridge 的 socket
+    数据面，不存在"先写私有目录再导出"。
     """
     try:
         from tools import saf_bridge

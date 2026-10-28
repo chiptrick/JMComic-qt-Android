@@ -162,7 +162,15 @@ class NasUploadItem(QtTaskBase):
         if nasInfo.is_waifu2x:
             srcDir = os.path.join(downloadInfo.convertPath, ToolUtil.GetCanSaveName(epsInfo.epsTitle))
 
-        desPath = os.path.join(os.path.join(Setting.GetCachePath(), "zip"), ToolUtil.GetCanSaveName(downloadInfo.title))
+        # 上传用的 zip 必须是**本地文件**(zipfile/WebDAV 只认本地路径)；缓存目录
+        # 现在可能是用户用 SAF 选的树，不能往里写 zip，改为应用临时目录。
+        from tools import platform_mobile
+        if platform_mobile.IsAndroid():
+            zipRoot = os.path.join(platform_mobile.GetAppDataDir(), "temp", "zip")
+        else:
+            import tempfile
+            zipRoot = os.path.join(tempfile.gettempdir(), "jmcomic-zip")
+        desPath = os.path.join(zipRoot, ToolUtil.GetCanSaveName(downloadInfo.title))
 
         if self.curPreUpIndex == 0:
             desFile = os.path.join(desPath, "{}.zip".format(ToolUtil.GetCanSaveName(downloadInfo.title)))

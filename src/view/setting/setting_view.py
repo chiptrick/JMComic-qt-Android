@@ -28,6 +28,17 @@ class SettingView(QtWidgets.QWidget, Ui_SettingNew):
         Ui_SettingNew.__init__(self)
         self.setupUi(self)
 
+        # 路径标签：整宽折行显示完整路径(不做中间省略)。水平 sizeHint 不参与
+        # 布局宽度计算，否则 QLabel 会按整段路径把整页撑到屏幕外。
+        for label in (self.downloadDir, self.cacheDir, self.chatDir, self.waifu2xDir):
+            label.setWordWrap(True)
+            label.setMinimumWidth(0)
+            policy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Ignored,
+                                           QtWidgets.QSizePolicy.Preferred)
+            # 高度必须跟着折行算(否则 Qt 只给一行的高度，长路径下半截被裁掉)
+            policy.setHeightForWidth(True)
+            label.setSizePolicy(policy)
+
         self.mainSize = None
         self.bookSize = None
         self.readSize = None
@@ -101,6 +112,7 @@ class SettingView(QtWidgets.QWidget, Ui_SettingNew):
 
         self.setDirButton.clicked.connect(self.SelectSavePath)
         self.cacheDirButton.clicked.connect(self.SelectCachePath)
+        self.cacheResetButton.clicked.connect(self.ResetCachePath)
         self.openDownloadDir.clicked.connect(partial(self.OpenDir, self.downloadDir))
         self.openCacheDir.clicked.connect(partial(self.OpenDir, self.cacheDir))
         self.openWaifu2xDir.clicked.connect(partial(self.OpenDir, self.waifu2xDir))
@@ -109,6 +121,9 @@ class SettingView(QtWidgets.QWidget, Ui_SettingNew):
 
         self.languageButton3.setVisible(True)
         self.categorySize.setVisible(False)
+        if platform_mobile.IsMobile():
+            # 聊天缓存这一行当前没有数据来源(永远空着)，手机上直接隐藏省空间
+            self.chatDirBox.setVisible(False)
 
         self.msgLabel.setVisible(False)
 
@@ -506,25 +521,43 @@ class SettingView(QtWidgets.QWidget, Ui_SettingNew):
         self.SetDownloadLabel()
 
     def SelectCachePath(self):
-        """ 修改缓存目录(封面/图片缓存/超分临时图/zip 临时文件)
+        """ 修改缓存目录(封面/图片缓存/超分临时图)
 
         入口：设置 → 下载与缓存 → "缓存位置"。
-        默认值是应用外部缓存目录
-        (/storage/emulated/0/Android/data/<包名>/cache/jmcomic-qt)：
-        系统"清理缓存"、设置-存储、支持 Android/data 的文件管理器都能清掉。
 
-        选中别的目录之后新缓存**直接写进新目录**(见 Setting.GetCachePath)，
-        只有旧目录里已有的缓存会在后台搬一次(不覆盖新目录里已有的文件)。
+        手机上走**系统 SAF 选择器**(ACTION_OPEN_DOCUMENT_TREE)：选中的目录由
+        takePersistableUriPermission 持久授权，应用按 `saf://<key>/jmcomic-qt`
+        直接读写(见 tools/vfs.py)，重启后仍然有效。
+        桌面端 / SAF 桥不可用时回落到本地目录选择器(缓存必须能被 open)。
+
+        选中之后新缓存**直接写进新目录**；只有旧目录里已有的缓存会在后台搬一次。
         """
         from tools import cache_path, platform_mobile
-        current = Setting.GetCachePath()
-        start = os.path.dirname(current) if current else ""
-        if not start or not os.path.isdir(start):
-            start = platform_mobile.GetExternalDir()
-        picked = mobile_file_dialog.PickLocalDir(self, Str.GetStr(Str.SelectFold), start)
-        if not picked:
+        picked = mobile_file_dialog.PickExportTree(Str.GetStr(Str.SelectFold))
+        if picked is None:
+            # SAF 桥不可用(桌面端/桥没打进包)：选真实本地目录
+            current = cache_path.DisplayPath()
+            start = os.path.dirname(current) if current else ""
+            if not start or not os.path.isdir(start):
+                start = platform_mobile.GetExternalDir()
+            path = mobile_file_dialog.PickLocalDir(self, Str.GetStr(Str.SelectFold), start)
+            if not path:
+                return
+            result = cache_path.SetBase(path)
+        elif not picked:
+            self.SetDownloadLabel()
             return
-        ok, reason, oldPath, newPath, moving = cache_path.SetBase(picked)
+        else:
+            result = cache_path.SetTree(picked.get("uri") or "", picked.get("name") or "")
+        self.ApplyCachePathResult(result)
+
+    def ResetCachePath(self):
+        """ 恢复默认缓存目录(应用外部缓存目录) """
+        from tools import cache_path
+        self.ApplyCachePathResult(cache_path.Reset())
+
+    def ApplyCachePathResult(self, result):
+        ok, reason, oldPath, newPath, moving = result
         self.SetDownloadLabel()
         if not ok:
             QtOwner().ShowMsg("无法使用该目录：{}".format(reason))
@@ -548,64 +581,76 @@ class SettingView(QtWidgets.QWidget, Ui_SettingNew):
     def SetDownloadLabel(self):
         """ 目录行文案
 
-        显示的是**真实会落盘的位置**：SAF 目录会还原成 /storage/emulated/0/…
+        显示的是**真实会落盘的位置**：SAF 目录还原成 /storage/emulated/0/…
         (树 URI 里带着 primary:Download/xxx，能还原)，用户一眼能对上文件管理器。
+        路径标签整宽折行显示，**不再做中间省略** —— 设置页必须能看全路径。
         """
-        from tools import mobile_ui
+        from tools import vfs
         display = Setting.GetDownloadDisplayPath()
         if not display:
             display = "./"
-        mobile_ui.ElideText(self.downloadDir, display)
+        self.downloadDir.setText(display)
         self.downloadDir.setToolTip(display)
 
-        # 缓存(封面/图片缓存/超分临时图)默认在应用外部缓存目录
-        # (/storage/emulated/0/Android/data/<包名>/cache/jmcomic-qt)：
-        # 可再生数据不放用户选的下载目录(免得文件管理器里堆一堆看不懂的文件)，
-        # 但也不藏在内置私有目录 —— 放外部，系统"清理缓存"/文件管理器清得掉。
-        # 用户也可以在"缓存位置"里改成别的真实目录(配置项 CachePath)。
+        # 缓存(封面/图片缓存/超分临时图)：默认在应用外部缓存目录，也可以在
+        # "缓存位置"里用 SAF 选到用户自己的目录(配置项 CachePathTree)。
+        # 目录里的文件由 vfs 逐文件直写，不再经过任何 "私有目录中转"。
         cachePath = Setting.GetCachePath()
-        mobile_ui.ElideText(self.cacheDir, cachePath)
-        mobile_ui.ElideText(self.waifu2xDir, os.path.join(cachePath, config.Waifu2xPath))
+        cacheDisplay = Setting.GetCacheDisplayPath()
+        waifuDisplay = vfs.RealPath(vfs.Join(cachePath, config.Waifu2xPath))
+        self.cacheDir.setText(cacheDisplay)
+        self.waifu2xDir.setText(waifuDisplay)
+        self.cacheDir.setToolTip(cacheDisplay)
+        self.waifu2xDir.setToolTip(waifuDisplay)
         if platform_mobile.IsAndroid():
-            # 自定义目录不可写时会回退默认值，这里按"实际生效的路径"判断
-            isCustom = os.path.normpath(cachePath) != os.path.normpath(Setting.GetDefaultCachePath())
+            # 自定义目录不可用时会回退默认值，这里按"实际生效的路径"判断
+            isCustom = os.path.normcase(cachePath) != os.path.normcase(Setting.GetDefaultCachePath())
             if isCustom:
-                self.cacheDir.setToolTip(
-                    "{}（自定义缓存目录，可在“缓存位置”里更改）".format(cachePath))
+                hint = "自定义缓存目录（SAF 授权，可在“缓存位置”里更改）"
             else:
-                self.cacheDir.setToolTip(
-                    "{}（默认缓存目录，可在系统存储设置或文件管理器中手动清理）".format(cachePath))
-            self.waifu2xDir.setToolTip(os.path.join(cachePath, config.Waifu2xPath))
-        else:
-            self.cacheDir.setToolTip(cachePath)
-            self.waifu2xDir.setToolTip(os.path.join(cachePath, config.Waifu2xPath))
+                hint = "默认缓存目录（可在系统存储设置或文件管理器中手动清理）"
+            self.cacheDir.setToolTip("{}（{}）".format(cacheDisplay, hint))
+        return
+
+    def _PathForLabel(self, label):
+        """ 每个目录行对应的**内部路径**(可能是 saf://...) """
+        from tools import vfs
+        if label is self.downloadDir:
+            return Setting.GetDownloadRoot()
+        if label is self.cacheDir:
+            return Setting.GetCachePath()
+        if label is self.waifu2xDir:
+            return vfs.Join(Setting.GetCachePath(), config.Waifu2xPath)
+        if label is self.chatDir:
+            return vfs.Join(Setting.GetCachePath(), config.ChatSavePath)
+        return ""
 
     def OpenDir(self, label):
         """ 打开目录
 
-        * 下载目录：配了 SAF 就直接用文件管理器打开那个目录(DocumentsUI)
-        * 缓存目录：在应用外部缓存目录里，Android 11+ 第三方文件管理器大多也进不了
-          Android/data，应用内跳转多半失败 —— 那就把真实路径告诉用户，让他在
-          系统存储设置/文件管理器里手动清理
+        * SAF 目录(下载/缓存)：直接打开那个目录的 document URI，系统文件管理器
+          会定位进去；这也是"改了缓存位置后打开目录没反应"的修法 —— 之前拿
+          `saf://` 的内部路径/Android/data 真实路径去开，系统既没有处理者、
+          Android 11+ 的文件管理器也进不去。
+        * 本地目录：交给系统文件管理器；打不开就把真实路径告诉用户。
         """
         from tools import mobile_ui, platform_mobile, vfs
-        text = mobile_ui.FullText(label) if label is not None else ""
+        path = self._PathForLabel(label)
+        text = vfs.RealPath(path) if path else (
+            mobile_ui.FullText(label) if label is not None else "")
         if platform_mobile.IsAndroid():
-            if label is self.downloadDir:
-                ok, reason = vfs.OpenInFileManager(Setting.GetDownloadRoot())
-                if not ok:
-                    if reason == "sandbox":
-                        QtOwner().ShowMsg(Str.GetStr(Str.SetDir))
-                    from tools.log import Log
-                    Log.Warn("open dir: {} -> {}".format(text, reason))
+            if not path:
+                QtOwner().ShowMsg("目录：{}".format(text))
                 return
-            ok, reason = vfs.OpenInFileManager(text)
+            ok, reason = vfs.OpenInFileManager(path)
             if not ok:
                 from tools.log import Log
                 Log.Warn("open dir: {} -> {}".format(text, reason))
-                # Android 11+ 第三方文件管理器基本进不了 Android/data：把路径讲清楚，
-                # 用户自己在系统存储设置(或支持的文件管理器)里清理
-                QtOwner().ShowMsg("目录：{}".format(text))
+                if reason == "sandbox" and label is self.downloadDir:
+                    # 下载目录还是应用专属目录：先去选一个 SAF 目录
+                    QtOwner().ShowMsg(Str.GetStr(Str.SetDir))
+                else:
+                    QtOwner().ShowMsg("目录：{}".format(text))
             return
         QDesktopServices.openUrl(QUrl.fromLocalFile(text))
         return

@@ -272,7 +272,8 @@ class TaskDownload(TaskBase, QtTaskBase):
                         return
                 else:
                     path = ToolUtil.GetRealPath(task.index+1, "book/{}/{}".format(task.bookId, task.epsIndex+1))
-                    cachePath2 = os.path.join(Setting.GetCachePath(), path)
+                    from tools import vfs
+                    cachePath2 = vfs.Join(Setting.GetCachePath(), path)
                     checkPaths = [task.loadPath]
 
                     if Setting.SavePath.value:

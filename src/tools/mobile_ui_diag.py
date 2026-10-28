@@ -1009,6 +1009,13 @@ def _SegFindCachedRealPage():
         root = Setting.GetCachePath()
     except Exception:
         return None
+    try:
+        from tools import vfs
+        if vfs.IsSaf(root):
+            # SAF 缓存树不能 glob(诊断只用于宿主/私有目录取样)
+            return None
+    except Exception:
+        return None
     for path in glob.glob(os.path.join(root, "book", "*", "*", "*")):
         try:
             if not os.path.isfile(path) or os.path.getsize(path) < 4096:

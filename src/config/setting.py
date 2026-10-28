@@ -75,9 +75,11 @@ class SettingValue:
             self._value = value
             self.autoValue = 0
         Setting.SaveSettingV(self)
-        # 任何设置变化都可能伴随缓存目录变化(目前是 CachePath)，清掉可写缓存
+        # 任何设置变化都可能伴随缓存目录变化(目前是 CachePath/CachePathTree)，清掉缓存
         Setting._cachePathResolved = ""
         Setting._cachePathRejected = ""
+        Setting._cacheSafKey = ""
+        Setting._cacheSafOk = False
 
 
 class Setting:
@@ -86,6 +88,9 @@ class Setting:
     _cachePathResolved = ""
     # 校验失败的目录也记下来，避免每张图都重试一次 + 刷一条日志
     _cachePathRejected = ""
+    # SAF 缓存目录的"可写"校验结果(按树 key 缓存，避免每次取路径都发一次 IPC)
+    _cacheSafKey = ""
+    _cacheSafOk = False
 
     # 通用设置
     IsUpdate = SettingValue("GeneraSetting", 1, False)
@@ -161,6 +166,13 @@ class Setting:
     #       Linux   -> $XDG_CACHE_HOME/jmcomic-qt
     #   * 绝对路径 = 设置页"缓存位置"选出来的自定义目录(直接写入，不经过默认目录)
     CachePath = SettingValue("DownloadSetting", "", False)
+    # 自定义缓存目录(SAF)：树 URI + 显示名
+    #
+    # 手机上的缓存目录用系统 SAF 选择器(ACTION_OPEN_DOCUMENT_TREE)授权，
+    # takePersistableUriPermission 之后重启仍可读写。实际路径是
+    # `saf://<key>/jmcomic-qt`(见 tools/vfs.py)，由 SAF 数据面逐文件直写。
+    CachePathTree = SettingValue("DownloadSetting", "", False)
+    CachePathTreeName = SettingValue("DownloadSetting", "", False)
 
     # Waifu2x设置
     SelectEncodeGpu = SettingValue("Waifu2xSetting", "", True)
@@ -300,11 +312,13 @@ class Setting:
         # (Init 早于 InitLoadSetting，那时 SavePath 还是空)
         if Setting.SavePath.value:
             try:
-                os.makedirs(Setting.GetCachePath(), exist_ok=True)
+                cachePath = Setting.GetCachePath()
+                if not str(cachePath).startswith("saf://"):
+                    os.makedirs(cachePath, exist_ok=True)
             except Exception:
                 pass
         custom = str(Setting.CachePath.value or "").strip()
-        if custom:
+        if custom and not custom.startswith("saf://"):
             try:
                 os.makedirs(custom, exist_ok=True)
             except Exception:
@@ -343,20 +357,47 @@ class Setting:
 
     @staticmethod
     def IsCustomCachePath():
-        """ 是否设置了自定义缓存目录 """
-        return bool(str(Setting.CachePath.value or "").strip())
+        """ 是否设置了自定义缓存目录(SAF 树或本地绝对路径) """
+        return bool(str(Setting.CachePathTree.value or "").strip()
+                    or str(Setting.CachePath.value or "").strip())
+
+    @staticmethod
+    def CacheTreeKey():
+        """ 缓存目录(SAF 树)的短 key；没选过/不在手机上返回空串 """
+        uri = str(Setting.CachePathTree.value or "")
+        if not uri:
+            return ""
+        try:
+            from tools import platform_mobile
+            if not platform_mobile.IsAndroid():
+                return ""
+        except Exception:
+            return ""
+        try:
+            from tools import saf_bridge
+            return saf_bridge.TreeKey(uri, Setting.CachePathTreeName.value)
+        except Exception:
+            return ""
 
     @staticmethod
     def GetCachePath():
-        """ 当前生效的缓存目录(自定义优先，默认见 GetDefaultCachePath)
+        """ 当前生效的缓存目录(SAF > 本地自定义 > 默认)
 
-        封面/图片缓存/超分临时图/zip 临时文件都**直接**写在这里 —— 不经过
-        任何"临时私有目录"，所以改完目录立即生效。
+        封面/图片缓存/超分临时图等**直接**写在这里，不经过任何"临时私有目录"。
+        手机上用 SAF 选的目录返回 `saf://<key>/jmcomic-qt`，由 tools/vfs.py 的
+        SAF 数据面逐文件直写(权限来自 takePersistableUriPermission，重启仍有效)。
 
-        自定义目录不可用时(被删、存储卡拔掉、没权限)回退默认值，避免整条图片
-        缓存链写不进去。校验结果缓存到 _cachePathResolved：这个函数每张图都会
-        调一次，不能每次都建目录/写探针。
+        自定义目录不可用时(授权失效/被删/没权限)回退默认值，避免整条图片缓存链
+        静默写失败。校验结果按 key 缓存 —— 这个函数每张图都会调一次。
         """
+        key = Setting.CacheTreeKey()
+        if key:
+            # 不在取路径时发 IPC 校验(启动/每张图都会调)：授权有效性由
+            # ApplyAndroidPathDefaults 起的后台线程检查，失败后这里自动回退默认值
+            if key == Setting._cacheSafKey and not Setting._cacheSafOk:
+                return Setting.GetDefaultCachePath()
+            return "saf://{}/{}".format(key, config.CacheLeafDir)
+
         custom = str(Setting.CachePath.value or "").strip()
         if not custom:
             return Setting.GetDefaultCachePath()
@@ -382,6 +423,12 @@ class Setting:
             return Setting.GetDefaultCachePath()
         Setting._cachePathResolved = path
         return path
+
+    @staticmethod
+    def GetCacheDisplayPath():
+        """ 给人看的缓存目录(SAF 路径还原成 /storage/emulated/0/… 真实路径) """
+        from tools import vfs
+        return vfs.RealPath(Setting.GetCachePath())
 
     @staticmethod
     def DownloadTreeKey():

@@ -1266,13 +1266,17 @@ adb shell dumpsys package <包名> | grep -E "minSdk|targetSdk"
 **下载与缓存都是"直接写"**：
 * 下载：设置 → 下载与缓存 → "设置目录"，手机走 SAF，选中的目录就是**下载目录本身**
   (`saf://<key>/commies/…`)，每张图直接写进去(见 §3.14)，没有"先落私有目录再导出"。
-* 缓存：设置 → 下载与缓存 → "缓存位置"。默认值见上表；配置项是 `config.ini` 的
-  `[DownloadSetting] CachePath`(空串 = 默认值)。自定义目录必须是 Python 能直接
-  `open()` 的真实路径(应用内部/外部私有目录都可以)，应用只在其下建 `jmcomic-qt/`
-  子目录；新缓存**直接写新目录**，只有旧目录里已有的缓存会在后台搬一次。
+* 缓存：设置 → 下载与缓存 → "缓存位置"。默认值见上表；手机上点按钮走**系统 SAF
+  选择器**，选中目录后 `takePersistableUriPermission` 持久授权，应用以
+  `saf://<key>/jmcomic-qt` 直接读写(见 `tools/vfs.py`)。配置项是 `config.ini` 的
+  `[DownloadSetting] CachePathTree / CachePathTreeName`(SAF)；桌面端/历史配置用
+  `CachePath`(本地绝对路径)。"默认缓存"按钮恢复默认值。
+  新缓存**直接写新目录**，只有旧目录里已有的缓存会在后台用 vfs 搬一次(不覆盖)。
 * 老版本配置里落在 `/data/user/0/…` 的下载目录，启动时由
   `platform_mobile.ApplyAndroidPathDefaults()` 改到外部存储，并把已下载的
   `commies` 内容在后台搬过去；新下载立刻写外部目录。
+* 设置页的路径行改成"名称/按钮一行 + 路径整宽一行"，完整路径自动折行显示，
+  不再中间省略；"打开目录"对 SAF 目录直接打开其 document URI(系统文件管理器)。
 
 **为什么缓存单独放外部缓存目录**：缓存全是可再生数据(封面、看图图片缓存、超分临时
 图、zip 临时文件)，删了顶多重新下载；放在内部私有目录里用户没有任何手段清理

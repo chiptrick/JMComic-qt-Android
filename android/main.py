@@ -625,7 +625,11 @@ def DumpDiagnostics(reason=""):
             lines.append("save path: {}".format(Setting.SavePath.value))
             lines.append("download root: {}".format(Setting.GetDownloadRoot()))
             lines.append("cache path: {} (自定义={})".format(
-                Setting.GetCachePath(), Setting.CachePath.value or "(空=默认)"))
+                Setting.GetCachePath(),
+                Setting.CachePathTreeName.value or Setting.CachePath.value or "(空=默认)"))
+            lines.append("cache display: {}".format(Setting.GetCacheDisplayPath()))
+            lines.append("cache tree: {}".format(
+                Setting.CachePathTreeName.value or Setting.CachePathTree.value or "(默认)"))
             lines.append("cache path default: {}".format(Setting.GetDefaultCachePath()))
         except Exception as es:
             lines.append("save/cache path: <{}>".format(es))

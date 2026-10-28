@@ -238,7 +238,14 @@ def RealPath(path):
     """ 界面上给人看的路径：saf 路径尽量还原成 /storage/emulated/0/… """
     uri, rel = Split(path)
     if not uri:
-        return str(path or "")
+        text = str(path or "")
+        if text.startswith(SafPrefix):
+            # 树登记表里找不到 key(极端情况)：至少显示一个可读的目录名，
+            # 不能把内部的 saf:// 路径直接甩给用户
+            key, _, rel2 = text[len(SafPrefix):].partition("/")
+            name = saf_bridge.TreeName(key) or "SAF目录"
+            return "{}/{}".format(name, rel2) if rel2 else name
+        return text
     base = saf_bridge.TreeRealPath(uri)
     if base:
         return "{}/{}".format(base, rel) if rel else base
@@ -299,14 +306,19 @@ def PicturePath(basePath):
 # 整棵树复制(改下载目录时把已下载的书搬过去)
 # ---------------------------------------------------------------------------
 
-def CopyTree(src, dst, onFile=None):
-    """ 递归复制 src -> dst，返回复制的文件数；失败的文件跳过 """
+def CopyTree(src, dst, onFile=None, overwrite=True):
+    """ 递归复制 src -> dst，返回复制的文件数；失败的文件跳过
+
+    overwrite=False：目标已存在同名文件时跳过(缓存搬迁用：新目录里的优先)
+    """
     count = 0
     for name, isDir in ListDir(src):
         source = Join(src, name)
         target = Join(dst, name)
         if isDir:
-            count += CopyTree(source, target, onFile)
+            count += CopyTree(source, target, onFile, overwrite)
+            continue
+        if not overwrite and Exists(target):
             continue
         data = Read(source)
         if data is None:

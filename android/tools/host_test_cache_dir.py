@@ -170,6 +170,8 @@ def TestCacheSetting():
     oldXDG = os.environ.get("XDG_CACHE_HOME", "")
     cacheBase = FreshDir()
     os.environ["XDG_CACHE_HOME"] = cacheBase
+    Setting.CachePathTree._value = ""
+    Setting.CachePathTree.setV = ""
     Setting.CachePath._value = ""
     Setting.CachePath.setV = ""
     Setting._cachePathResolved = ""
@@ -216,6 +218,54 @@ def TestCacheSetting():
             os.environ.pop("XDG_CACHE_HOME", None)
 
 
+def TestCacheSaf():
+    """ SAF 缓存目录：选目录 -> saf://<key>/jmcomic-qt -> 恢复默认 """
+    from config.setting import Setting
+    from tools import cache_path, saf_bridge
+
+    names = ("IsSupported", "IoMakedirs", "IoWrite", "IoDelete", "TreeKey", "TreeUri",
+             "UriDisplayName", "IoExists")
+    old = {name: getattr(saf_bridge, name) for name in names}
+    oldSave = Setting.SaveSettingV
+    saf_bridge.IsSupported = lambda: True
+    saf_bridge.IoMakedirs = lambda uri, rel: True
+    saf_bridge.IoWrite = lambda uri, rel, data: True
+    saf_bridge.IoDelete = lambda uri, rel: True
+    saf_bridge.TreeKey = lambda uri, name="": "t9"
+    saf_bridge.TreeUri = lambda key: "content://tree/primary%3ADownload%2FJC"
+    saf_bridge.UriDisplayName = lambda uri: "JC"
+    # 搬迁用：SAF 不存在(避免测试真的去 am/Service)
+    saf_bridge.IoExists = lambda uri, rel: (False, False, 0)
+    Setting.SaveSettingV = staticmethod(lambda item: None)
+    try:
+        Setting.CachePathTree.SetValue("")
+        Setting.CachePathTreeName.SetValue("")
+        Setting.CachePath.SetValue("")
+
+        ok, reason, oldPath, newPath, moving = cache_path.SetTree(
+            "content://tree/primary%3ADownload%2FJC", "JC")
+        assert ok, reason
+        assert newPath == "saf://t9/jmcomic-qt", newPath
+        assert Setting.CacheTreeKey() == "t9"
+        assert Setting.GetCachePath() == newPath
+        assert Setting.GetCacheDisplayPath().endswith("jmcomic-qt")
+        print("[ok] SAF 缓存目录直接写 saf://<key>/jmcomic-qt")
+
+        ok, reason, _, back, _ = cache_path.Reset()
+        assert ok, reason
+        assert not Setting.CachePathTree.value, "恢复默认要清掉 SAF 授权配置"
+        assert back == Setting.GetDefaultCachePath()
+        print("[ok] 恢复默认缓存目录清空 SAF 配置")
+    finally:
+        Setting.CachePathTree.SetValue("")
+        Setting.CachePathTreeName.SetValue("")
+        Setting.CachePath.SetValue("")
+        Setting.SaveSettingV = oldSave
+        for name, value in old.items():
+            setattr(saf_bridge, name, value)
+        cache_path.WaitMigrate()
+
+
 def TestCacheCustomMigrate():
     from tools import cache_path
 
@@ -250,6 +300,7 @@ def main():
     TestPathHelpers()
     TestSavePathNormalize()
     TestCacheSetting()
+    TestCacheSaf()
     TestCacheCustomMigrate()
     print("下载/缓存目录回归: PASS")
     return 0

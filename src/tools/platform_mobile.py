@@ -450,6 +450,42 @@ def WaitCacheMigrate(timeout=30.0):
     return WaitDirMigrate(timeout)
 
 
+def _CheckSafCacheAsync(key):
+    """ 后台确认 SAF 缓存目录仍可写(授权被收回/目录被删 -> 回退默认目录)
+
+    不能在 GetCachePath() 里同步做：服务首次启动 + 一次 IPC 要几百毫秒，
+    而那个函数在建主窗口时就会被调用。这里失败后写回 _cacheSafOk=False，
+    后续取路径时 Setting 自动回退默认目录。
+    """
+    from config import config
+    from config.setting import Setting
+    from tools import saf_bridge
+
+    uri = saf_bridge.TreeUri(key)
+    if not uri:
+        return
+
+    def Work():
+        ok = False
+        try:
+            saf_bridge.IoMakedirs(uri, config.CacheLeafDir)
+            # mkdirs 无论成败都回 ok，必须真写一次探针才能发现授权失效
+            probe = "{}/.jm_write_probe".format(config.CacheLeafDir)
+            ok = saf_bridge.IoWrite(uri, probe, b"jm")
+            if ok:
+                saf_bridge.IoDelete(uri, probe)
+        except Exception:
+            ok = False
+        Setting._cacheSafKey = key
+        Setting._cacheSafOk = ok
+        if not ok:
+            _LogMigrate("cache: SAF 缓存目录不可写，回退默认目录: {}".format(
+                Setting.CachePathTreeName.value or key))
+
+    import threading
+    threading.Thread(target=Work, name="cache-saf-check", daemon=True).start()
+
+
 def ApplyAndroidPathDefaults():
     """ 设置读完之后校正 Android 的下载/缓存目录，并把旧位置的内容搬过去
 
@@ -489,10 +525,19 @@ def ApplyAndroidPathDefaults():
     try:
         effective = NormalizeLocalPath(Setting.GetCachePath())
         default = NormalizeLocalPath(Setting.GetDefaultCachePath())
-        if effective and default and effective != default:
+        # SAF 缓存由 cache_path.SetTree 在切换时用 vfs 搬，不能走本地 shutil
+        if effective and default and effective != default and not effective.startswith("saf://"):
             # 不在这里判断默认目录是否非空：启动时"内部→默认"的搬迁可能还在跑，
             # 交给后台线程(先等前一个搬完)再判断；没有可搬的东西就是空转一次
             MigrateDirAsync(default, effective, "cache", waitFirst=True)
+    except Exception:
+        pass
+
+    # SAF 缓存：后台确认授权还有效(失败则回退默认目录，不阻塞首帧)
+    try:
+        key = Setting.CacheTreeKey()
+        if key:
+            _CheckSafCacheAsync(key)
     except Exception:
         pass
 

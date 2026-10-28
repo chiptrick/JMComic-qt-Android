@@ -1100,6 +1100,11 @@ class Ui_SettingNew(object):
 
         self.horizontalLayout_10.addWidget(self.cacheDirButton)
 
+        self.cacheResetButton = QPushButton(self.frame_11)
+        self.cacheResetButton.setObjectName(u"cacheResetButton")
+
+        self.horizontalLayout_10.addWidget(self.cacheResetButton)
+
         self.horizontalSpacer_8 = QSpacerItem(40, 20, QSizePolicy.Expanding, QSizePolicy.Minimum)
 
         self.horizontalLayout_10.addItem(self.horizontalSpacer_8)
@@ -1107,109 +1112,102 @@ class Ui_SettingNew(object):
 
         self.verticalLayout_13.addLayout(self.horizontalLayout_10)
 
-        self.horizontalLayout_2 = QHBoxLayout()
-        self.horizontalLayout_2.setObjectName(u"horizontalLayout_2")
-        self.label_3 = QLabel(self.frame_11)
+        # 下载路径：名称/按钮一行，完整路径单独占一行(自动折行，不再省略)
+        self.downloadDirBox = QWidget(self.frame_11)
+        self.downloadDirBox.setObjectName(u"downloadDirBox")
+        self.downloadDirLayout = QVBoxLayout(self.downloadDirBox)
+        self.downloadDirLayout.setObjectName(u"downloadDirLayout")
+        self.downloadDirLayout.setContentsMargins(0, 0, 0, 0)
+        self.downloadDirLayout.setSpacing(2)
+        self.downloadDirTop = QHBoxLayout()
+        self.downloadDirTop.setObjectName(u"downloadDirTop")
+        self.label_3 = QLabel(self.downloadDirBox)
         self.label_3.setObjectName(u"label_3")
-        self.label_3.setMinimumSize(QSize(80, 0))
-
-        self.horizontalLayout_2.addWidget(self.label_3)
-
-        self.downloadDir = QLabel(self.frame_11)
-        self.downloadDir.setObjectName(u"downloadDir")
-        self.downloadDir.setMinimumSize(QSize(150, 0))
-
-        self.horizontalLayout_2.addWidget(self.downloadDir)
-
-        self.openDownloadDir = QPushButton(self.frame_11)
-        self.openDownloadDir.setObjectName(u"openDownloadDir")
-
-        self.horizontalLayout_2.addWidget(self.openDownloadDir)
-
+        self.downloadDirTop.addWidget(self.label_3)
         self.horizontalSpacer_16 = QSpacerItem(40, 20, QSizePolicy.Expanding, QSizePolicy.Minimum)
+        self.downloadDirTop.addItem(self.horizontalSpacer_16)
+        self.openDownloadDir = QPushButton(self.downloadDirBox)
+        self.openDownloadDir.setObjectName(u"openDownloadDir")
+        self.downloadDirTop.addWidget(self.openDownloadDir)
+        self.downloadDirLayout.addLayout(self.downloadDirTop)
+        self.downloadDir = QLabel(self.downloadDirBox)
+        self.downloadDir.setObjectName(u"downloadDir")
+        self.downloadDir.setWordWrap(True)
+        self.downloadDir.setMinimumWidth(0)
+        self.downloadDirLayout.addWidget(self.downloadDir)
+        self.verticalLayout_13.addWidget(self.downloadDirBox)
 
-        self.horizontalLayout_2.addItem(self.horizontalSpacer_16)
-
-
-        self.verticalLayout_13.addLayout(self.horizontalLayout_2)
-
-        self.horizontalLayout_18 = QHBoxLayout()
-        self.horizontalLayout_18.setObjectName(u"horizontalLayout_18")
-        self.label_4 = QLabel(self.frame_11)
+        self.cacheDirBox = QWidget(self.frame_11)
+        self.cacheDirBox.setObjectName(u"cacheDirBox")
+        self.cacheDirLayout = QVBoxLayout(self.cacheDirBox)
+        self.cacheDirLayout.setObjectName(u"cacheDirLayout")
+        self.cacheDirLayout.setContentsMargins(0, 0, 0, 0)
+        self.cacheDirLayout.setSpacing(2)
+        self.cacheDirTop = QHBoxLayout()
+        self.cacheDirTop.setObjectName(u"cacheDirTop")
+        self.label_4 = QLabel(self.cacheDirBox)
         self.label_4.setObjectName(u"label_4")
-        self.label_4.setMinimumSize(QSize(80, 0))
-
-        self.horizontalLayout_18.addWidget(self.label_4)
-
-        self.cacheDir = QLabel(self.frame_11)
-        self.cacheDir.setObjectName(u"cacheDir")
-        self.cacheDir.setMinimumSize(QSize(150, 0))
-
-        self.horizontalLayout_18.addWidget(self.cacheDir)
-
-        self.openCacheDir = QPushButton(self.frame_11)
-        self.openCacheDir.setObjectName(u"openCacheDir")
-
-        self.horizontalLayout_18.addWidget(self.openCacheDir)
-
+        self.cacheDirTop.addWidget(self.label_4)
         self.horizontalSpacer_17 = QSpacerItem(40, 20, QSizePolicy.Expanding, QSizePolicy.Minimum)
+        self.cacheDirTop.addItem(self.horizontalSpacer_17)
+        self.openCacheDir = QPushButton(self.cacheDirBox)
+        self.openCacheDir.setObjectName(u"openCacheDir")
+        self.cacheDirTop.addWidget(self.openCacheDir)
+        self.cacheDirLayout.addLayout(self.cacheDirTop)
+        self.cacheDir = QLabel(self.cacheDirBox)
+        self.cacheDir.setObjectName(u"cacheDir")
+        self.cacheDir.setWordWrap(True)
+        self.cacheDir.setMinimumWidth(0)
+        self.cacheDirLayout.addWidget(self.cacheDir)
+        self.verticalLayout_13.addWidget(self.cacheDirBox)
 
-        self.horizontalLayout_18.addItem(self.horizontalSpacer_17)
-
-
-        self.verticalLayout_13.addLayout(self.horizontalLayout_18)
-
-        self.horizontalLayout_20 = QHBoxLayout()
-        self.horizontalLayout_20.setObjectName(u"horizontalLayout_20")
-        self.label_27 = QLabel(self.frame_11)
+        self.chatDirBox = QWidget(self.frame_11)
+        self.chatDirBox.setObjectName(u"chatDirBox")
+        self.chatDirLayout = QVBoxLayout(self.chatDirBox)
+        self.chatDirLayout.setObjectName(u"chatDirLayout")
+        self.chatDirLayout.setContentsMargins(0, 0, 0, 0)
+        self.chatDirLayout.setSpacing(2)
+        self.chatDirTop = QHBoxLayout()
+        self.chatDirTop.setObjectName(u"chatDirTop")
+        self.label_27 = QLabel(self.chatDirBox)
         self.label_27.setObjectName(u"label_27")
-        self.label_27.setMinimumSize(QSize(80, 0))
-
-        self.horizontalLayout_20.addWidget(self.label_27)
-
-        self.chatDir = QLabel(self.frame_11)
-        self.chatDir.setObjectName(u"chatDir")
-        self.chatDir.setMinimumSize(QSize(150, 0))
-
-        self.horizontalLayout_20.addWidget(self.chatDir)
-
-        self.openChatDir = QPushButton(self.frame_11)
-        self.openChatDir.setObjectName(u"openChatDir")
-
-        self.horizontalLayout_20.addWidget(self.openChatDir)
-
+        self.chatDirTop.addWidget(self.label_27)
         self.horizontalSpacer_18 = QSpacerItem(40, 20, QSizePolicy.Expanding, QSizePolicy.Minimum)
+        self.chatDirTop.addItem(self.horizontalSpacer_18)
+        self.openChatDir = QPushButton(self.chatDirBox)
+        self.openChatDir.setObjectName(u"openChatDir")
+        self.chatDirTop.addWidget(self.openChatDir)
+        self.chatDirLayout.addLayout(self.chatDirTop)
+        self.chatDir = QLabel(self.chatDirBox)
+        self.chatDir.setObjectName(u"chatDir")
+        self.chatDir.setWordWrap(True)
+        self.chatDir.setMinimumWidth(0)
+        self.chatDirLayout.addWidget(self.chatDir)
+        self.verticalLayout_13.addWidget(self.chatDirBox)
 
-        self.horizontalLayout_20.addItem(self.horizontalSpacer_18)
-
-
-        self.verticalLayout_13.addLayout(self.horizontalLayout_20)
-
-        self.horizontalLayout_19 = QHBoxLayout()
-        self.horizontalLayout_19.setObjectName(u"horizontalLayout_19")
-        self.label_5 = QLabel(self.frame_11)
+        self.waifu2xDirBox = QWidget(self.frame_11)
+        self.waifu2xDirBox.setObjectName(u"waifu2xDirBox")
+        self.waifu2xDirLayout = QVBoxLayout(self.waifu2xDirBox)
+        self.waifu2xDirLayout.setObjectName(u"waifu2xDirLayout")
+        self.waifu2xDirLayout.setContentsMargins(0, 0, 0, 0)
+        self.waifu2xDirLayout.setSpacing(2)
+        self.waifu2xDirTop = QHBoxLayout()
+        self.waifu2xDirTop.setObjectName(u"waifu2xDirTop")
+        self.label_5 = QLabel(self.waifu2xDirBox)
         self.label_5.setObjectName(u"label_5")
-        self.label_5.setMinimumSize(QSize(80, 0))
-
-        self.horizontalLayout_19.addWidget(self.label_5)
-
-        self.waifu2xDir = QLabel(self.frame_11)
-        self.waifu2xDir.setObjectName(u"waifu2xDir")
-        self.waifu2xDir.setMinimumSize(QSize(150, 0))
-
-        self.horizontalLayout_19.addWidget(self.waifu2xDir)
-
-        self.openWaifu2xDir = QPushButton(self.frame_11)
-        self.openWaifu2xDir.setObjectName(u"openWaifu2xDir")
-
-        self.horizontalLayout_19.addWidget(self.openWaifu2xDir)
-
+        self.waifu2xDirTop.addWidget(self.label_5)
         self.horizontalSpacer_19 = QSpacerItem(40, 20, QSizePolicy.Expanding, QSizePolicy.Minimum)
-
-        self.horizontalLayout_19.addItem(self.horizontalSpacer_19)
-
-
-        self.verticalLayout_13.addLayout(self.horizontalLayout_19)
+        self.waifu2xDirTop.addItem(self.horizontalSpacer_19)
+        self.openWaifu2xDir = QPushButton(self.waifu2xDirBox)
+        self.openWaifu2xDir.setObjectName(u"openWaifu2xDir")
+        self.waifu2xDirTop.addWidget(self.openWaifu2xDir)
+        self.waifu2xDirLayout.addLayout(self.waifu2xDirTop)
+        self.waifu2xDir = QLabel(self.waifu2xDirBox)
+        self.waifu2xDir.setObjectName(u"waifu2xDir")
+        self.waifu2xDir.setWordWrap(True)
+        self.waifu2xDir.setMinimumWidth(0)
+        self.waifu2xDirLayout.addWidget(self.waifu2xDir)
+        self.verticalLayout_13.addWidget(self.waifu2xDirBox)
 
 
         self.verticalLayout_4.addWidget(self.frame_11)
@@ -1344,6 +1342,7 @@ class Ui_SettingNew(object):
         self.label_21.setText(QCoreApplication.translate("SettingNew", u"\u4e0b\u8f7d\u548c\u7f13\u5b58\u8def\u5f84\uff08\u7f13\u5b58\u6587\u4ef6\u9700\u81ea\u5df1\u624b\u52a8\u6e05\u9664\uff09", None))
         self.setDirButton.setText(QCoreApplication.translate("SettingNew", u"\u8bbe\u7f6e\u76ee\u5f55", None))
         self.cacheDirButton.setText(QCoreApplication.translate("SettingNew", u"\u7f13\u5b58\u4f4d\u7f6e", None))
+        self.cacheResetButton.setText(QCoreApplication.translate("SettingNew", u"\u9ed8\u8ba4\u7f13\u5b58", None))
         self.label_3.setText(QCoreApplication.translate("SettingNew", u"\u4e0b\u8f7d", None))
         self.downloadDir.setText("")
         self.openDownloadDir.setText(QCoreApplication.translate("SettingNew", u"\u6253\u5f00\u76ee\u5f55", None))

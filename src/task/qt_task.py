@@ -90,7 +90,9 @@ class QtTaskBase:
 
         if not cachePath and not savePath:
             if Setting.SavePath.value and path:
-                cachePath = os.path.join(Setting.GetCachePath(), path)
+                # 缓存目录可能是 SAF 树(saf://<key>/jmcomic-qt)，必须用 vfs 拼
+                from tools import vfs
+                cachePath = vfs.Join(Setting.GetCachePath(), path)
         # if not Setting.IsOpenDohPicture.value:
         return TaskDownload().DownloadTask(url, downloadCallBack, completeCallBack, downloadStCallBack, backParam, loadPath,
                                                cachePath, savePath, saveParam, cleanFlag, isReload, resetCnt)

@@ -161,9 +161,10 @@ class BookInfoView(QtWidgets.QWidget, Ui_BookInfo, QtTaskBase):
             self.localButton.setIcon(QIcon(":/png/icon/icon_like.png"))
         else:
             self.localButton.setIcon(QIcon(":/png/icon/icon_like_off.png"))
-        path = os.path.join(Setting.GetCachePath(), "book/{}".format(self.bookId))
-        waifuPath = os.path.join(Setting.GetCachePath(), "waifu2x/book/{}".format(self.bookId))
-        if os.path.isdir(path) or os.path.isdir(waifuPath):
+        from tools import vfs
+        path = vfs.Join(Setting.GetCachePath(), "book/{}".format(self.bookId))
+        waifuPath = vfs.Join(Setting.GetCachePath(), "waifu2x/book/{}".format(self.bookId))
+        if vfs.IsDir(path) or vfs.IsDir(waifuPath):
             self.clearButton.setIcon(QIcon(":/png/icon/clear_on.png"))
         else:
             self.clearButton.setIcon(QIcon(":/png/icon/clear_off.png"))
@@ -478,16 +479,18 @@ class BookInfoView(QtWidgets.QWidget, Ui_BookInfo, QtTaskBase):
         self.AddHttpTask(req.AddAndDelFavoritesReq2(self.bookId), self.AddFavoriteBack)
 
     def ClearCache(self):
-        path = os.path.join(Setting.GetCachePath(), "book/{}".format(self.bookId))
-        waifuPath = os.path.join(Setting.GetCachePath(), "waifu2x/book/{}".format(self.bookId))
+        from tools import vfs
+        path = vfs.Join(Setting.GetCachePath(), "book/{}".format(self.bookId))
+        waifuPath = vfs.Join(Setting.GetCachePath(), "waifu2x/book/{}".format(self.bookId))
         isClear = QMessageBox.information(self, Str.GetStr(Str.ClearCache), Str.GetStr(Str.ConfirmClearBookCache).format(path, waifuPath), QtWidgets.QMessageBox.Yes|QtWidgets.QMessageBox.No)
         if isClear == QtWidgets.QMessageBox.Yes:
             if not Setting.SavePath.value:
                 return
-            if os.path.isdir(path):
-                shutil.rmtree(path, True)
-            if os.path.isdir(waifuPath):
-                shutil.rmtree(waifuPath, True)
+            # 缓存可能在 SAF 树里，不能直接用 shutil
+            if vfs.IsDir(path):
+                vfs.RemoveTree(path)
+            if vfs.IsDir(waifuPath):
+                vfs.RemoveTree(waifuPath)
         self.UpdateFavoriteIcon()
 
     def DelFavoriteBack(self, raw):

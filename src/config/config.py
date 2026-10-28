@@ -10,6 +10,8 @@ ResetCnt = 5                   # 下载重试次数
 
 IsUseCache = True              # 是否使用cache
 CachePathDir = "cache"         # cache目录
+# 缓存目录(用户可选)里应用自用的子目录名：不往用户选的目录里散落文件
+CacheLeafDir = "jmcomic-qt"
 # CacheExpired = 24 * 60 * 60  # cache过期时间24小时
 PreLoading = 10                # 预加载5页
 PreLook = 5                    # 预显示

@@ -374,18 +374,36 @@ def StackSettingNav(view):
 
 
 def FitSettingRows(view):
-    """ 设置页四行"目录路径 + 打开目录"：路径中间省略 + 整页禁止横向滚动
+    """ 设置页四行"目录路径"：整宽折行显示完整路径(不再中间省略)
 
-    原来这里是 `label.setMinimumWidth(100)`，但 100px 根本不够显示路径，Qt 会按
-    整段文本的 sizeHint 撑；`_jmElide` 之后行宽由屏幕决定，路径显示不下的部分用
-    "…" 省略。
+    旧做法是 `ElideText` 把路径省略成一行 —— 用户反馈"看不到完整路径，改完缓存
+    位置也不知道落在哪"。现在每行结构改成"名称/按钮一行 + 路径整宽一行"，
+    路径标签 wordWrap=True、水平策略 Ignored：宽度由行决定，长路径自然折成多行。
+    这里只负责把旧版本可能留下的省略状态清掉，并压住横向滚动条。
     """
     for name in ("downloadDir", "cacheDir", "chatDir", "waifu2xDir"):
         label = getattr(view, name, None)
-        if label is not None:
-            ElideText(label, FullText(label))
-    # 路径行已经能自适应，剩下的横向溢出(某些语言/字号下)宁可裁掉也不要让整页
-    # 可以横向拖动 —— 用户感知的"宽度超出范围"就是这种横向可拖动
+        if label is None:
+            continue
+        try:
+            label.setWordWrap(True)
+            label.setMinimumWidth(0)
+            label.setMaximumHeight(16777215)
+            policy = QSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+            policy.setHeightForWidth(True)
+            label.setSizePolicy(policy)
+            # 旧版 ElideText 会写 _jmFullText/装 Resize 过滤器；这里解除接管
+            filter = getattr(label, "_jmElideFilter", None)
+            if filter is not None:
+                try:
+                    label.removeEventFilter(filter)
+                except Exception:
+                    pass
+                label._jmElideFilter = None
+            label._jmFullText = None
+        except Exception as es:
+            Log.Error(es)
+    # 路径行已经能折行，剩下的横向溢出宁可裁掉也不要让整页可以横向拖动
     area = getattr(view, "scrollArea", None)
     if area is not None:
         try:
@@ -1152,7 +1170,7 @@ def ReflowPortrait(root=None, available=None):
     count += FitTablesForPortrait(root)
     # 弹窗宽度要在所有拆行/压扁之后按最终字体算一次(combo 可能已经被压窄)
     count += FitComboPopups(root)
-    # 设置页的路径行：任何一次重排之后都重新省略一遍(标签文字是运行时才填的)
+    # 设置页的路径行：任何一次重排之后都恢复成"整宽折行"，别被旧逻辑省略
     FitSettingRows(root)
     return count
 

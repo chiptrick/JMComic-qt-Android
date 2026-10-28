@@ -334,16 +334,15 @@ class ToolUtil(object):
             from tools import vfs
             c = CTime()
             formatList = [".jpg", ".png", ".gif", ".webp", ".bmp", ".apng"]
-            for mat in formatList:
-                if filePath[-4:] in formatList:
-                    path = filePath
-                elif filePath[-5:] in formatList:
-                    path = filePath
-                else:
-                    path = filePath + mat
-                if not vfs.IsFile(path):
-                    continue
-
+            text = str(filePath or "")
+            if not text:
+                return None
+            # 已经带扩展名就只试这一个，别把同一个文件读 6 遍
+            hasExt = text[-4:] in formatList or text[-5:] in formatList
+            for mat in (("",) if hasExt else formatList):
+                path = text if hasExt else text + mat
+                # 直接读(不存在返回 None)：缓存可能落在 SAF 树里，每多一次
+                # IsFile 就多一轮 IPC；SAF 下这个差别在翻页时很明显
                 data = vfs.Read(path)
                 if data is None:
                     continue

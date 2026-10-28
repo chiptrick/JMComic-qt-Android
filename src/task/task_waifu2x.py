@@ -229,7 +229,9 @@ class TaskWaifu2x(TaskBase):
         # 否则每次都要重算一遍，表现就是"超分一直没生效"。
         if not noSaveCache and path:
             a = crc32(json.dumps(model).encode("utf-8"))
-            cachePath = os.path.join(Setting.GetCachePath(), config.Waifu2xPath, path)
+            # 缓存目录可能是 SAF 树，路径必须用 vfs 拼
+            from tools import vfs
+            cachePath = vfs.Join(Setting.GetCachePath(), config.Waifu2xPath, path)
             info.cachePath = cachePath + "-{}".format(a)
 
         if cleanFlag:

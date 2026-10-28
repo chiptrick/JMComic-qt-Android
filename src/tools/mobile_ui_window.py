@@ -392,20 +392,21 @@ def ClearTempCache():
 
     只删目录里的条目、不删目录本身(下次启动 Setting.Init 会重建)；
     配置/数据/日志都在各自的目录里，不受影响。
+    缓存目录可能是 SAF 树(用户自选)，统一走 vfs 的列目录/删除。
     """
     try:
         from config.setting import Setting
+        from tools import vfs
         cachePath = Setting.GetCachePath()
-        if not cachePath or not os.path.isdir(cachePath):
+        if not cachePath or not vfs.IsDir(cachePath):
             return 0
         count = 0
-        for name in os.listdir(cachePath):
-            path = os.path.join(cachePath, name)
+        for name, _isDir in vfs.ListDir(cachePath):
+            if not name or name in (".", ".."):
+                continue
+            path = vfs.Join(cachePath, name)
             try:
-                if os.path.isdir(path) and not os.path.islink(path):
-                    shutil.rmtree(path, ignore_errors=True)
-                else:
-                    os.remove(path)
+                vfs.RemoveTree(path)
                 count += 1
             except Exception as es:
                 Log.Error(es)
