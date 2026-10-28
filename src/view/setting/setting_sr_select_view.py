@@ -22,8 +22,14 @@ class SettingSrSelectView(BaseMaskDialog, Ui_SrSelect):
         self.curModelName = curModelName or ""
         self.saveButton.clicked.connect(self._ClickButton)
         self.closeButton.clicked.connect(self.close)
+        # 每次打开都会 new 一个新弹窗（见 QtOwner.OpenSrSelectModel），父窗口又是主窗口，
+        # 不主动销毁的话它连同 40+ 行表格会一直挂着 —— 反复开关几次后越用越钝
+        self.closed.connect(self.deleteLater)
         self._FitSize()
         self.tableWidget.SetCurrentModel(self.curModelName)
+        if not self.tableWidget.DetectionOk():
+            # 探测不可信时列表退回了"全部模型"，必须说清楚，否则用户会以为都能用
+            self.label.setText("未检测到可用的超分引擎，已列出全部模型（需引擎可用才能生效）")
         # 让当前项居中要等布局跑完(宽高这时才是真的)
         QTimer.singleShot(0, self.tableWidget.ScrollToCurrent)
 
@@ -38,17 +44,18 @@ class SettingSrSelectView(BaseMaskDialog, Ui_SrSelect):
         width = owner.width() if owner is not None else 0
         height = owner.height() if owner is not None else 0
         if width <= 0:
-            self.widget.resize(673, 560)
+            self.widget.setFixedSize(673, 560)
             return
-        self.widget.setMinimumWidth(0)
-        self.widget.setMaximumWidth(max(320, width - 16))
+        # 必须 setFixedSize：widget 在 mask 弹窗的 QVBoxLayout 里，resize() 会被布局
+        # 覆盖回 sizeHint —— 真机上就出现"弹窗只有巴掌大、列表只露 4 行"(截图反馈)。
         dialogWidth = min(560, max(320, width - 16))
-        dialogHeight = min(620, max(320, height - 96)) if height > 0 else 560
-        self.widget.resize(dialogWidth, dialogHeight)
+        dialogHeight = min(660, max(360, int(height * 0.86))) if height > 0 else 560
+        self.widget.setFixedSize(dialogWidth, dialogHeight)
 
     def _ClickButton(self):
         modelName = self.tableWidget.SelectedModelName()
-        if not modelName:
-            return
-        self.Close.emit(modelName)
+        if modelName:
+            self.Close.emit(modelName)
+        # 一个都没选中（当前模型不在可用列表里、又没有点选）时不要卡在弹窗里：
+        # 直接关掉，设置保持原样。原来这里是 return，用户点「确定」毫无反应。
         self.close()

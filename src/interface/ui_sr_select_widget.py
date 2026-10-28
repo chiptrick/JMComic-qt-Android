@@ -32,12 +32,16 @@ class Ui_SrSelect(object):
         self.verticalLayout.setObjectName(u"verticalLayout")
         self.label_4 = QLabel(SrSelect)
         self.label_4.setObjectName(u"label_4")
+        font = QFont()
+        font.setPointSize(9)
+        self.label_4.setFont(font)
         self.label_4.setWordWrap(True)
 
         self.verticalLayout.addWidget(self.label_4)
 
         self.label = QLabel(SrSelect)
         self.label.setObjectName(u"label")
+        self.label.setFont(font)
         self.label.setWordWrap(True)
 
         self.verticalLayout.addWidget(self.label)
@@ -64,7 +68,7 @@ class Ui_SrSelect(object):
         self.tableWidget.horizontalHeader().setProperty("showSortIndicator", False)
         self.tableWidget.horizontalHeader().setStretchLastSection(False)
         self.tableWidget.verticalHeader().setVisible(False)
-        self.tableWidget.verticalHeader().setDefaultSectionSize(44)
+        self.tableWidget.verticalHeader().setDefaultSectionSize(40)
 
         self.verticalLayout.addWidget(self.tableWidget)
 
@@ -94,8 +98,8 @@ class Ui_SrSelect(object):
 
     def retranslateUi(self, SrSelect):
         SrSelect.setWindowTitle(QCoreApplication.translate("SrSelect", u"Form", None))
-        self.label_4.setText(QCoreApplication.translate("SrSelect", u"\u652f\u6301Waifu2x\u3001Real-CUGAN\u3001Real-ESRGAN\uff08\u4e0d\u652f\u6301CPU\uff09", None))
-        self.label.setText(QCoreApplication.translate("SrSelect", u"\u6309\u7b97\u6cd5\u5206\u7ec4\uff1a\u6a21\u578b\u65cf \u00b7 \u653e\u5927\u500d\u6570 \u00b7 \u964d\u566a\u7b49\u7ea7\uff1b\u70b9\u8868\u5934\u300c\u8017\u65f6\u300d\u53ef\u5e73\u94fa\u6392\u5e8f", None))
+        self.label_4.setText(QCoreApplication.translate("SrSelect", u"\u652f\u6301 Waifu2x / Real-CUGAN / Real-ESRGAN\uff08\u4e0d\u652f\u6301 CPU\uff09", None))
+        self.label.setText(QCoreApplication.translate("SrSelect", u"\u300c\u6a21\u578b\u300d\u5217\u662f\u539f\u59cb\u6a21\u578b ID\uff1b\u70b9\u300c\u8017\u65f6\u300d\u8868\u5934\u53ef\u5e73\u94fa\u6392\u5e8f", None))
         ___qtablewidgetitem = self.tableWidget.horizontalHeaderItem(0)
         ___qtablewidgetitem.setText(QCoreApplication.translate("SrSelect", u"\u6a21\u578b", None));
         ___qtablewidgetitem1 = self.tableWidget.horizontalHeaderItem(1)

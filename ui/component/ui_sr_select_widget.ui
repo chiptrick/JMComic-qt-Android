@@ -22,8 +22,13 @@
   <layout class="QVBoxLayout" name="verticalLayout">
    <item>
     <widget class="QLabel" name="label_4">
+     <property name="font">
+      <font>
+       <pointsize>9</pointsize>
+      </font>
+     </property>
      <property name="text">
-      <string>支持Waifu2x、Real-CUGAN、Real-ESRGAN（不支持CPU）</string>
+      <string>支持 Waifu2x / Real-CUGAN / Real-ESRGAN（不支持 CPU）</string>
      </property>
      <property name="wordWrap">
       <bool>true</bool>
@@ -32,8 +37,13 @@
    </item>
    <item>
     <widget class="QLabel" name="label">
+     <property name="font">
+      <font>
+       <pointsize>9</pointsize>
+      </font>
+     </property>
      <property name="text">
-      <string>按算法分组：模型族 · 放大倍数 · 降噪等级；点表头「耗时」可平铺排序</string>
+      <string>「模型」列是原始模型 ID；点「耗时」表头可平铺排序</string>
      </property>
      <property name="wordWrap">
       <bool>true</bool>
@@ -79,7 +89,7 @@
       <bool>false</bool>
      </attribute>
      <attribute name="verticalHeaderDefaultSectionSize">
-      <number>44</number>
+      <number>40</number>
      </attribute>
      <column>
       <property name="text">
