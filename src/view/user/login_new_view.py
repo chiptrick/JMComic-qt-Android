@@ -1,6 +1,3 @@
-import base64
-import time
-
 from PySide6 import QtWidgets
 from PySide6.QtCore import QTimer
 
@@ -107,24 +104,30 @@ class LoginNewView(QtWidgets.QWidget, Ui_LoginNew, QtTaskBase):
         self.AddHttpTask(request, self.InitEchConfigBack)
 
     def InitEchConfigBack(self, raw):
+        """ ECH 配置回包：成功存起来并 15 分钟后再取，失败 1 分钟重试
+
+        旧版代理页有一行小字(echTick)显示"ECH 配置更新时间"，登录/代理页重构
+        (5aa8613) 之后那个标签已经删掉了。之前这里还在 setText，抛的
+        AttributeError 被 except 吞掉 —— 表面上"不影响使用"，但异常发生在
+        timer.stop() 之前，等于**拿到配置也停不掉失败时设的 1 分钟重试节奏**，
+        于是每 1 分钟发一次 DoH 查询。状态现在只记日志(带时间戳)。
+        """
         try:
             st = raw.get("st")
             data = raw.get('data')
             if st != Str.Ok or not data:
-                self.echTick.setText("error")
-                self.echTick.setStyleSheet("background-color:transparent;color:{}".format("#d71345"))
                 Log.Warn("not fetch ech config")
-                self.timer.stop()
-                self.timer.setInterval(1000*(1*60))
-                self.timer.start()
+                self.RestartEchTimer(60)
             else:
                 QtOwner().echConfig = data
-                day = time.strftime(Str.GetStr(Str.UpdateTime)+'：%Y-%m-%d-%H:%M:%S', time.localtime(time.time()))
-                self.echTick.setText(day),
-                self.echTick.setStyleSheet("background-color:transparent;color:{}".format(QtOwner().GetThemeColor()))
-                Log.Info(f"update ech config, {data}")
-                self.timer.stop()
-                self.timer.setInterval(1000 * (15 * 60))
-                self.timer.start()
+                Log.Info("update ech config, {}".format(data))
+                self.RestartEchTimer(15 * 60)
         except Exception as es:
             Log.Error(es)
+
+    def RestartEchTimer(self, seconds):
+        """ 重设定时器节奏(先 stop 再改 interval，运行中的 QTimer 才会用新值) """
+        self.timer.stop()
+        self.timer.setInterval(1000 * seconds)
+        self.timer.start()
+        return
