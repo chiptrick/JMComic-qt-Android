@@ -177,6 +177,23 @@ def ApplyGridCoverSize(root):
     return count
 
 
+def _ItemWidth(widget):
+    """item widget 的"有效宽度"：已定宽就用定宽，否则用 sizeHint
+
+    真机上 QSS 的内边距会让 sizeHint 比实际宽度大 4px 左右，如果直接拿 sizeHint
+    去判"是否超宽"，就会每排一次收一点封面，最后收成 96px 的小封面。
+    """
+    try:
+        if widget.minimumWidth() == widget.maximumWidth() and widget.maximumWidth() > 0:
+            return widget.maximumWidth()
+    except Exception:
+        pass
+    try:
+        return widget.sizeHint().width()
+    except Exception:
+        return 0
+
+
 def _GridOverflow(root):
     """ item 实际宽度超出"可用宽/列数"多少像素(<=0 表示一行放得下 GridColumns 个) """
     try:
@@ -196,7 +213,7 @@ def _GridOverflow(root):
                 widget = view.itemWidget(view.item(row))
                 if widget is None:
                     continue
-                worst = max(worst, widget.sizeHint().width() - per)
+                worst = max(worst, _ItemWidth(widget) - per)
         return worst
     except Exception as es:
         Log.Error(es)
@@ -246,18 +263,41 @@ def RefreshItemSizeHints(root):
                     # 而 sizeHint 会被 item 内部布局(封面+标签+边距)撑大；真机上因此
                     # 出现过"item 163 < 330/2 却仍然一行 1 个"。
                     # 把 item widget 的宽度也固定成栅格宽，sizeHint 就跟着栅格走。
-                    cellW = max(w.sizeHint().width() for w in widgets)
+                    cellW = max(_ItemWidth(w) for w in widgets)
                     cellH = max(w.sizeHint().height() for w in widgets)
                     viewport = view.viewport()
                     avail = viewport.width() if viewport is not None else view.width()
                     per = max(60, avail // max(1, GridColumns)) if avail > 0 else 0
                     if per > 0 and cellW > per:
                         cellW = per
-                        for w in widgets:
-                            try:
-                                w.setFixedWidth(cellW)
-                            except Exception as es:
-                                Log.Error(es)
+                    # 无论如何都把 item widget 钉到 cellW：
+                    #   * 只要它没被钉住，sizeHint 里就会带 QSS 内边距(比实际宽 4px 左右)，
+                    #     _GridOverflow 判"超宽" -> ApplyGridCoverSize 每轮把封面收窄一点，
+                    #     最后收成 48px 的小封面（真机 0.79 就是这样翻车的）；
+                    #   * 钉住之后 SyncContentWidth 才有确定的内容宽度可用。
+                    for w in widgets:
+                        try:
+                            w.setFixedWidth(cellW)
+                        except Exception as es:
+                            Log.Error(es)
+                    # 定宽之后必须重算高度：宽度一变，封面高度(按宽高比)和标题换行都变，
+                    # 沿用定宽前的 cellH 会让文字溢出到下一项上（真机表现为文字压字）。
+                    cellH = 0
+                    for row in range(view.count()):
+                        item = view.item(row)
+                        widget = view.itemWidget(item)
+                        if widget is None:
+                            continue
+                        try:
+                            widget.SyncContentWidth(notify=False)
+                        except Exception as es:
+                            Log.Error(es)
+                        hint = widget.sizeHint()
+                        item.setSizeHint(hint)
+                        if hint.height() > cellH:
+                            cellH = hint.height()
+                    if cellH <= 0:
+                        cellH = max(w.sizeHint().height() for w in widgets)
                     view.setGridSize(QSize(cellW, cellH))
                 # 强制重排(顺序：先更新几何再重排 items)
                 for name in ("updateGeometries", "doItemsLayout"):

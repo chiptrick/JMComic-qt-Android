@@ -65,8 +65,7 @@ class IndexView(QWidget, Ui_Index, QtTaskBase):
                     if index == 1:
                         self.weekIndex = index
                         self.bookWidgetList[self.weekIndex].LoadCallBack = self.LoadNextPage
-                    for v in info.bookList:
-                        w.AddBookItemByBook(v)
+                    w.AddBooksDeferred(info.bookList)
                     index += 1
                 self.tabWidget.setCurrentIndex(0)
             else:
@@ -126,8 +125,7 @@ class IndexView(QWidget, Ui_Index, QtTaskBase):
         if st == Status.Ok:
             self.isInitNew = True
             bookList = raw["bookList"]
-            for v in bookList:
-                self.newListWidget.AddBookItemByBook(v)
+            self.newListWidget.AddBooksDeferred(bookList)
             self.spinBox.setValue(page)
             self.spinBox.setMaximum(999)
             self.newListWidget.UpdatePage(page, 999)
@@ -153,8 +151,7 @@ class IndexView(QWidget, Ui_Index, QtTaskBase):
         self.bookWidgetList[self.weekIndex].UpdateState()
         if st == Status.Ok:
             bookList = raw["bookList"]
-            for v in bookList:
-                self.bookWidgetList[self.weekIndex].AddBookItemByBook(v)
+            self.bookWidgetList[self.weekIndex].AddBooksDeferred(bookList)
             self.spinBox.setValue(page)
             self.spinBox.setMaximum(999)
             self.bookWidgetList[self.weekIndex].UpdatePage(page, 999)

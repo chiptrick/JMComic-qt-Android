@@ -1,7 +1,7 @@
 from functools import partial
 
 from PySide6 import QtWidgets
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QCursor
 from PySide6.QtWidgets import QListWidgetItem, QMenu, QApplication, QFrame, QListWidget, QMessageBox
 
@@ -290,6 +290,46 @@ class ComicListWidget(BaseListWidget):
         url = v.url
         categories = "{} {}".format(ToolUtil.GetUpdateStrByTick(v.tick), Str.GetStr(Str.Looked))
         self.AddBookItem(_id, title, categories, url)
+
+    def AddBooksDeferred(self, books, chunk=6):
+        """分批添加封面项：每 chunk 项让出一次事件循环
+
+        首页/分类一次回来 60~80 本，AddBookItem 单条约 4~8ms（建控件 + 5 处 QSS +
+        排版 + sizeHint），一口气加完就是 250~500ms 的主线程阻塞 —— 用户看到的是
+        "列表出来时整屏卡一下"，而且正好会压住那时的换页动画（实测动画帧间隔里
+        40~54ms 的尖峰就出现在这种时刻）。
+        这里改成每 chunk 项 QTimer.singleShot(0) 让出一次，把一次长阻塞摊成若干
+        个短任务；最后统一做一次网格重排（去抖）。
+        """
+        try:
+            queue = getattr(self, "_jmBookQueue", None)
+            if queue is None:
+                queue = []
+                self._jmBookQueue = queue
+            queue.extend(books or [])
+        except Exception:
+            return
+        self._PumpBookQueue(chunk)
+        return
+
+    def _PumpBookQueue(self, chunk=6):
+        queue = getattr(self, "_jmBookQueue", None)
+        if not queue:
+            return
+        try:
+            for _ in range(min(int(chunk), len(queue))):
+                book = queue.pop(0)
+                try:
+                    self.AddBookItemByBook(book)
+                except Exception as es:
+                    Log.Error(es)
+        except Exception as es:
+            Log.Error(es)
+        if queue:
+            QTimer.singleShot(0, lambda: self._PumpBookQueue(chunk))
+        else:
+            _ScheduleGridCover(self)
+        return
 
     def AddBookItem(self, _id, title, categoryStr="", url="", isShowToolButton=False, isShiled=False, rawBook=None):
         index = self.count()

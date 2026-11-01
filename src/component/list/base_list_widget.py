@@ -83,6 +83,10 @@ class BaseListWidget(QListWidget, QtTaskBase):
 
     def clear(self) -> None:
         QListWidget.clear(self)
+        # 分批添加(AddBooksDeferred)还有剩余的话一并丢掉：清空后不该被旧数据填回来
+        queue = getattr(self, "_jmBookQueue", None)
+        if queue:
+            del queue[:]
 
         # 防止异步加载时，信息错乱
         self.ClearTask()
