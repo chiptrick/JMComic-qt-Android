@@ -45,6 +45,13 @@ target_link_libraries(sr_qnn PRIVATE ${ONNXRUNTIME_LIB} dl)
 
 if(ANDROID)
     target_link_libraries(sr_qnn PRIVATE log android)
+
+    # 16KB 页对齐：NDK r28+ 默认就是 16384，这里显式写死是为了用 r26/r27 时
+    # 也能产出合规库（Android 15 起有 16KB 页设备，不对齐只能靠系统兼容模式跑）。
+    # 校验：python android/tools/check_elf_page_align.py <apk>
+    target_link_options(sr_qnn PRIVATE
+        "-Wl,-z,max-page-size=16384"
+        "-Wl,-z,common-page-size=16384")
 endif()
 
 # 注意：不能加 -fvisibility=hidden，否则 ctypes 找不到 srq_* 符号
