@@ -10,6 +10,7 @@ from component.label.gif_label import GifLabel
 from component.label.msg_label import MsgLabel
 from component.system_tray_icon.my_system_tray_icon import MySystemTrayIcon
 from component.widget.main_widget import Main
+from component.widget.animation_stack_widget import AnimationEnum
 from config import config
 from config.setting import Setting
 from qt_owner import QtOwner
@@ -454,6 +455,13 @@ class MainView(Main, QtTaskBase):
                 self.toolButtonGroup.setId(button, i)
                 self.menuLayout.addWidget(button)
                 self.toolButtons.append(button)
+        # 面包屑增删按钮会让 menuLayout 失效，真正的重排会落到**下一次事件循环**，
+        # 也就是换页动画正在跑的时候 —— 主窗口跟着重排/重绘一大片，动画首帧正好被
+        # 这一下打断（实测表现为"切页第一帧闪黑 + 动画没了"）。这里当场算完。
+        try:
+            self.menuLayout.activate()
+        except Exception:
+            pass
         return
 
     def OpenLoginView(self):
@@ -481,12 +489,22 @@ class MainView(Main, QtTaskBase):
             subIndex = self.subStackList.index(index)
             if subIndex <= 0:
                 return
-            self.SwitchWidgetByIndex(self.subStackList[subIndex-1])
+            target = self.subStackList[subIndex - 1]
+            # 回退必须把栈裁到目标页：原来只切页面不裁栈，面包屑会留着已经退掉的层级，
+            # 而且下一次返回会按"当前页在栈里的位置=0"判断，直接弹"再按一次退出"。
+            keep = self.subStackList[:subIndex]
+            self.ClearTabBar()          # 注意：它会顺带清空 subStackList
+            self.subStackList = keep
+            self.UpdateTabBar()
+            # 方向必须现在显式给：上面已经把当前页从 subStackList 里裁掉了，
+            # 再让 SwitchWidgetByIndex 自己 list.index(currentIndex()) 会算成 0，
+            # 和目标的 0 比较后恒为 LeftToRight（返回也播成前进方向）。
+            self.SwitchWidgetByIndex(target, AnimationEnum.RightToLeft)
 
     def SwitchWidget(self, widget, **kwargs):
         return self.SwitchWidgetByIndex(self.subStackWidget.indexOf(widget), **kwargs)
 
-    def SwitchWidgetByIndex(self, index, **kwargs):
+    def SwitchWidgetByIndex(self, index, direction=None, **kwargs):
         # 手机端：换页前先把软键盘/输入框焦点收掉。输入框在"没人输入"的时候还占着
         # 焦点会让 Qt 把返回键当成"收软键盘"用掉(见 mobile_ui.DismissTextInput)，
         # 表现就是"第一次按返回没反应，第二次才返回"。
@@ -495,11 +513,26 @@ class MainView(Main, QtTaskBase):
         # 也才在这时向系统申请软键盘 —— 延后再收两遍，别让输入框白占着焦点
         for delay in (0, 150):
             QTimer.singleShot(delay, lambda: mobile_ui.DismissTextInput("switch-widget-late"))
+        mobile_ui.CancelBackQuit()
         # 手机端：从抽屉里选页面后要顺手收起抽屉。否则抽屉还开着，"选中页面 -> 按返回"
         # 的第一次只是把抽屉收起来(页面不动)，用户得按第二次才回退 —— 实测被当成
-        # "多级页面返回要按两次"。主动切换导航也要取消"连按两次退出"的待退出状态。
+        # "多级页面返回要按两次"。
+        #
+        # **必须先收完抽屉再换页**：抽屉是主窗口里的真实控件，收起过程会让窗口重绘
+        # 一大片；而换页覆盖层这时往往还在等 GPU 首帧（~35ms），这一片正好露出空白，
+        # 就是"点菜单项之后黑一下"。两者串行就没这个窗口。
+        nav = getattr(self, "navigationWidget", None)
+        if nav is not None and getattr(nav, "_jmDrawer", False) and not nav.isHidden():
+            mobile_ui.CloseDrawer(self)
+            delay = int(getattr(mobile_ui, "DrawerAniMs", 120)) + 40
+            QTimer.singleShot(delay, lambda: self._SwitchWidgetNow(index, direction, **kwargs))
+            return
         mobile_ui.CloseDrawer(self)
-        mobile_ui.CancelBackQuit()
+        self._SwitchWidgetNow(index, direction, **kwargs)
+        return
+
+    def _SwitchWidgetNow(self, index, direction=None, **kwargs):
+        """真正的换页（抽屉已收起 / 本就不需要收）"""
         if index == self.subStackWidget.currentIndex():
             self.subStackWidget.widget(index).SwitchCurrent(**kwargs)
             return
@@ -520,20 +553,32 @@ class MainView(Main, QtTaskBase):
             self.subStackList = subStackList
             self.subStackList.append(index)
             self.UpdateTabBar()
-        self.subStackWidget.SwitchWidgetByIndex(index, **kwargs)
-        # self.toolButtonGroup.id()
+        # 面包屑按钮的选中态/文字必须在**动画开始前**改完：改文字会改变 sizeHint，
+        # 让 menuLayout 重新排版、连带把 subStackWidget 的 resizeEvent 也带起来。
+        # 原来放在动画之后，等于动画刚起步就被一次布局重排打断（帧率掉、还闪黑）。
         for button in self.toolButtons:
             if self.toolButtonGroup.id(button) == index:
                 button.setChecked(True)
                 button.setText(self.subStackWidget.widget(index).windowTitle())
+        try:
+            self.menuLayout.activate()
+            lay = self.layout()
+            if lay is not None:
+                lay.activate()
+        except Exception:
+            pass
+        self.subStackWidget.SwitchWidgetByIndex(index, direction, **kwargs)
         return
 
     def SwitchWidgetAndClear(self, index):
         self.ClearTabBar()
         self.subStackList = [index]
+        # 面包屑必须在**动画开始前**重建完：增删 QToolButton 会让 menuLayout 重排，
+        # 顺手把 subStackWidget 的 resizeEvent 也带起来。原来放在动画之后，等于
+        # 动画正播着突然来一次布局变化，实测会把动画打断、还闪一帧全黑。
+        self.UpdateTabBar()
         kwargs = {"refresh": True}
         self.subStackWidget.SwitchWidgetByIndex(index, **kwargs)
-        self.UpdateTabBar()
         # 手机端：点击导航后自动收起抽屉
         mobile_ui.CloseDrawer(self)
         # 手机端：主动切换导航后取消"连按两次返回键退出"的待退出状态

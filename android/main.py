@@ -794,10 +794,41 @@ def DeferredStartup():
     return
 
 
+def ApplyRhiBackend():
+    """把 widget 窗口的 RHI 合成分解后端钉到 Vulkan（必须早于 QApplication）
+
+    为什么显式指定（V2463A / Adreno / Android 14，1440x3168，DPR 3.75 实测）：
+      * Qt6 的 QWidget 顶层窗口用 QRhi 合成，本机默认已是 Vulkan；
+        但默认值随机型/系统/Qt 版本变化，显式钉住才能保证行为一致。
+      * **QOpenGLWidget 在 Vulkan 合成下不可用**（logcat 原文）：
+        "The top-level window is not using OpenGL for composition,
+         'Vulkan' is not compatible with QOpenGLWidget"
+        → widget 拿不到 context，isValid() 恒为 False，GPU 覆盖层会静默失效。
+        只有 QT_WIDGETS_RHI_BACKEND=opengl 时 isValid 才为 True（已实测）。
+      * 也就是说：要走 GPU 合成层必须用 QRhiWidget + 预编译 .qsb 着色器，
+        不能再用 QOpenGLWidget。见 component/widget/gpu_anim_cover.py 的说明。
+
+    <AppDataDir>/sr_env.txt 里写 JM_WIDGETS_RHI=opengl 可以覆盖（仅排查用）。
+    """
+    want = (os.environ.get("JM_WIDGETS_RHI") or "vulkan").strip().lower()
+    if want not in ("vulkan", "opengl", "d3d11", "metal", "null"):
+        want = "vulkan"
+    # 只设 BACKEND，**不要**设 QT_WIDGETS_RHI=1。
+    # Android（Qt 6.12 / TextureView 容器）上 Qt 默认就用 RHI 合成窗口；
+    # 显式写 QT_WIDGETS_RHI=1 反而会走进一条不可用的路径 —— 实测 0.82 加上它之后
+    # QRhiWidget 一直报 "QRhiWidget: No QRhi"，GPU 覆盖层全部降级，而且主窗口
+    # 高度错成 384x486、下半屏是黑的。去掉后 0.81→热推状态恢复正常（145fps）。
+    os.environ["QT_WIDGETS_RHI_BACKEND"] = want
+    os.environ.setdefault("QSG_RHI_BACKEND", want)
+    return want
+
+
 def Main():
     SetupPath()
     # 必须在 QApplication 之前：渲染容器类型是窗口初始化时读的一次性环境变量
     ApplySurfaceContainer()
+    # 必须在 QApplication 之前：RHI 合成后端同样是窗口初始化时读一次
+    ApplyRhiBackend()
     try:
         from PySide6.QtWidgets import QApplication
         app = QApplication.instance()
