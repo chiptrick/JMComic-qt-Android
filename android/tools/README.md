@@ -41,7 +41,7 @@ Android 移植用的脚本集合。**所有脚本都不写死本机路径**，�
 | --- | --- |
 | `wsl_setup_base.sh` | WSL Ubuntu 构建环境：基础工具 + JDK17 + Python3.11(conda) + 仓库副本 |
 | `wsl_setup_base2.sh` | 修正版：micromamba + Python3.11 + 仓库副本，可重复执行 |
-| `wsl_setup_android.sh` | Android cmdline-tools + platform 34 + build-tools 35 + NDK r26d |
+| `wsl_setup_android.sh` | Android cmdline-tools + platform 34 + build-tools 35 + 最新版 NDK（装 `ndk` 包，不写死版本） |
 | `wsl_install_toolchain.sh` | 宿主工具链：PySide6-Essentials + shiboken6(本地 wheel) + buildozer/cython |
 | `wsl_config_mirrors.sh` | 配置可到达镜像 + 安装 buildozer/p4a 依赖 + clone p4a(develop) 并改 GitHub 域名 |
 | `wsl_build_py311_src.sh` | 源码编译安装 CPython 3.11（buildozer 要求宿主 python ≤ 3.11） |
@@ -97,6 +97,14 @@ Android 移植用的脚本集合。**所有脚本都不写死本机路径**，�
 | `wsl_check_sync.sh` | 检查 Windows 仓库与 WSL 构建树是否一致（避免改完代码却拿旧包验证） |
 | `wsl_check_minsdk.sh` | 从 AndroidManifest 读 minSdk / targetSdk / extractNativeLibs |
 | `wsl_check_qnn_libs.py` | 查 `onnxruntime-android-qnn` 的 POM 依赖，以及各版本 AAR 是否自带 QNN 运行时 |
+| `resolve_ndk.sh` | **NDK 版本不写死的唯一入口**：显式路径 > `JM_NDK_VERSION` > `$SDK/ndk/*` 中最高版本；被 `build_android.sh`/`build_arm64.sh`/`build_x86_64.sh`/`env.sh` 复用 |
+| `versions.env` | **工具链版本号的唯一事实来源**：API level / minSdk / build-tools / JDK 区间 / Gradle 下限 / cmake / NDK / ORT。只放数据不放逻辑，环境变量可覆盖 |
+| `resolve_host.sh` | **宿主平台抽象**：`jm_host_os`（识别 WSL）、`jm_nproc`、`jm_stat_mtime`、`jm_sha256`、`jm_sed_i`（GNU/BSD 通用）、`jm_realpath`、`jm_norm_path`（`D:\x` → `/mnt/d/x`）、`jm_ver_ge`、`jm_sdk_latest_pkg` |
+| `resolve_jdk.sh` | **构建 JDK 发现+区间校验**：不盲信 `PATH`/`JAVA_HOME`，只在 `JM_JDK_MIN~JM_JDK_MAX`（默认 17~24）内挑，越界给原因（Gradle 8.14 跑不了 Java 27） |
+| `check_scripts.py` | 脚本卫生：CRLF / BOM / shebang / 可执行位；`--fix` 一键规范化。CRLF 的 .sh 在 Linux 下报的是 `bad interpreter`，极易误判成环境问题 |
+| `gradle_wrapper.py` | 读/校验/改写 p4a dist 里的 `gradle-wrapper.properties`；改写时自动删掉 `distributionSha256Sum`（换了分发包校验和必失败） |
+| `check_elf_page_align.py` | **16KB 页对齐门禁**：APK/目录/单个 .so 的 `PT_LOAD.p_align` 是否 ≥16384（与 Google `check_elf_alignment.sh` 同口径），Hexagon skel 与非 ELF 数据包自动跳过，`--json/--soft` 供 CI 用 |
+| `check_16kb_device.sh` | 真机/模拟器 16KB 验收：页大小、兼容模式开关、应用是否被标记为 compat、`--fatal on` 严格模式、`--launch` 抓首启日志 |
 | `qnn_guard.sh` | **打包前闸门**：`libs/<abi>` 缺 QNN 运行库就自动补（`QNN_AUTO_FETCH=0` 可关），补不上直接失败。`JM_QNN=0` 可显式打纯 CPU 对照包 |
 | `qnn_manifest.py` | QNN 库清单/校验的唯一事实来源：`list`（供 add_libs）、`verify`（缺库/Stub-Skel 配对/ELF 架构）、`verify-apk`（成品包断言）、`prune`（裁掉 80MB 的 Prepare 与多余 HTP 架构） |
 | `wsl_check_bundle_content.sh` | 解出 APK 里的 `libpybundle.so`（其实是 tar），确认 Python 运行时依赖齐 |

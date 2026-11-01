@@ -847,7 +847,7 @@ Qt 的多点触摸是**每个触点一个目标控件**的。滚动模式下相�
 
 ```
 reader pinch: 开始双指缩放(base=100%, 模式=ReadMode.LeftRightScroll, 距离=612, 触点数=2)
-reader pinch: 触点 3 在(420,1500) 下面 = ReadOpenGL
+reader pinch: 触点 3 在(420,1500) 下面 = ReadVulkan
 reader pinch: 触点 4 在(980,1500) 下面 = QLabel        <- 落在相邻页的嵌入窗口上
 ```
 
@@ -1126,10 +1126,13 @@ adb shell getprop ro.soc.model          # 确认是高通芯片(8 Gen 1 及以�
 ## 5. 构建（宿主机需 Linux/macOS，Windows 请用 WSL2）
 
 ```bash
-# 依赖：JDK 17、Android SDK(platform-tools, platforms;android-34, build-tools;35.0.0)、
-#       Android NDK 26.1.10909125、Python 3.11/3.12
+# 依赖：autoconf/automake/libtool/pkg-config、**perl-core**（openssl recipe 要 FindBin 等核心模块）、
+#       JDK 17~25、Android SDK(platform-tools, platform, build-tools)、
+#       Android NDK r28 及以上、Python 3.11/3.12
 export ANDROID_HOME=$HOME/Android/Sdk
-export ANDROID_NDK_HOME=$HOME/Android/Sdk/ndk/26.1.10909125
+# NDK 不用手动指定：脚本自动取 $ANDROID_HOME/ndk 下版本最高的那个（NDK 28+ 才默认
+# 按 16KB 页对齐编译，见 §11）。要钉住某个版本时用 JM_NDK_VERSION=<版本>。
+bash android/tools/resolve_ndk.sh --sdk "$ANDROID_HOME" --check   # 看选中的 NDK + 16KB 结论
 
 # Android wheel(Qt 6.12.0 abi3 + curl_cffi 0.16.3 cp314)：下载并 sha256 校验，放 android/wheels/
 # (每个 ABI 一套；缺失时 build_android.sh 会按目标 ABI 自动 qtpip download)
@@ -1453,7 +1456,7 @@ wsl -u root -e bash -lc 'bash <仓库根>/android/tools/wsl_run_file_dialog_asus
 | 步骤 | 脚本 | 解决的问题 |
 | --- | --- | --- |
 | 基础环境 | `wsl_setup_base.sh` / `wsl_setup_base2.sh` | apt 装 JDK17/gcc/cmake；**WSL 可以直接 `wsl -u root` 提权**，不需要 sudo 密码 |
-| Android SDK/NDK | `wsl_setup_android.sh` | cmdline-tools + platform-34 + build-tools 35 + **NDK 26.1.10909125** |
+| Android SDK/NDK | `wsl_setup_android.sh` | cmdline-tools + platform-34 + build-tools 35 + **最新版 NDK**（装 `ndk` 包，脚本自动发现版本，不写死 r26d） |
 | 镜像配置 | `wsl_config_mirrors.sh` | ① pip 走清华镜像(PyPI 直连只有 ~11KB/s) ② git 全局 `insteadOf` 走 `ghproxy.net`（本机 DNS 把 github.com 污染成 127.0.0.1）③ **把 p4a 里 102 个 recipe 的 GitHub 直链批量改写成镜像**，否则编译 python3/openssl/libffi 时全部下载失败 |
 | ONNX Runtime | `wsl_fetch_ort.sh` | `onnxruntime-android-qnn` AAR(含 libonnxruntime.so 与 ORT 头文件) + NuGet 的 linux-x64 库(宿主自测用) |
 | QNN 运行库 | `wsl_fetch_qnn.sh` | **关键**：ORT 的 Android QNN AAR 只有 2 个 .so，QNN 运行库在同 POM 依赖的 `com.qualcomm.qti:qnn-runtime:2.37.1` 里（libQnnHtp.so / libQnnSystem.so / libQnnHtpPrepare.so / V68–V79 的 Stub+Skel），从 Maven 取即可，不需要登录 QNN SDK |
@@ -1585,7 +1588,7 @@ python android/tools/patch_buildozer_spec.py ... --icon "$ICON"   # -> icon.file
 | --- | --- | --- |
 | `JM_REPO` / `$JmRepo` | 仓库根（脚本自己往上两级推出） | 自动定位 |
 | `JM_WORK` | WSL 构建树 | `/root/jmcomic-build` |
-| `JM_SDK` / `JM_NDK` | Android SDK / NDK | `$JM_WORK/android-sdk`、`.../ndk/26.1.10909125` |
+| `JM_SDK` / `JM_NDK` | Android SDK / NDK | `$JM_WORK/android-sdk`、`$JM_SDK/ndk` 下版本最高者（可用 `JM_NDK_VERSION` 钉住） |
 | `JM_VENV` / `JM_VPY` | buildozer 宿主 venv / python | `$JM_WORK/venv311` |
 | `JM_ADB` / `$JmAdb` | adb 可执行文件 | 先查 `PATH`，再查 `$ANDROID_HOME`、`~/Android/Sdk` |
 | `JM_SERIAL` / `$JmSerial` | 目标设备串号 | `adb devices` 里第一个已授权设备 |
@@ -1704,8 +1707,10 @@ adb logcat -d | grep -iE "python|sr_qnn|Qt" | tail -40
 ```
 
 > 模拟器镜像建议用 x86_64 的 Google APIs 镜像（Android 14/15/16 都行，minSdk 是 34）。
-> 16KB page size 的镜像也能装：我们的原生库都由 NDK r26d 编出，按 4KB 对齐，
-> 系统在 16KB 页镜像上会兼容加载。
+> **16KB 页镜像要不要用，取决于包的版本**：0.87 及更早由 NDK r26d 编出，全部按 4KB
+> 对齐，系统会把它塞进"16KB 向后兼容模式"（首启有警告、Android 17 可设成 fatal 直接
+> 崩溃）；从改用 NDK r28+ 的版本起才真正 16KB 对齐。别凭镜像能装就下结论，跑
+> `python tools/check_elf_page_align.py dist/<apk>` 看结论（见 §11）。
 
 ### 10.4 不想动构建脚本时的手工路径
 
@@ -1788,3 +1793,173 @@ SELFTEST_SUMMARY backend=CPU (ONNX Runtime) htp=False tile_ms=329
 
 
 
+
+
+## 11. 16KB 页大小兼容（0.88 起）
+
+### 11.1 为什么必须做
+
+Android 15 起系统可以跑在 16KB 页上。这类设备要求 `.so` 的 `PT_LOAD` 段按 16KB
+对齐，否则：
+
+* 系统把应用塞进 **16KB 向后兼容模式**（bionic 用 `linker_phdr_16kib_compat` 重映射
+  段，复杂布局还要 memfd 双映射 + SIGSEGV 模拟），首启弹"以 16KB 兼容模式运行"的警告；
+* Android 17 可以把兼容模式设成 `fatal`（`bionic.linker.16kb.app_compat.enabled=fatal`），
+  不合规的库直接 SIGABRT —— 表现就是"装完即闪退"，且崩在进程启动阶段，用户无法自救；
+* Google Play 对 targetSdk≥35 的更新自 2025-11 起强制要求 16KB 兼容（官方文档口径：
+  2027-02-01 起不合规更新无法发布）。本项目是 sideload 分发、targetSdk 34，暂不受
+  商店规则约束，但设备侧的风险与 targetSdk 无关。
+
+一句话：**不是"能不能装"的问题，是"还能撑多久"的问题。**
+
+### 11.2 0.87 的实测基线（arm64-v8a，218 个 .so）
+
+| 分层 | 状态 |
+| --- | --- |
+| Qt 6.12 全套 + 插件（164 个） | 已按 16KB 构建 ✅ |
+| onnxruntime（2）+ QNN arm64（12） | 已对齐 ✅ |
+| `libpython3.14.so` / `libpythonbin.so` / `libmain_*.so` | 4KB ❌（进程入口就断在这） |
+| recipe 三方库：`libssl`/`libcrypto`/`libsqlite3`/`libffi`/`libfreetype`/`libpng16`/`libjpeg`/`libturbojpeg`/`libc++_shared`(×2) | 4KB ❌ |
+| 自研 `libsr_qnn.so` / `libsr_qnn_proc.so` | 4KB ❌ |
+| 7 个 `libQnn*Skel.so` | ELF32/Hexagon，DSP RPC 加载，**不参与** bionic 校验 |
+| `libpybundle.so` | 非 ELF（数据包），不参与加载 |
+| `libavformat.so`（Qt 自带） | `p_align` 已达标，但有 1 个段 offset/vaddr 不同余（门禁只告警） |
+
+根因：这些库都由 **NDK r26d** 编出，r26 默认 4KB 对齐。NDK r28 起默认 16KB。
+
+### 11.3 两条命令（一个拦产物，一个验设备）
+
+```bash
+# 产物级门禁：build_android.sh 第 8 步自动跑，不合规直接失败
+python tools/check_elf_page_align.py dist/JMComic-<ver>-arm64-v8a-debug.apk
+python tools/check_elf_page_align.py dist/... --json --soft     # CI 里只报不拦
+python tools/check_elf_page_align.py libs/arm64-v8a --list-ok   # 查目录
+
+# 设备级验收（需要一台真 16KB 设备）
+bash tools/check_16kb_device.sh --pkg org.jmcomic.jmcomic --launch
+bash tools/check_16kb_device.sh --pkg org.jmcomic.jmcomic --fatal on   # 严格模式暴露问题
+```
+
+判定口径与 Google 的 `check_elf_alignment.sh` 一致：只看 `PT_LOAD` 的 `p_align`
+是否 ≥ 16384。额外的"offset/vaddr 同余"检查默认只告警（会有 Qt 自带的库命中，
+且我们无法重编它们），需要严格模式时加 `--strict-congruence`。
+
+### 11.4 NDK 版本策略：不写死
+
+`tools/resolve_ndk.sh` 是全仓唯一入口，选择顺序：
+
+1. `JM_NDK` / `ANDROID_NDK_HOME` / `ANDROID_NDK_ROOT` 显式目录
+2. `JM_NDK_VERSION=<版本>` → `$SDK/ndk/<版本>`（回退到已知可用版本）
+3. 默认取 `$SDK/ndk/*` 里**版本号最高**的一个 —— 以后装了新 NDK 不用改任何脚本
+4. `$SDK/ndk-bundle` 兜底
+
+`build_android.sh` 会校验版本 ≥ r28，低于就直接报错并给安装/钉版本的命令；
+`build_android.sh`、`build_arm64.sh`、`build_x86_64.sh`、`tools/env.sh` 以及
+`tools/wsl_*.sh` 全部走这个解析器，不再有 `26.1.10909125` 这类硬编码。
+
+`libsr_qnn.so` 的 CMake 里另外显式加了
+`-Wl,-z,max-page-size=16384 -Wl,-z,common-page-size=16384`，
+所以就算有人把 NDK 钉到 r26/r27，这个库也不会退化成 4KB。
+
+### 11.5 回归清单（16KB 设备上逐条走）
+
+1. 冷启动 → 首页出图；logcat 里不出现 `running in 16 KB backcompat mode`
+2. 超分：QNN/HTP 与 CPU 两条后端各跑一张
+3. 图片解码：webp / gif / 长图各一张；翻页动画（QRhi 覆盖层）连续翻 30 页
+4. 下载 + 解密入库（SQLite）、历史记录、字体渲染
+5. `--fatal on` 后重复 1~4，全过才算"不依赖兼容模式"
+
+> 注意：模拟器抓不到 QRhiWidget 层的像素（见 §8），翻页动画的像素级验收要在真机做。
+
+## 12. 工具链版本集中配置与跨平台可移植性（0.88 起）
+
+### 12.1 一个文件管所有版本号
+
+工具链版本不再散落在十几个脚本里，全部集中在 **`tools/versions.env`**：
+
+| 变量 | 默认 | 说明 |
+| --- | --- | --- |
+| `JM_API_LEVEL` | 34 | compileSdk / targetSdk / p4a `--android-api` |
+| `JM_MIN_SDK` | 34 | minSdk（改动直接影响可安装设备范围） |
+| `JM_BUILD_TOOLS` | `auto` | `auto` = 用 `$SDK/build-tools` 下已装的最高版本 |
+| `JM_JDK_MIN` / `JM_JDK_MAX` | 17 / 25 | 构建 JDK 的允许区间（25 LTS 需要 Gradle ≥9.1） |
+| `JM_GRADLE_MIN` | 9.1.0 | 支持 Java 25 的最低版本（同时含 3 个 high 级公告的修复） |
+| `JM_GRADLE_VERSION` | 9.8.2 | 改写 p4a 模板与 dist 里的 wrapper（打包前预置，立即生效） |
+| `JM_NDK_MIN_MAJOR` | 28 | 16KB 页对齐的起点 |
+| `JM_CMAKE_MIN` | 3.20 | libsr_qnn 的 CMake 要求 |
+| `JM_ORT_VERSION` | 1.29.0 | ONNX Runtime 依赖版本 |
+
+约定：**环境变量永远优先**。临时换版本不用改文件、不用提交：
+
+```bash
+JM_API_LEVEL=35 ./build_android.sh          # 试 targetSdk 35
+JM_JDK_VERSION=21  ./build_android.sh       # 钉住 JDK 主版本
+JM_GRADLE_VERSION=8.14.6 ./build_android.sh # 顺手把 Gradle 补到安全版本
+JM_BUILD_TOOLS=36.0.0 ./build_android.sh    # 强制某个 build-tools
+```
+
+### 12.2 版本是怎么"动态获取"的
+
+| 对象 | 解析方式 | 校验 |
+| --- | --- | --- |
+| NDK | `JM_NDK`/`ANDROID_NDK_HOME` → `JM_NDK_VERSION` → `$SDK/ndk/*` 最高版本 | 主版本 ≥ `JM_NDK_MIN_MAJOR` |
+| JDK | `JM_JDK` → `JAVA_HOME`（区间内才用）→ `JM_JDK_VERSION` → 扫描常见安装位 | 主版本 ∈ `[MIN, MAX]`（默认 17~25），越界直接报错并说明原因 |
+| build-tools | `auto` 时取已装最高版本 | 目录存在性检查 |
+| Gradle | 打包前改写 p4a 模板 + dist 的 `gradle-wrapper.properties`；打包后复查 | 低于 `JM_GRADLE_MIN` 告警（`JM_GRADLE_VERSION` 直接改写） |
+| cmake | `cmake --version` | ≥ `JM_CMAKE_MIN` |
+
+装新版本工具链后**不需要改任何脚本**：把 NDK 放进 `$SDK/ndk/`、JDK 放进常规目录即可。
+
+### 12.3 跨平台：抽掉了哪些隐含假设
+
+`tools/resolve_host.sh` 提供一层薄抽象，脚本里不再出现平台方言：
+
+| 原来 | 现在 | 为什么 |
+| --- | --- | --- |
+| `sed -i`（14 处） | `jm_sed_i` | BSD sed 必须 `-i ''`，否则 macOS 上直接失败 |
+| `nproc`（5 处） | `jm_nproc` | macOS 无 `nproc`，回落 `sysctl -n hw.ncpu` / `getconf` |
+| `sha256sum`（2 处） | `jm_sha256` | macOS 是 `shasum -a 256`，再回落 `openssl dgst` |
+| `stat -c %Y` / `readlink -f` | `jm_stat_mtime` / `jm_realpath` | BSD 参数不同 |
+| `$(uname -s)` 字面量判断 | `jm_host_os` | 能区分 WSL / MSYS，错误提示能指到正确做法 |
+| Windows 风格路径 | `jm_norm_path` | `D:/Android_SDK` → `/mnt/d/Android_SDK`，否则 `[[ -d ]]` 全判假 |
+| `mapfile`（bash 4+） | `while read` | macOS 自带 bash 3.2 没有 `mapfile` |
+| GNU `sed '0,/re/'` 与 `\n` 替换 | python 内联脚本 | 这两个都是 GNU 扩展，BSD 上会静默改错或报错 |
+
+换行符另外两道保险：`.gitattributes` 强制 `android/**/*.sh` 为 LF；`tools/check_scripts.py`
+在每次构建开始时体检（CRLF/BOM/shebang），必要时 `--fix` 一键规范化。
+
+### 12.4 下载策略：镜像 + aria2 多线程
+
+所有 GitHub 下载（p4a 的 recipe 源码包、raw 补丁文件、本脚本拉的头文件）统一走
+`tools/resolve_host.sh` 的 `jm_download`：
+
+* **镜像**：`github.com` / `raw.githubusercontent.com` 一律加前缀
+  `JM_GH_MIRROR_PREFIX`（默认 `https://gh-proxy.com/`，实测 ~4MB/s）。
+  已挂在其它镜像下的链接不会被二次包装。
+* **aria2c 多线程**：装了 `aria2c` 就用 `-x16 -s16` 并发 + 断点续传；
+  没装或失败自动回落 `curl -fsSL --retry 3`。关闭：`JM_USE_ARIA2=0`。
+* **p4a 内部下载**：给 `Recipe.download_file` 打了本地补丁
+  （`tools/patch_p4a_downloader.py`，构建时幂等注入），p4a 自己的下载也走 aria2。
+  原因：p4a 用 urlretrieve 串行下载，国内网络下就是"卡在下载 openssl/sqlite3"。
+* **两个副本都要镜像化**：p4a 会把自己复制到 `.buildozer/.../python-for-android/`，
+  下载用那份副本的 recipe——只改 venv 没用，所以每次打包前两处都重新镜像化
+  （`tools/patch_p4a_urls.sh`，幂等）。
+
+### 12.4 迁移到 Linux 主机的检查清单
+
+```bash
+# 1) 脚本本身是否干净（CRLF/BOM/shebang）
+python android/tools/check_scripts.py android
+
+# 2) 三个解析器是否都能挑到东西
+bash android/tools/resolve_ndk.sh  --sdk "$ANDROID_HOME" --check
+bash android/tools/resolve_jdk.sh  --check
+bash android/tools/resolve_host.sh --check   # 打印平台结论（也可 source 后用 jm_* 函数）
+
+# 3) 构建（会自动跑上面两步）
+bash android/build_android.sh --abi arm64-v8a
+```
+
+仍然与平台绑定的只剩两处，都是**有意为之**：
+`tools/wsl_*.sh`（WSL 专用流程：ext4 构建树、`setsid` 脱离式构建）和
+`*.ps1`（Windows 侧入口）。它们不参与 Linux 主机构建，也不被 `build_android.sh` 调用。
