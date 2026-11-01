@@ -146,7 +146,7 @@ class ToolUtil(object):
     @staticmethod
     def GetLookScaleModel(category, w, h, mat="jpg"):
         data = ToolUtil.GetModelByIndex(Setting.LookModelName.value, Setting.LookScale.value, mat)
-        # 放大倍数不能过大：超分图超过 4K 时，桌面端 QImage/OpenGL 纹理有显示 bug。
+        # 放大倍数不能过大：超分图超过 4K 时，桌面端 QImage 转 GPU 纹理有显示 bug。
         # 但移动端 GPU(骁龙 8 系 Adreno)纹理上限是 16K，且超分图在 SetPixIem 里还会
         # 再缩放到屏幕尺寸，所以这里按"超分后最大边长"限幅更合理 —— 原来按原图
         # min 边一刀切，会让 2000~3000 的漫画页被压到 1.5x，超分效果几乎看不见。

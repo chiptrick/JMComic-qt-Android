@@ -80,6 +80,17 @@ def InitQt(app=None):
     Log.Init()
     Setting.Init()
     Setting.InitLoadSetting()
+    # 必须在建第一个窗口(以及桌面端 QApplication)之前：Qt 的 RHI 后端环境变量
+    # 只在第一次 flush 时读一次，之后改就不生效了(所以开关是"重启生效")。
+    # Android 那边 QApplication 已经由 android/main.py 建好，但窗口还没建，这里照样有效。
+    try:
+        from tools import vulkan_accel
+        if vulkan_accel.ApplyFromSetting():
+            Log.Info("vulkan accel enabled: {}".format(vulkan_accel.GetStatus()))
+        else:
+            Log.Info("vulkan accel not enabled: {}".format(vulkan_accel.GetStatus()))
+    except Exception as es:
+        Log.Error(es)
     os.environ['QT_IMAGEIO_MAXALLOC'] = "10000000000000000000000000000000000000000000000000000000000000000"
     QtGui.QImageReader.setAllocationLimit(0)
 

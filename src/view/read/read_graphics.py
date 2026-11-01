@@ -1,8 +1,7 @@
 import time
 
 from PySide6.QtCore import Qt, QEvent, QPoint, QRect, QRectF, Signal, QFile
-from PySide6.QtGui import QPainter, QFont, QPixmap, QFontMetrics, QWheelEvent, QSurfaceFormat
-from PySide6.QtOpenGLWidgets import QOpenGLWidget
+from PySide6.QtGui import QPainter, QFont, QPixmap, QFontMetrics, QWheelEvent
 from PySide6.QtWidgets import QGraphicsView, QFrame, QGraphicsItem, QGraphicsScene, \
     QGraphicsPixmapItem, QGraphicsProxyWidget, QScroller, QAbstractSlider, QApplication
 
@@ -15,7 +14,7 @@ from config.setting import Setting
 from tools.log import Log
 from tools.str import Str
 from view.read.read_enum import ReadMode, QtFileData
-from view.read.read_opengl import ReadOpenGL
+from view.read.read_vulkan import ReadVulkan
 from view.read.read_pool import QtReadImgPoolManager
 from view.read.read_qgraphics_proxy_widget import ReadQGraphicsProxyWidget
 
@@ -61,16 +60,14 @@ class ReadGraphicsView(QGraphicsView, SmoothScroll):
         self.setRenderHints(QPainter.Antialiasing | QPainter.SmoothPixmapTransform)
         self.setCacheMode(QGraphicsView.CacheBackground)
         # self.setCacheMode(QGraphicsView.CacheNone)
-        if Setting.IsOpenOpenGL.value:
-            self.openGl = ReadOpenGL()
-            f = QSurfaceFormat()
-            # f.setVersion(4, 3)
-            a = f.version()
-            f.setSamples(4)
-            # f.setSwapInterval(0)
-            self.openGl.setFormat(f)
-            self.setViewport(self.openGl)
-            Log.Info("open opengl, ver:{}".format(a))
+        if Setting.IsOpenVulkan.value:
+            # Vulkan 后端在启动时由 tools/vulkan_accel 通过环境变量指定（Qt 只读一次，
+            # 所以这个开关是"重启生效"）。视口本身不含图形上下文，QGraphicsView 的
+            # 绘制链路（QPainter -> 后备存储 -> RHI 纹理）与不加速时完全一致。
+            self.vulkanViewport = ReadVulkan()
+            self.setViewport(self.vulkanViewport)
+            Log.Info("vulkan accel, backend:{}, status:{}".format(
+                self.vulkanViewport.GetBackendName(), self.vulkanViewport.GetStatus()))
 
         self.setViewportUpdateMode(QGraphicsView.FullViewportUpdate)
         # self.setViewportUpdateMode(QGraphicsView.SmartViewportUpdate)

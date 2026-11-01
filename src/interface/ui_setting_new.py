@@ -426,10 +426,10 @@ class Ui_SettingNew(object):
 
         self.verticalLayout_17.addWidget(self.label_42)
 
-        self.openglBox = QCheckBox(self.frame_14)
-        self.openglBox.setObjectName(u"openglBox")
+        self.vulkanBox = QCheckBox(self.frame_14)
+        self.vulkanBox.setObjectName(u"vulkanBox")
 
-        self.verticalLayout_17.addWidget(self.openglBox)
+        self.verticalLayout_17.addWidget(self.vulkanBox)
 
 
         self.verticalLayout_4.addWidget(self.frame_14)
@@ -1288,7 +1288,7 @@ class Ui_SettingNew(object):
         self.categoryBox.setItemText(1, QCoreApplication.translate("SettingNew", u"\u4e0d\u663e\u793a", None))
 
         self.label_42.setText(QCoreApplication.translate("SettingNew", u"\u56fe\u7247\u6d4f\u89c8\u8bbe\u7f6e", None))
-        self.openglBox.setText(QCoreApplication.translate("SettingNew", u"\u5f00\u542fOpenGL\u52a0\u901f", None))
+        self.vulkanBox.setText(QCoreApplication.translate("SettingNew", u"\u5f00\u542fVulkan\u52a0\u901f", None))
         self.label_10.setText(QCoreApplication.translate("SettingNew", u"\u65e5\u5fd7\u7b49\u7ea7\uff1a", None))
         self.logutton0.setText(QCoreApplication.translate("SettingNew", u"Warn", None))
         self.logutton1.setText(QCoreApplication.translate("SettingNew", u"Info", None))

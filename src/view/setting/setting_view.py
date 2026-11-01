@@ -63,7 +63,7 @@ class SettingView(QtWidgets.QWidget, Ui_SettingNew):
         self.coverCheckBox.clicked.connect(partial(self.CheckButtonEvent, Setting.CoverIsOpenWaifu, self.coverCheckBox))
         self.downAuto.clicked.connect(partial(self.CheckButtonEvent, Setting.DownloadAuto, self.downAuto))
         # self.titleBox.clicked.connect(partial(self.CheckButtonEvent, Setting.IsUseTitleBar, self.titleBox))
-        self.openglBox.clicked.connect(partial(self.CheckButtonEvent, Setting.IsOpenOpenGL, self.openglBox))
+        self.vulkanBox.clicked.connect(partial(self.CheckButtonEvent, Setting.IsOpenVulkan, self.vulkanBox))
 
         # LineEdit:
         self.httpEdit.editingFinished.connect(partial(self.LineEditEvent, Setting.HttpProxy, self.httpEdit))
@@ -270,7 +270,7 @@ class SettingView(QtWidgets.QWidget, Ui_SettingNew):
         self.httpEdit.setText(Setting.HttpProxy.value)
         self.sockEdit.setText(Setting.Sock5Proxy.value)
         # self.titleBox.setChecked(Setting.IsUseTitleBar.value)
-        self.openglBox.setChecked(Setting.IsOpenOpenGL.value)
+        self.vulkanBox.setChecked(Setting.IsOpenVulkan.value)
         for index in range(self.encodeSelect.count()):
             if Setting.SelectEncodeGpu.value == self.encodeSelect.itemText(index):
                 self.encodeSelect.setCurrentIndex(index)

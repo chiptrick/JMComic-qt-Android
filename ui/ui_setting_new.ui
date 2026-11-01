@@ -791,9 +791,9 @@
              </widget>
             </item>
             <item>
-             <widget class="QCheckBox" name="openglBox">
+             <widget class="QCheckBox" name="vulkanBox">
               <property name="text">
-               <string>开启OpenGL加速</string>
+               <string>开启Vulkan加速</string>
               </property>
              </widget>
             </item>

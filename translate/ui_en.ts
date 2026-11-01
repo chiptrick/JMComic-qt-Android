@@ -2449,8 +2449,8 @@
     </message>
     <message>
         <location filename="../ui/ui_setting_new.ui" line="891"/>
-        <source>开启OpenGL加速</source>
-        <translation>Enable OpenGL Acceleration</translation>
+        <source>开启Vulkan加速</source>
+        <translation>Enable Vulkan Acceleration</translation>
     </message>
     <message>
         <location filename="../ui/ui_setting_new.ui" line="923"/>

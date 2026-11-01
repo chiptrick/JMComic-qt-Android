@@ -92,6 +92,13 @@ class Setting:
     _cacheSafKey = ""
     _cacheSafOk = False
 
+    # 已经废弃的旧设置键：(分类, 新键名, 旧键名)
+    # 旧键里的值会搬到新键上，旧键从配置文件里删掉，用户升级后不用重新勾一遍。
+    # 图片浏览的加速开关从 GL 换成 Vulkan(见 tools/vulkan_accel.py)就是这一条。
+    _LegacyKeys = (
+        ("ReadSetting", "IsOpenVulkan", "IsOpenOpenGL"),
+    )
+
     # 通用设置
     IsUpdate = SettingValue("GeneraSetting", 1, False)
     Language = SettingValue("GeneraSetting", 0, False, ["Auto", "zh", "hk", "en"])  # ch-zh ch-hk eu
@@ -210,7 +217,9 @@ class Setting:
     ScrollInitSpeed = SettingValue("ReadSetting", 400, False)
     ScrollTime = SettingValue("ReadSetting", 100, False)
     PreDownWaifu2x = SettingValue("ReadSetting", 1, False)
-    IsOpenOpenGL = SettingValue("ReadSetting", 0, True)
+    # 看图时把窗口合成切到 Vulkan(见 tools/vulkan_accel.py)。
+    # Qt 的后端环境变量只在第一次 flush 时读一次，所以改完要重启(isNeedReset=True)。
+    IsOpenVulkan = SettingValue("ReadSetting", 0, True)
     # UpDownScrollSpeed = SettingValue("ReadSetting", 100, False)
     # ScaleCnt = SettingValue("ReadSetting", 0, False)
 
@@ -258,6 +267,7 @@ class Setting:
         path = os.path.join(Setting.GetConfigPath(), "config.ini")
         from PySide6.QtCore import QSettings
         settings = QSettings(path, QSettings.Format.IniFormat)
+        Setting._MigrateLegacyKeys(settings)
         for name in dir(Setting):
             setItem = getattr(Setting, name)
             if isinstance(setItem, SettingValue):
@@ -279,6 +289,26 @@ class Setting:
         elif sys.platform.lower() == "linux" and not Setting.SavePath.value:
             Setting.SavePath.SetValue(Setting.GetDataPath())
         return
+
+    @staticmethod
+    def _MigrateLegacyKeys(settings):
+        """ 旧键的值搬到新键上并从配置文件里删掉旧键
+
+        只在新键还不存在时才搬值(用户已经在新版本里改过的以新键为准)。
+        """
+        changed = False
+        for tag, newName, oldName in Setting._LegacyKeys:
+            oldKey = tag + "/" + oldName
+            if not settings.contains(oldKey):
+                continue
+            newKey = tag + "/" + newName
+            if not settings.contains(newKey):
+                settings.setValue(newKey, settings.value(oldKey))
+            settings.remove(oldKey)
+            changed = True
+        if changed:
+            settings.sync()
+        return changed
 
     @staticmethod
     def SaveSetting():
