@@ -25,16 +25,18 @@ import zipfile
 def FindAapt(explicit):
     if explicit:
         return explicit
+    # 可执行文件后缀随平台不同（Windows 上是 aapt.exe）
+    exe = "aapt.exe" if os.name == "nt" else "aapt"
     sdk = os.environ.get("ANDROID_HOME") or os.environ.get("ANDROID_SDK_ROOT") or ""
     candidates = []
     if sdk:
         bt = os.path.join(sdk, "build-tools")
         if os.path.isdir(bt):
             for name in sorted(os.listdir(bt), reverse=True):
-                candidates.append(os.path.join(bt, name, "aapt"))
+                candidates.append(os.path.join(bt, name, exe))
     for path in os.environ.get("PATH", "").split(os.pathsep):
         if path:
-            candidates.append(os.path.join(path, "aapt"))
+            candidates.append(os.path.join(path, exe))
     for cand in candidates:
         if os.path.isfile(cand) and os.access(cand, os.X_OK):
             return cand

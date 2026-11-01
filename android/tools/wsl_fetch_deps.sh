@@ -7,7 +7,7 @@
 set -euo pipefail
 WORK="${WORK:-"$JM_WORK"}"
 SRC="$WORK/src"
-ORT="${ORT:-1.29.0}"
+ORT="${ORT:-${JM_ORT_VERSION}}"
 LIBS="$SRC/android/libs/arm64-v8a"
 WHEELS="$SRC/android/wheels"
 ORTHDR="$WORK/ort"

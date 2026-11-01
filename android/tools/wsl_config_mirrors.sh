@@ -44,7 +44,7 @@ echo "===== [$(date +%T)] 5. 把 p4a recipes 里的 GitHub 直链改写成镜像
 count=0
 while IFS= read -r f; do
     if grep -q 'https://github.com/' "$f"; then
-        sed -i "s|https://github.com/|$GH/|g" "$f"
+        jm_sed_i "s|https://github.com/|$GH/|g" "$f"
         count=$((count + 1))
     fi
 done < <(find "$WORK/p4a/pythonforandroid/recipes" -name '*.py')

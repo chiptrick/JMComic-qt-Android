@@ -11,8 +11,13 @@
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-API="${API:-34}"
-MINAPI="${MINAPI:-34}"
+# 版本号与平台能力统一来源：不再在这里写死 34 / 依赖 GNU sed
+# shellcheck source=versions.env
+. "${HERE}/tools/versions.env"
+# shellcheck source=resolve_host.sh
+. "${HERE}/tools/resolve_host.sh"
+API="${API:-${JM_API_LEVEL:-34}}"
+MINAPI="${MINAPI:-${JM_MIN_SDK:-34}}"
 ABI="${ABI:-arm64-v8a}"                    # arm64-v8a(真机) / x86_64(模拟器)
 ORIENTATION="${ORIENTATION:-fullUser}"   # fullUser=跟随系统旋转锁定(默认)，portrait=强制竖屏
 MODEL_DIR="${HERE}/sr_qnn/models"
@@ -23,7 +28,7 @@ warn() { printf '\033[1;33m[warn]\033[0m %s\n' "$*"; }
 SetKey() {
     local file="$1" key="$2" value="$3"
     if grep -qE "^[#[:space:]]*${key}[[:space:]]*=" "$file"; then
-        sed -i -E "s|^[#[:space:]]*${key}[[:space:]]*=.*|${key} = ${value}|" "$file"
+        jm_sed_i -E "s|^[#[:space:]]*${key}[[:space:]]*=.*|${key} = ${value}|" "$file"
     else
         printf '%s = %s\n' "${key}" "${value}" >> "$file"
     fi
@@ -31,11 +36,14 @@ SetKey() {
 
 DelKey() {
     local file="$1" key="$2"
-    sed -i -E "/^[#[:space:]]*${key}[[:space:]]*=/d" "$file"
+    jm_sed_i -E "/^[#[:space:]]*${key}[[:space:]]*=/d" "$file"
 }
 
 # --------------------------------------------------------------- buildozer.spec
-mapfile -t SPECS < <(find "${HERE}" -name buildozer.spec -not -path '*/.venv/*' 2>/dev/null || true)
+SPECS=()
+while IFS= read -r _spec; do [ -n "$_spec" ] && SPECS+=("$_spec"); done <<EOF
+$(find "${HERE}" -name buildozer.spec -not -path '*/.venv/*' 2>/dev/null || true)
+EOF
 if [[ ${#SPECS[@]} -eq 0 ]]; then
     warn "没有找到 buildozer.spec，先执行一次 pyside6-android-deploy --keep-deployment-files"
 else
@@ -84,17 +92,43 @@ else
 fi
 
 # ----------------------------------------------------------- AndroidManifest.xml
-mapfile -t MANIFESTS < <(find "${HERE}" -name AndroidManifest.xml -not -path '*/.venv/*' 2>/dev/null || true)
+MANIFESTS=()
+while IFS= read -r _mf; do [ -n "$_mf" ] && MANIFESTS+=("$_mf"); done <<EOF
+$(find "${HERE}" -name AndroidManifest.xml -not -path '*/.venv/*' 2>/dev/null || true)
+EOF
 for manifest in "${MANIFESTS[@]:-}"; do
     [[ -n "${manifest}" ]] || continue
     log "打补丁: ${manifest}"
-    if grep -q 'android:screenOrientation' "${manifest}"; then
-        sed -i -E "s|android:screenOrientation=\"[^\"]*\"|android:screenOrientation=\"${ORIENTATION}\"|" "${manifest}"
-    else
-        sed -i -E "0,/<activity/s|(<activity )|\1android:screenOrientation=\"${ORIENTATION}\" |" "${manifest}"
-    fi
-    if ! grep -q 'android.permission.INTERNET' "${manifest}"; then
-        sed -i -E "0,/<application/s|(<manifest[^>]*>)|\1\n    <uses-permission android:name=\"android.permission.INTERNET\" />|" "${manifest}"
+    # 这里原本是两条 sed：`0,/<activity/s|...|` 与替换串里的 `\n` 都是 GNU 扩展，
+    # BSD/macOS 的 sed 既不认 `0,/re/` 地址，也不会把 `\n` 解释成换行。
+    # 改成 python 后语义不变、两边行为一致，而且天然幂等。
+    if ! "${PYTHON_BIN:-python3}" - "${manifest}" "${ORIENTATION}" <<'PY'
+import pathlib
+import re
+import sys
+
+path, orientation = sys.argv[1], sys.argv[2]
+p = pathlib.Path(path)
+text = p.read_text(encoding="utf-8")
+orig = text
+
+if "android:screenOrientation" in text:
+    text = re.sub(r'android:screenOrientation="[^"]*"',
+                  'android:screenOrientation="{}"'.format(orientation), text, count=1)
+else:
+    text = re.sub(r"(<activity\b)",
+                  r'\1 android:screenOrientation="{}"'.format(orientation), text, count=1)
+
+if "android.permission.INTERNET" not in text:
+    text = re.sub(r"(<manifest\b[^>]*>)",
+                  r'\1\n    <uses-permission android:name="android.permission.INTERNET" />',
+                  text, count=1)
+
+if text != orig:
+    p.write_text(text, encoding="utf-8")
+PY
+    then
+        warn "  修改 ${manifest} 失败（原文件未改动）"
     fi
 done
 

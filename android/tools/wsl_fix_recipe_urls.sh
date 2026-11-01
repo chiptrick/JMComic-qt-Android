@@ -13,7 +13,7 @@ echo "== 1) 修复被重复加了 ghproxy 前缀的 URL =="
 fixed=0
 while IFS= read -r file; do
     if grep -q 'ghproxy.net/https://ghproxy.net/' "$file"; then
-        sed -i 's|ghproxy\.net/https://ghproxy\.net/|ghproxy.net/|g' "$file"
+        jm_sed_i 's|ghproxy\.net/https://ghproxy\.net/|ghproxy.net/|g' "$file"
         fixed=$((fixed + 1))
     fi
 done < <(find "$RECIPES" -name '*.py')
@@ -42,7 +42,7 @@ EOF
 echo "== 3) openssl 换到 GitHub release(openssl.org 证书链 python 验不过) =="
 f="$RECIPES/openssl/__init__.py"
 if [ -f "$f" ] && grep -q "www.openssl.org" "$f"; then
-    sed -i "s|https://www.openssl.org/source/openssl-{version}.tar.gz|$GH/openssl/openssl/releases/download/openssl-{version}/openssl-{version}.tar.gz|g" "$f"
+    jm_sed_i "s|https://www.openssl.org/source/openssl-{version}.tar.gz|$GH/openssl/openssl/releases/download/openssl-{version}/openssl-{version}.tar.gz|g" "$f"
 fi
 grep -oE "url = .*" "$f" | head -1
 

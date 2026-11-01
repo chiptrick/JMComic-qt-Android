@@ -10,7 +10,7 @@
 set -euo pipefail
 WORK="$JM_WORK"
 SRC="$WORK/src"
-ORT="${ORT:-1.29.0}"
+ORT="${ORT:-${JM_ORT_VERSION}}"
 LIBS="$SRC/android/libs/${JM_ABI}"
 ORTHDR="$WORK/ort"
 VARIANT="onnxruntime-android-qnn"

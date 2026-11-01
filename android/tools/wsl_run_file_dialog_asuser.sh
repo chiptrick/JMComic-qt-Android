@@ -28,7 +28,7 @@ cp "$REPO/android/tools/host_test_file_dialog.py" "$WORK/android/tools/"
 # 注意解释器路径要在**降权之后**才解析，所以用 `python3 -c` 把 exec 放到 wq159 进程里
 # (由 root 先 fork 再 setuid，内核会在降权后的权限下解析那个 /root 路径 —— 会失败)，
 # 因此改成：直接复制一份**真实解释器二进制**到 /tmp，再把 venv 的脚本路径指过去。
-REAL_BIN="$(readlink -f "$REAL_PY")"
+REAL_BIN="$(jm_realpath "$REAL_PY")"
 cp "$REAL_BIN" "$WORK/python3"
 chmod 755 "$WORK/python3"
 

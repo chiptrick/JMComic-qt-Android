@@ -110,7 +110,7 @@ QtModuleBlacklist = ("Test", "QuickTest")
 # buildozer/工具生成的默认值是 "py,png,jpg,kv,atlas,qml,js"，**不含 onnx/txt**，
 # 于是 sr_qnn/models/*.onnx + models.txt 从来没有进过 APK —— 真机上超分后端
 # 因此报"NPU 超分后端不可用"(模型数为 0)。
-RuntimeExts = ["onnx", "txt"]
+RuntimeExts = ["onnx", "txt", "qsb"]
 
 Sections = ("app", "buildozer", "android", "python", "qt")
 
@@ -423,6 +423,13 @@ def Main():
             print("  模型随 private.tar 分发, source.include_exts={}".format(exts))
         else:
             print("  [warn] {} 里没有 .onnx，跳过模型配置".format(modelsScan))
+
+    # 预编译着色器(.qsb)必须随包分发：GPU 动画覆盖层(QRhiWidget + Vulkan)运行时按
+    # 文件路径加载 component/widget/shaders/animcover.*.qsb，缺了就直接降级成 raster。
+    # 这件事与超分模型无关，所以单独保证一次（模型分支不跑时也要放行）。
+    exts = MergeExts(spec.GetKey("app", "source.include_exts"), ["qsb"])
+    spec.SetKey("app", "source.include_exts", exts)
+    print("  .qsb 随 private.tar 分发, source.include_exts={}".format(exts))
 
     # 用本地 p4a 源码(我们已经把 recipe 里的 GitHub 直链改成了可达镜像)，
     # 否则 buildozer 会去 clone github.com(本机不可达)

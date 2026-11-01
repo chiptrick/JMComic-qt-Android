@@ -123,13 +123,34 @@ if [[ -n "${VERSION_EFF}" ]] && ! validate_version "${VERSION_EFF}"; then
 fi
 
 # ---------------------------------------------------------------- 宿主环境检查
-[[ "$(uname -s)" == "Linux" || "$(uname -s)" == "Darwin" ]] || \
-    die "本脚本要求在 Linux/macOS 执行(Windows 宿主请用 ./${SIBLING_PS1}，经 WSL 构建)"
+# 平台判断与版本号都走统一抽象：不写死 uname 字面量、不写死 cmake/API/JDK 版本
+# shellcheck source=tools/versions.env
+. "${HERE}/tools/versions.env"
+# shellcheck source=tools/resolve_host.sh
+. "${HERE}/tools/resolve_host.sh"
+# 机器本地路径（不入库）：JM_JDK / ANDROID_HOME / TMPDIR 等只对本机有效的值放这里，
+# 免得每次手动构建都要 export。模板见 tools/local.env.example
+if [[ -f "${HERE}/tools/local.env" ]]; then
+    # shellcheck source=tools/local.env
+    . "${HERE}/tools/local.env"
+fi
+case "$(jm_host_os)" in
+    linux|wsl|darwin) ;;
+    *) die "本脚本要求在 Linux / WSL / macOS 执行(当前: $(jm_host_desc))；
+       Windows 宿主请用 ./${SIBLING_PS1}，经 WSL 构建" ;;
+esac
 [[ -f "${BUILD_SH}" ]] || die "找不到 ${BUILD_SH}(脚本被移动了？请从 android/ 目录运行)"
-NDK="${ANDROID_NDK_HOME:-${ANDROID_NDK_ROOT:-}}"
-[[ -n "${NDK}" ]] || die "请设置 ANDROID_NDK_HOME 指向 NDK r26d"
+# NDK 不写死版本：默认取 $ANDROID_HOME/ndk 下最高版本（详见 tools/resolve_ndk.sh）
+# shellcheck source=tools/resolve_ndk.sh
+. "${HERE}/tools/resolve_ndk.sh"
+NDK="$(jm_resolve_ndk "${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}")"
+[[ -n "${NDK}" ]] || NDK="${ANDROID_NDK_HOME:-${ANDROID_NDK_ROOT:-}}"
+NDK="$(jm_norm_path "${NDK}")"
+[[ -n "${NDK}" ]] || { jm_ndk_hint "${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"; die "找不到 Android NDK"; }
 [[ -d "${NDK}" ]] || die "NDK 目录不存在: ${NDK}"
-command -v cmake >/dev/null || die "缺少 cmake(>=3.20)"
+CMAKE_VER="$(jm_cmd_version cmake --version)"
+[[ -n "${CMAKE_VER}" ]] || die "缺少 cmake(需要 >= ${JM_CMAKE_MIN})"
+jm_ver_ge "${CMAKE_VER}" "${JM_CMAKE_MIN}" || die "cmake 版本过低: ${CMAKE_VER}(需要 >= ${JM_CMAKE_MIN})"
 
 # ---------------------------------------------------------------- 架构专属预检
 # 只看本架构的产物，不碰另一架构的任何文件

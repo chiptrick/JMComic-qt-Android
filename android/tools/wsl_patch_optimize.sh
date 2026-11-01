@@ -39,7 +39,7 @@ changed=0
 for f in "${FILES[@]}"; do
     before=$(grep -c 'PYTHONOPTIMIZE", "2"' "$f" 2>/dev/null || true)
     if [ "${before:-0}" -gt 0 ]; then
-        sed -i 's/PYTHONOPTIMIZE", "2"/PYTHONOPTIMIZE", "1"/g' "$f"
+        jm_sed_i 's/PYTHONOPTIMIZE", "2"/PYTHONOPTIMIZE", "1"/g' "$f"
         changed=$((changed + 1))
         printf '  已改 %s\n' "${f#$WORK/}"
     fi

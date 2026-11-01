@@ -174,3 +174,6 @@ android/buildozer.spec
 # Android：一键构建脚本(Windows PowerShell)的执行日志与产物输出
 android/tools/logs/
 android/logs/
+# 本机路径配置（模板 local.env.example 入库，实际配置不入库）
+android/tools/local.env
+android/.p4a-src/

@@ -4,7 +4,7 @@
 set -uo pipefail
 W="$JM_WORK"
 L="$W/src/android/libs/arm64-v8a"
-NDK="$W/android-sdk/ndk/26.1.10909125"
+NDK="${JM_NDK:-$(jm_resolve_ndk "$W/android-sdk")}"   # 不写死版本：取 ndk 下最高版本
 TOOLCHAIN="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin"
 
 echo "=== libs/arm64-v8a ($(ls "$L" | wc -l) 个文件) ==="

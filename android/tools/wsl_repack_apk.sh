@@ -12,11 +12,12 @@ WORK="${WORK:-"$JM_WORK"}"
 SRC="$WORK/src"
 ANDROID="$SRC/android"
 SDK="$WORK/android-sdk"
-NDK="$SDK/ndk/26.1.10909125"
+NDK="${JM_NDK:-$(jm_resolve_ndk "$SDK")}"   # 不写死版本：取 $SDK/ndk 下最高版本
 VPY="$WORK/venv311/bin/python"
 P4A="$WORK/p4a"
 
-export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
+# JDK 版本不写死：tools/resolve_jdk.sh 按 versions.env 的区间挑（默认 17~24）
+jm_apply_jdk || { echo "[FATAL] 找不到可用的构建 JDK；bash android/tools/resolve_jdk.sh --check 看详情"; exit 1; }
 export ANDROID_HOME="$SDK" ANDROID_SDK_ROOT="$SDK" ANDROID_NDK_HOME="$NDK"
 export PATH="$WORK/venv311/bin:$JAVA_HOME/bin:$PATH"
 export VIRTUAL_ENV="$WORK/venv311"

@@ -11,7 +11,7 @@ set -euo pipefail
 WORK="${WORK:-$JM_WORK}"
 SRC="$WORK/src"
 SDK="$WORK/android-sdk"
-NDK="$SDK/ndk/26.1.10909125"
+NDK="${JM_NDK:-$(jm_resolve_ndk "$SDK")}"   # 不写死版本：取 $SDK/ndk 下最高版本
 ORT="$WORK/ort"
 ABI="${JM_ABI:-arm64-v8a}"
 LIBS="$SRC/android/libs/$ABI"
@@ -20,7 +20,7 @@ BUILD="$WORK/build-android-$ABI"
 VPY="$WORK/venv311/bin/python"
 [ -x "$VPY" ] || VPY="$WORK/venv-host/bin/python"
 MIRROR="${MIRROR:-https://pypi.tuna.tsinghua.edu.cn/simple}"
-ORT_VER="${ORT_VER:-1.29.0}"
+ORT_VER="${ORT_VER:-${JM_ORT_VERSION}}"
 mkdir -p "$WORK/logs" "$LIBS"
 exec > >(tee -a "$WORK/logs/build_native.log") 2>&1
 
@@ -64,11 +64,11 @@ if [ ! -f "$LIBS/libonnxruntime.so" ]; then
 fi
 cmake -S "$SRC/android/sr_qnn/cpp" -B "$BUILD" \
     -DCMAKE_TOOLCHAIN_FILE="$NDK/build/cmake/android.toolchain.cmake" \
-    -DANDROID_ABI="$ABI" -DANDROID_PLATFORM=android-34 \
+    -DANDROID_ABI="$ABI" -DANDROID_PLATFORM="${ANDROID_PLATFORM:-android-${JM_API_LEVEL}}" \
     -DONNXRUNTIME_INCLUDE_DIR="$ORT/include" \
     -DONNXRUNTIME_LIB_DIR="$LIBS" \
     -DCMAKE_BUILD_TYPE=Release 2>&1 | tail -8
-cmake --build "$BUILD" -j"$(nproc)" 2>&1 | tail -25
+cmake --build "$BUILD" -j"$(jm_nproc)" 2>&1 | tail -25
 cp "$BUILD/libsr_qnn.so" "$LIBS/libsr_qnn.so"
 # 独立进程入口：命名成 lib*.so 才会随 buildozer 打进 APK(extractNativeLibs 后
 # 位于 nativeLibraryDir，允许 exec)。它的用途见 sr_qnn_proc.cpp 头注释。
@@ -88,7 +88,7 @@ cmake -S "$SRC/android/sr_qnn/cpp" -B "$WORK/build-host" \
     -DONNXRUNTIME_INCLUDE_DIR="$ORT/include" \
     -DONNXRUNTIME_LIB_DIR="$ORT/linux-x64" \
     -DCMAKE_BUILD_TYPE=Release 2>&1 | tail -6
-cmake --build "$WORK/build-host" -j"$(nproc)" 2>&1 | tail -25
+cmake --build "$WORK/build-host" -j"$(jm_nproc)" 2>&1 | tail -25
 ls -sh "$WORK/build-host/libsr_qnn.so"
 
 if [ "${SKIP_HOST_TEST:-0}" = "1" ]; then

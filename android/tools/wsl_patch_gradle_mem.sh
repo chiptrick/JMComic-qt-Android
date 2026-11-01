@@ -29,7 +29,7 @@ changed=0
 # build-<abi>/，只扫 p4a 源码就会漏掉它们，校验再按全名扫 -> 必炸在 3.7。
 while IFS= read -r f; do
     if grep -q "Xmx$OLD_XMX" "$f"; then
-        sed -i "s/Xmx$OLD_XMX/Xmx$NEW_XMX/g" "$f"
+        jm_sed_i "s/Xmx$OLD_XMX/Xmx$NEW_XMX/g" "$f"
         echo "  已改 ${f#$WORK/}"
         changed=$((changed + 1))
     fi

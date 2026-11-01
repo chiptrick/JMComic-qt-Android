@@ -29,7 +29,7 @@ Fetch() {
         echo "  <- 从 archive/ 取回 $name"
     fi
     if [ -s "$name" ]; then
-        got=$(sha256sum "$name" | cut -d' ' -f1)
+        got=$(jm_sha256 "$name")
         # want 为空(x86_64 没有上游公布的 sha256)时，至少要确认是完整 zip：
         # 下载被中断留下的半截文件也"存在"，只看 -s 会把它当成品。
         if [ -z "$want" ] && ! "$JM_VPY" -c "import sys,zipfile; sys.exit(0 if zipfile.ZipFile(sys.argv[1]).testzip() is None else 1)" "$name" 2>/dev/null; then
@@ -53,7 +53,7 @@ Fetch() {
                 --speed-limit 200000 --speed-time 20 -o "$name" "$base$name" || {
                 rm -f "$name"; sleep 3; continue
             }
-            got=$(sha256sum "$name" | cut -d' ' -f1)
+            got=$(jm_sha256 "$name")
             if [ -z "$want" ]; then
                 # 没有预期 sha256 时，以"zip 结构完整"作为下载成功的判据
                 if "$JM_VPY" -c "import sys,zipfile; sys.exit(0 if zipfile.ZipFile(sys.argv[1]).testzip() is None else 1)" "$name" 2>/dev/null; then
@@ -122,7 +122,7 @@ echo
 echo "=== 核对 .so 的 NEEDED(必须是 libpython3.14.so) ==="
 # 只看关键库：整个 wheel 有几百个 .so，逐个 readelf 会把日志刷成几万行，
 # 而这几个就能证明"这个 wheel 是给目标 CPython 3.14 编的"。
-NDKBIN="$JM_WORK/android-sdk/ndk/26.1.10909125/toolchains/llvm/prebuilt/linux-x86_64/bin"
+NDKBIN="${JM_NDK}/toolchains/llvm/prebuilt/linux-x86_64/bin"   # NDK 由 env.sh 自动选版本
 PY="$JM_VPY"
 for w in "$DIR/$PYSIDE_WHEEL" "$DIR/$SHIBO_WHEEL"; do
     echo "--- $(basename "$w") ---"

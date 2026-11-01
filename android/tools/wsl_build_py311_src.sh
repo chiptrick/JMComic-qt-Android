@@ -29,11 +29,11 @@ fi
 ls -sh "Python-$PYVER.tgz" || { echo "源码下载失败"; exit 1; }
 rm -rf "Python-$PYVER" && tar -xzf "Python-$PYVER.tgz"
 
-echo "===== [$(date +%T)] configure + make(-j$(nproc)) ====="
+echo "===== [$(date +%T)] configure + make(-j$(jm_nproc)) ====="
 cd "Python-$PYVER"
 ./configure --prefix="$PREFIX" --with-ensurepip=install --enable-optimizations=no >/dev/null 2>&1 || \
     ./configure --prefix="$PREFIX" --with-ensurepip=install >/dev/null
-make -j"$(nproc)" >/dev/null 2>&1 || { echo "make 失败"; exit 1; }
+make -j"$(jm_nproc)" >/dev/null 2>&1 || { echo "make 失败"; exit 1; }
 make install >/dev/null 2>&1 || { echo "make install 失败"; exit 1; }
 "$PREFIX/bin/python3.11" --version
 "$PREFIX/bin/python3.11" -c "import ssl, sqlite3, zlib, bz2, lzma, ctypes; print('stdlib(ssl/sqlite3/ctypes) OK')"
