@@ -65,3 +65,9 @@ REALESRGAN_X4PLUS_UP4X            realesrgan_x4plus_up4x.onnx        4  0  192
 REALESRGAN_X4PLUSANIME_UP4X       realesrgan_x4plus_anime_up4x.onnx  4  0  192
 REALESRGAN_GENERAL_UP4X            realesrgan_general_up4x.onnx        4  0  192
 REALESRGAN_GENERAL_WDN_UP4X        realesrgan_general_wdn_up4x.onnx    4  0  192
+SRMD_UP2X                          srmd_x2.onnx                        2  0  192
+SRMD_UP3X                          srmd_x3.onnx                        3  0  192
+SRMD_UP4X                          srmd_x4.onnx                        4  0  192
+SRMDNF_UP2X                        srmdnf_x2.onnx                      2  0  192
+SRMDNF_UP3X                        srmdnf_x3.onnx                      3  0  192
+SRMDNF_UP4X                        srmdnf_x4.onnx                      4  0  192
