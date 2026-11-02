@@ -1,0 +1,22 @@
+# libsr_vk 模型清单（Vulkan 后端专用）
+#
+# 格式：NAME|param文件|bin文件|scale|tile|in_channels
+#   NAME        引擎里的模型名（与上层 UI 对应）
+#   param/bin   ncnn 模型文件（放同一目录）
+#   scale       原生放大倍数
+#   tile        建议 tile 边长（<=0 时用 192）
+#   in_channels 输入通道数：
+#                普通模型 = 3
+#                SRMD     = 19（3 图 + 15 个退化常量 + noise 平面）
+#                SRMDNF   = 18（3 图 + 15 个退化常量，无 noise）
+#   省略 in_channels 时按 3 处理。
+#
+# 说明：SRMD 的 15 个退化常量已烘焙进 libsr_vk（抄自 srmd_preproc.comp），
+#       不需要模型文件额外提供；noise 固定按 0（干净图）传入。
+
+SRMD_UP2X|srmd_x2.param|srmd_x2.bin|2|192|19
+SRMD_UP3X|srmd_x3.param|srmd_x3.bin|3|192|19
+SRMD_UP4X|srmd_x4.param|srmd_x4.bin|4|192|19
+SRMDNF_UP2X|srmdnf_x2.param|srmdnf_x2.bin|2|192|18
+SRMDNF_UP3X|srmdnf_x3.param|srmdnf_x3.bin|3|192|18
+SRMDNF_UP4X|srmdnf_x4.param|srmdnf_x4.bin|4|192|18
